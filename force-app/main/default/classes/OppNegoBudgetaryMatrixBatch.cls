@@ -1,0 +1,111 @@
+/**
+ * @description   Negotiation-stage budgetary opportunity no-activity escalation emails.
+ * @author        Anshita Chanda
+ * @date          2026-08-10
+ */
+public without sharing class OppNegoBudgetaryMatrixBatch implements Database.Batchable<SObject> {
+  private static final String TEMPLATE_30D = 'Negotiation Budgetary 30d Owner';
+  private static final String TEMPLATE_35D = 'Negotiation Budgetary 35d HOD';
+  private static final String TEMPLATE_60D = 'Negotiation Budgetary 60d Sir';
+
+  public Database.QueryLocator start(Database.BatchableContext context) {
+    return Database.getQueryLocator(
+      [
+        SELECT
+          Id,
+          Name,
+          OwnerId,
+          Owner.Email,
+          StageName,
+          CreatedDate,
+          LastModifiedDate,
+          Budget_Confirmed__c,
+          RecordType.DeveloperName,
+          Department_Name__c,
+          Department_NameFormula__c,
+          CRM_User_Email_Formula__c,
+          NurtureEscalation48Sent__c,
+          NurtureEscalation60Sent__c,
+          NurtureEscalation72Sent__c
+        FROM Opportunity
+        WHERE
+          StageName = 'Negotiation'
+          AND IsClosed = FALSE
+          AND Budget_Confirmed__c = TRUE
+          AND RecordType.DeveloperName != 'Tender_Opportunity'
+          AND (
+            NurtureEscalation48Sent__c = FALSE
+            OR NurtureEscalation60Sent__c = FALSE
+            OR NurtureEscalation72Sent__c = FALSE
+          )
+      ]
+    );
+  }
+
+  public void execute(Database.BatchableContext context, List<Opportunity> scope) {
+    Map<Id, Date> lastActivityByOpportunityId = EscalationMatrixOpportunityHelper.getLastActivityDates(
+      new Map<Id, Opportunity>(scope).keySet()
+    );
+    List<Opportunity> opportunitiesToUpdate = new List<Opportunity>();
+
+    for (Opportunity opportunityRecord : scope) {
+      Date lastActivityDate = lastActivityByOpportunityId.containsKey(opportunityRecord.Id)
+        ? lastActivityByOpportunityId.get(opportunityRecord.Id)
+        : opportunityRecord.LastModifiedDate.date();
+      Long daysSinceActivity = EscalationMatrixEmailService.daysSince(lastActivityDate);
+
+      Opportunity updateRecord = new Opportunity(Id = opportunityRecord.Id);
+      Boolean changed = false;
+
+      if (
+        !opportunityRecord.NurtureEscalation48Sent__c &&
+        daysSinceActivity >= 30 &&
+        EscalationMatrixEmailService.sendOpportunityEmail(
+          opportunityRecord,
+          TEMPLATE_30D,
+          EscalationMatrixEmailService.RecipientGroup.OWNER_AND_CRM
+        )
+      ) {
+        updateRecord.NurtureEscalation48Sent__c = true;
+        changed = true;
+      }
+
+      if (
+        !opportunityRecord.NurtureEscalation60Sent__c &&
+        daysSinceActivity >= 35 &&
+        EscalationMatrixEmailService.sendOpportunityEmail(
+          opportunityRecord,
+          TEMPLATE_35D,
+          EscalationMatrixEmailService.RecipientGroup.HOD_AND_CRM_HEAD
+        )
+      ) {
+        updateRecord.NurtureEscalation60Sent__c = true;
+        changed = true;
+      }
+
+      if (
+        !opportunityRecord.NurtureEscalation72Sent__c &&
+        daysSinceActivity >= 60 &&
+        EscalationMatrixEmailService.sendOpportunityEmail(
+          opportunityRecord,
+          TEMPLATE_60D,
+          EscalationMatrixEmailService.RecipientGroup.ED_SIR
+        )
+      ) {
+        updateRecord.NurtureEscalation72Sent__c = true;
+        changed = true;
+      }
+
+      if (changed) {
+        opportunitiesToUpdate.add(updateRecord);
+      }
+    }
+
+    if (!opportunitiesToUpdate.isEmpty()) {
+      update opportunitiesToUpdate;
+    }
+  }
+
+  public void finish(Database.BatchableContext context) {
+  }
+}

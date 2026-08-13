@@ -1,0 +1,76 @@
+<template>
+  <lightning-card title="Email Campaign Report" icon-name="standard:email">
+    <div class="slds-p-around_medium">
+      <template if:true={isLoading}>
+        <lightning-spinner alternative-text="Loading" size="small"></lightning-spinner>
+      </template>
+
+      <template if:true={errorMessage}>
+        <div class="slds-notify slds-notify_alert slds-theme_error slds-m-bottom_small" role="alert">
+          <span class="slds-assistive-text">error</span>
+          <h2>{errorMessage}</h2>
+        </div>
+      </template>
+
+      <div class="slds-m-top_small">
+        <lightning-radio-group
+          name="product"
+          label="Product Name"
+          options={productOptions}
+          value={selectedProduct}
+          type="radio"
+          onchange={handleProductChange}
+          required
+        ></lightning-radio-group>
+      </div>
+
+      <div class="slds-m-top_medium slds-grid slds-gutters">
+        <div class="slds-col">
+          <lightning-button
+            variant="brand"
+            label="Fetch Report"
+            onclick={handleFetch}
+            disabled={disableFetch}
+          ></lightning-button>
+        </div>
+        <div class="slds-col">
+          <lightning-button
+            variant="neutral"
+            label="Back to Campaigns"
+            onclick={handleBackToList}
+          ></lightning-button>
+        </div>
+      </div>
+
+      <template if:true={showEmptyState}>
+        <div class="slds-box slds-theme_shade slds-m-top_large">
+          <p class="slds-text-body_regular">
+            No email delivery reports were returned from Infobip for the last 48
+            hours. If you just sent an email, wait 1–2 minutes and click Fetch
+            Report.
+          </p>
+        </div>
+      </template>
+
+      <template if:true={hasReport}>
+        <div class="slds-m-top_large">
+          <h2 class="slds-text-heading_small slds-m-bottom_small">Report</h2>
+          <dl class="slds-dl_horizontal">
+            <dt class="slds-dl_horizontal__label">Product Name</dt>
+            <dd class="slds-dl_horizontal__detail">{productName}</dd>
+            <dt class="slds-dl_horizontal__label">Lookback</dt>
+            <dd class="slds-dl_horizontal__detail">Last 48 hours</dd>
+          </dl>
+
+          <lightning-datatable
+            key-field="indexNo"
+            data={summaryRows}
+            columns={columns}
+            hide-checkbox-column
+            class="slds-m-top_small"
+          ></lightning-datatable>
+        </div>
+      </template>
+    </div>
+  </lightning-card>
+</template>

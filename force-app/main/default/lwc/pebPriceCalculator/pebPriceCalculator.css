@@ -1,0 +1,135 @@
+.section-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #032d60;
+    background: #eef2f8;
+    border-left: 3px solid #0176d3;
+    padding: 0.35rem 0.6rem;
+    margin: 0.9rem 0 0.4rem 0;
+    border-radius: 3px;
+}
+
+.peb-table {
+    font-size: 0.8rem;
+}
+
+.peb-table th {
+    background: #f3f6fb;
+    font-weight: 700;
+    vertical-align: middle;
+}
+
+.peb-table td,
+.peb-table th {
+    padding: 0.25rem 0.4rem;
+    vertical-align: middle;
+}
+
+.peb-table .ctr {
+    text-align: center;
+}
+
+.peb-table .rgt {
+    text-align: right;
+}
+
+.peb-table tr.subtotal td {
+    background: #f2f2f2;
+    font-weight: 700;
+}
+
+/* Keep numeric inputs compact inside the grid */
+.peb-table lightning-input,
+.peb-table lightning-combobox {
+    --slds-c-input-spacing-horizontal-start: 0.25rem;
+}
+
+.peb-banner {
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+    font-size: 0.82rem;
+}
+
+.peb-banner_success {
+    background: #edf7f0;
+    border: 1px solid #91db8b;
+    color: #2e5c2e;
+}
+
+.peb-banner_warning {
+    background: #fef6e6;
+    border: 1px solid #f5c98a;
+    color: #8a5340;
+}
+
+.totals-box {
+    max-width: 34rem;
+    margin-left: auto;
+}
+
+.tot-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.25rem 0.35rem;
+    border-bottom: 1px solid #eef1f6;
+}
+
+.tot-row.strong {
+    font-weight: 700;
+    background: #f7f9fc;
+}
+
+.tot-row.grand {
+    font-weight: 700;
+    font-size: 1.05rem;
+    background: #fff4d6;
+    border-radius: 3px;
+    margin-top: 0.25rem;
+}
+
+.margin-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.margin-input {
+    width: 5rem;
+}
+/* PAYMENT TERMS box - Deepanjan (31st July 2026).
+   Sits in the space to the left of the totals box on the Summary row. */
+.summary-grid {
+    align-items: flex-start;
+}
+
+.terms-box {
+    max-width: 34rem;
+    border-top: 3px solid #0176d3;
+}
+
+.terms-box__header {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #032d60;
+    padding-bottom: 0.35rem;
+    margin-bottom: 0.6rem;
+    border-bottom: 1px solid #eef1f6;
+}
+
+.terms-field {
+    margin-bottom: 0.65rem;
+}
+
+.terms-field:last-child {
+    margin-bottom: 0;
+}
+
+.terms-hint {
+    font-size: 0.68rem;
+    color: #706e6b;
+    font-style: italic;
+    line-height: 1.25;
+    margin-top: 0.1rem;
+}

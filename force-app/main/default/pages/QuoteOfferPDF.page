@@ -1,0 +1,396 @@
+<apex:page standardController="Quote" extensions="SteelPipesQuoteController" renderAs="pdf" showHeader="false" sidebar="false" applyBodyTag="false">
+    <head>
+        <style>
+            @page {
+                size: A4 portrait;
+                margin-top: 45mm;
+                margin-bottom: 35mm;
+                margin-left: 10mm;
+                margin-right: 10mm;
+                @top-center {
+                    content: element(header);
+                }
+            }
+            div.header { position: running(header); text-align: center; width: 100%; }
+            body { font-family: sans-serif; font-size: 11px; line-height: 1.4; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 15px; word-wrap: break-word; }
+            th, td { border: 1px solid black; padding: 4px; text-align: left; font-size: 9px; word-wrap: break-word; word-break: break-all; }
+            .header-text { text-align: center; font-size: 12px; font-weight: bold; }
+            .bg-green { background-color: #92D050; font-weight: bold; }
+            .text-center { text-align: center; }
+            .text-right { text-align: right; }
+            .no-border { border: none !important; }
+            .bold { font-weight: bold; }
+            p, li { margin: 6px 0; }
+        </style>
+    </head>
+    <body>
+        
+        <div class="header">
+            <apex:image url="{!$Resource.UtkarshHeader}" style="width: 190mm; height: auto;" alt="Utkarsh Header"/>
+        </div>
+        
+        <!-- REF AND DATE -->
+        <div style="width: 100%; clear: both;">
+            <div style="float: left; width: 50%;"><b>REF:</b> {!quoteRecord.Quote_Reference__c}</div>
+            <div style="float: right; width: 50%; text-align: right;"><b>DATE:</b> {!todayDate}</div>
+        </div>
+        <br/><br/>
+        
+        <!-- ADDRESS BLOCK -->
+        <div>
+            <b>TO,</b><br/>
+            <b>{!quoteRecord.Account.Name}</b><br/>
+            {!companyAddress}<br/><br/>
+            
+            <b>KIND ATTN:</b> {!quoteRecord.Contact.Name} ({!contactNo})<br/>
+            <b>EMAIL ID:</b> {!contactEmail}<br/><br/>
+            
+            <b>SUB: OUR OFFER FOR STEEL PIPES OF BANSAL, UTKARSH BRAND.</b><br/>
+            <b>Ref:</b> Please refer to your query &amp; the discussion had with us.<br/>
+        </div>
+        
+        <!-- INTRO PARAGRAPHS -->
+        <p>
+            Your enquiry for supplying of the product as mentioned in the captioned subject has given us this opportunity to connect and introduce our company and the “Bansal, Utkarsh” brand and the various range of products of the company including and not limited to the “MS or GI ERW Pipes”.
+        </p>
+        <p>
+            We take pride to mention that you have approached one of the leading brands in the country engaged in the manufacturing of the product as described herein and we can assure you that if you decide to accept our offer and place the purchase/supply order in our favor you will always feel proud for having made the right decision by relying upon the best quality product.
+        </p>
+        <p>
+            Our offer and/or quotation for the MS ERW Pipes “Bansal, Utkarsh” brand as enquired by you is/are more clearly mentioned and recorded in the Annexure “A” to this quotation. The said Annexure “A” shall for all practical purposes be considered as a part of the present quotation.
+        </p>
+        
+        <br/>
+        <h3 style="text-align: center; text-decoration: underline;">ANNEXURE A</h3>
+        
+        <!-- THE TABLE -->
+        <apex:outputPanel rendered="{!!isExport}">
+        <apex:outputPanel rendered="{!standardLineItems.size > 0}">
+            <table>
+                <thead>
+                    <tr style="background-color: #FFFF00;">
+                        <th class="text-center" style="width: 3%;">SL No</th>
+                        <th class="text-center" style="width: 12%;">Pipe / Designation</th>
+                        <th class="text-center" style="width: 6%;">Size<br/>(mm)</th>
+                        <th class="text-center" style="width: 9%;">Thickness<br/>(mm/Std)</th>
+                        <th class="text-center" style="width: 6%;">End Finish</th>
+                        <th class="text-center" style="width: 8%;">IS Specification</th>
+                        <apex:repeat value="{!specialHeaderCols}" var="col">
+                            <th class="text-center" style="width: {!IF(col == 'Special Description', '9%', '5%')};">{!col}</th>
+                        </apex:repeat>
+                        <apex:outputPanel layout="none" rendered="{!showRateInDocDomestic}">
+                            <th class="text-center" style="width: 7%;">Rate per Kg</th>
+                            <th class="text-center" style="width: 7%;">Per Unit Price</th>
+                        </apex:outputPanel>
+                        <th class="text-center" style="width: 8%;">QTY</th>
+                        <th class="text-center" style="width: 7%;">Quoted Price</th>
+                        <th class="text-center" style="width: 9%;">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <apex:repeat value="{!standardLineItems}" var="row">
+                        <tr>
+                            <td class="text-center">{!row['SlNo']}</td>
+                            <td class="text-center">{!row['designation']}</td>
+                            <td class="text-center">{!row['size_nb']}</td>
+                            <td class="text-center">{!IF(ISBLANK(row['display_class_thickness']), '-', row['display_class_thickness'])}</td>
+                            <td class="text-center">{!row['end_finish']}</td>
+                            <td class="text-center">{!row['standard_spec_grade']}</td>
+                            <apex:repeat value="{!row['specialValuesList']}" var="sVal">
+                                <td class="text-center"><apex:outputText value="{!sVal}" escape="false"/></td>
+                            </apex:repeat>
+                            <apex:outputPanel layout="none" rendered="{!showRateInDocDomestic}">
+                                <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!row['pdf_rate']}"/></apex:outputText></td>
+                                <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!row['pdf_display_unit_price']}"/></apex:outputText></td>
+                            </apex:outputPanel>
+                            <td class="text-center">
+                                <apex:outputText value="{0, number, #,##0}"><apex:param value="{!row['quantity']}"/></apex:outputText>&nbsp;{!IF(row['uom'] == 'Pieces', 'PCS', IF(row['uom'] == 'Meters', 'MTRS', row['uom']))}
+                            </td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!row['pdf_unit_price']}"/></apex:outputText></td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!row['pdf_base_total']}"/></apex:outputText></td>
+                        </tr>
+                    </apex:repeat>
+                    <!-- Freight Lump Sum row -->
+                    <apex:outputPanel rendered="{!showLumpSumFreight}" layout="none">
+                    <tr>
+                        <td colspan="{!IF(showRateInDocDomestic, 9, 7) + specialHeaderCols.size}" class="text-right" style="font-weight: bold;">Freight (Lump Sum):</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!lumpSumFreightAmount}"/></apex:outputText>
+                        </td>
+                    </tr>
+                    </apex:outputPanel>
+                    <!-- Freight Price per KG row -->
+                    <apex:outputPanel rendered="{!showPricePerKgFreight}" layout="none">
+                    <tr>
+                        <td colspan="{!IF(showRateInDocDomestic, 9, 7) + specialHeaderCols.size}" class="text-right" style="font-weight: bold;">Freight (Price per KG):</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!pricePerKgFreightAmount}"/></apex:outputText>
+                        </td>
+                    </tr>
+                    </apex:outputPanel>
+                    <tr>
+                        <td colspan="{!IF(showRateInDocDomestic, 9, 7) + specialHeaderCols.size}" class="text-right" style="font-weight: bold; background-color: #FFFF00;">Sub Total:</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold; background-color: #FFFF00;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!standardTotalAmount}"/></apex:outputText>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="{!IF(showRateInDocDomestic, 9, 7) + specialHeaderCols.size}" class="text-right" style="font-weight: bold;">GST @18%:</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!standardTotalGst}"/></apex:outputText>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="{!IF(showRateInDocDomestic, 9, 7) + specialHeaderCols.size}" class="text-right" style="font-weight: bold; background-color: #FFFF00;">Grand Total:</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold; background-color: #FFFF00;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!standardTotalFinal}"/></apex:outputText>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </apex:outputPanel>
+
+        <!-- SPECIAL LINE ITEMS (if any) -->
+        <apex:repeat value="{!specialLineItems}" var="spRow">
+            <h3 style="text-decoration: underline; margin-bottom: 5px; margin-top: 15px;">SPECIAL ITEM - {!spRow['customHeader']}</h3>
+            <table>
+                <thead>
+                    <tr style="background-color: #FFFF00;">
+                        <th class="text-center" style="width: 3%;">SL No</th>
+                        <th class="text-center" style="width: 12%;">Pipe / Designation</th>
+                        <th class="text-center" style="width: 6%;">Size<br/>(mm)</th>
+                        <th class="text-center" style="width: 9%;">Thickness<br/>(mm/Std)</th>
+                        <th class="text-center" style="width: 6%;">End Finish</th>
+                        <th class="text-center" style="width: 8%;">IS Specification</th>
+                        <th class="text-center" style="width: 12%;">{!spRow['customHeader']}</th>
+                        <apex:outputPanel layout="none" rendered="{!showRateInDocDomestic}">
+                            <th class="text-center" style="width: 7%;">Rate per Kg</th>
+                            <th class="text-center" style="width: 7%;">Per Unit Price</th>
+                        </apex:outputPanel>
+                        <th class="text-center" style="width: 8%;">QTY</th>
+                        <th class="text-center" style="width: 7%;">Quoted Price</th>
+                        <th class="text-center" style="width: 9%;">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="text-center">{!spRow['SlNo']}</td>
+                        <td class="text-center">{!spRow['designation']}</td>
+                        <td class="text-center">{!spRow['size_nb']}</td>
+                        <td class="text-center">{!IF(ISBLANK(spRow['display_class_thickness']), '-', spRow['display_class_thickness'])}</td>
+                        <td class="text-center">{!spRow['end_finish']}</td>
+                        <td class="text-center">{!spRow['standard_spec_grade']}</td>
+                        <td class="text-center" style="font-weight: bold;"><apex:outputText value="{!spRow['customValue']}" escape="false"/></td>
+                        <apex:outputPanel layout="none" rendered="{!showRateInDocDomestic}">
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['pdf_rate']}"/></apex:outputText></td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['pdf_display_unit_price']}"/></apex:outputText></td>
+                        </apex:outputPanel>
+                        <td class="text-center">
+                            <apex:outputText value="{0, number, #,##0}"><apex:param value="{!spRow['quantity']}"/></apex:outputText>&nbsp;{!IF(spRow['uom'] == 'Pieces', 'PCS', IF(spRow['uom'] == 'Meters', 'MTRS', spRow['uom']))}
+                        </td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['pdf_unit_price']}"/></apex:outputText></td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['pdf_base_total']}"/></apex:outputText></td>
+                    </tr>
+                    <!-- Freight Lump Sum row -->
+                    <apex:outputPanel rendered="{!showLumpSumFreight}" layout="none">
+                    <tr>
+                        <td colspan="{!IF(showRateInDocDomestic, 10, 8)}" class="text-right" style="font-weight: bold;">Freight (Lump Sum):</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!lumpSumFreightAmount}"/></apex:outputText>
+                        </td>
+                    </tr>
+                    </apex:outputPanel>
+                    <!-- Freight Price per KG row -->
+                    <apex:outputPanel rendered="{!showPricePerKgFreight}" layout="none">
+                    <tr>
+                        <td colspan="{!IF(showRateInDocDomestic, 10, 8)}" class="text-right" style="font-weight: bold;">Freight (Price per KG):</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!pricePerKgFreightAmount}"/></apex:outputText>
+                        </td>
+                    </tr>
+                    </apex:outputPanel>
+                    <tr>
+                        <td colspan="{!IF(showRateInDocDomestic, 10, 8)}" class="text-right" style="font-weight: bold; background-color: #FFFF00;">Sub Total:</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold; background-color: #FFFF00;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['pdf_base_total']}"/></apex:outputText>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="{!IF(showRateInDocDomestic, 10, 8)}" class="text-right" style="font-weight: bold;">GST @18%:</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['pdf_gst_amount']}"/></apex:outputText>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="{!IF(showRateInDocDomestic, 10, 8)}" class="text-right" style="font-weight: bold; background-color: #FFFF00;">Grand Total:</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold; background-color: #FFFF00;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['pdf_total_price']}"/></apex:outputText>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </apex:repeat>
+        </apex:outputPanel>
+
+        <!-- ==============================================
+             EXPORT TABLE (15 Columns)
+             ============================================== -->
+        <apex:outputPanel rendered="{!isExport}">
+        <apex:outputPanel rendered="{!standardLineItems.size > 0}">
+            <table>
+                <thead>
+                    <tr style="background-color: #FFFF00;">
+                        <th class="text-center" style="width: 10%;">Designation</th>
+                        <th class="text-center" style="width: 10%;">Standard / Spec / Grade</th>
+                        <th class="text-center" style="width: 6%;">Size (mm)</th>
+                        <th class="text-center" style="width: 5%;">OD (mm)</th>
+                        <th class="text-center" style="width: 5%;">Wall Thk (mm)</th>
+                        <th class="text-center" style="width: 7%;">End Finish</th>
+                        <th class="text-center" style="width: 6%;">Length (M)</th>
+                        <th class="text-center" style="width: 7%;">Total Pcs</th>
+                        <th class="text-center" style="width: 5%;">Kg/mtr</th>
+                        <th class="text-center" style="width: 7%;">Total Mtrs</th>
+                        <th class="text-center" style="width: 7%;">Total Weight (MT)</th>
+                        <th class="text-center" style="width: 7%;">Price Basis</th>
+                        <th class="text-center" style="width: 7%;">Unit Rate ({!exportCurrency})</th>
+                        <th class="text-center" style="width: 7%;">Total FOB ({!exportCurrency})</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <apex:repeat value="{!standardLineItems}" var="row">
+                        <tr>
+                            <td class="text-center">{!row['designation']}</td>
+                            <td class="text-center">{!row['standard_spec_grade']} - {!row['grade']}</td>
+                            <td class="text-center">{!row['size_nb']}</td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!row['od']}"/></apex:outputText></td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!row['wall_thickness']}"/></apex:outputText></td>
+                            <td class="text-center">{!row['end_finish']}</td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!row['pipe_length']}"/></apex:outputText></td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0}"><apex:param value="{!row['total_pieces']}"/></apex:outputText></td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.000}"><apex:param value="{!row['kg_per_meter']}"/></apex:outputText></td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!row['total_meters']}"/></apex:outputText></td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.000}"><apex:param value="{!row['total_weight']}"/></apex:outputText></td>
+                            <td class="text-center">{!row['price_input_type']}</td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!row['price_fc']}"/></apex:outputText></td>
+                            <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!row['total_fob_fc']}"/></apex:outputText></td>
+                        </tr>
+                    </apex:repeat>
+                    <tr>
+                        <td colspan="12" class="text-right" style="font-weight: bold; background-color: #FFFF00;">Sub Total:</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold; background-color: #FFFF00;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!totalExportFobFc}"/></apex:outputText>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </apex:outputPanel>
+        
+        <apex:repeat value="{!specialLineItems}" var="spRow">
+            <h3 style="text-decoration: underline; margin-bottom: 5px; margin-top: 15px;">SPECIAL ITEM - {!spRow['customHeader']}</h3>
+            <table>
+                <thead>
+                    <tr style="background-color: #FFFF00;">
+                        <th class="text-center" style="width: 10%;">Designation</th>
+                        <th class="text-center" style="width: 10%;">Standard / Spec / Grade</th>
+                        <th class="text-center" style="width: 6%;">Size (mm)</th>
+                        <th class="text-center" style="width: 5%;">OD (mm)</th>
+                        <th class="text-center" style="width: 5%;">Wall Thk (mm)</th>
+                        <th class="text-center" style="width: 7%;">End Finish</th>
+                        <th class="text-center" style="width: 6%;">Length (M)</th>
+                        <th class="text-center" style="width: 7%;">Total Pcs</th>
+                        <th class="text-center" style="width: 5%;">Kg/mtr</th>
+                        <th class="text-center" style="width: 7%;">Total Mtrs</th>
+                        <th class="text-center" style="width: 7%;">Total Weight (MT)</th>
+                        <th class="text-center" style="width: 7%;">Price Basis</th>
+                        <th class="text-center" style="width: 7%;">Unit Rate ({!exportCurrency})</th>
+                        <th class="text-center" style="width: 7%;">Total FOB ({!exportCurrency})</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="text-center">{!spRow['designation']}</td>
+                        <td class="text-center">{!spRow['standard_spec_grade']} - {!spRow['grade']}</td>
+                        <td class="text-center">{!spRow['size_nb']}</td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['od']}"/></apex:outputText></td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['wall_thickness']}"/></apex:outputText></td>
+                        <td class="text-center">{!spRow['end_finish']}</td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['pipe_length']}"/></apex:outputText></td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0}"><apex:param value="{!spRow['total_pieces']}"/></apex:outputText></td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0.000}"><apex:param value="{!spRow['kg_per_meter']}"/></apex:outputText></td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['total_meters']}"/></apex:outputText></td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0.000}"><apex:param value="{!spRow['total_weight']}"/></apex:outputText></td>
+                        <td class="text-center">{!spRow['price_input_type']}</td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['price_fc']}"/></apex:outputText></td>
+                        <td class="text-right"><apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['total_fob_fc']}"/></apex:outputText></td>
+                    </tr>
+                    <tr>
+                        <td colspan="12" class="text-right" style="font-weight: bold; background-color: #FFFF00;">Sub Total:</td>
+                        <td colspan="2" class="text-right" style="font-weight: bold; background-color: #FFFF00;">
+                            <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!spRow['total_fob_fc']}"/></apex:outputText>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </apex:repeat>
+        </apex:outputPanel>
+
+        <!-- ONLY RENDERING FOR DOMESTIC (!isExport) -->
+        <apex:outputPanel rendered="{!!isExport}">
+        <apex:outputPanel rendered="{!specialLineItems.size > 0}">
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px;">
+                <tr>
+                    <td class="text-right no-border" style="width: 82%; font-weight: bold; font-size: 12px;">OVERALL GRAND TOTAL:</td>
+                    <td class="text-right" style="width: 18%; border: 1px solid #000; font-weight: bold; font-size: 12px; padding: 5px; background-color: #FFFF00;">
+                        <apex:outputText value="{0, number, #,##0.00}"><apex:param value="{!totalFinalAmount}"/></apex:outputText>
+                    </td>
+                </tr>
+            </table>
+        </apex:outputPanel>
+        </apex:outputPanel>
+
+        <!-- TERMS AND CONDITIONS -->
+        <div style="page-break-before: always;"></div>
+        <h3 style="text-decoration: underline; margin-bottom: 10px;">TERMS &amp; CONDITIONS OF THE CONTRACT: -</h3>
+        <ol style="padding-left: 20px;">
+            <li><b>Payment Terms:</b> {!jsonData['tc_payment_terms']}</li>
+            <li><b>Delivery:</b> {!jsonData['tc_delivery_period']}</li>
+            <li><b>Transportation &amp; Freight:</b> 
+                The rates are on&nbsp;<apex:outputText value="{!IF(jsonData['tc_transportation'] == 'Excluded', 'Ex-works', IF(jsonData['tc_transportation'] == 'Included', 'F.O.R', jsonData['tc_transportation']))}" /> 
+                at {!jsonData['tc_work_address']}
+            </li>
+            <li><b>Inspection:</b> {!jsonData['tc_inspection']}</li>
+            <li><b>Drawing/GTP:</b> It shall always be the absolute obligation of the Buyer to provide a proper legible valid GTP with all dimensions specifications and information of the product in order to undertake the manufacturing of the products based on the GTP. A 50% advance is mandatory along with the purchase order to undertake manufacturing of product based on drawing and balance before dispatch.</li>
+            <li><b>Material Tolerance:</b> All dimensional tolerance like OD &amp; Wall Thickness (+/-) shall be as per applicable IS specification.</li>
+            <li>UIL shall be responsible for the material as per specifications mentioned in GTP/PO. However, in case of any change in design by User or any Other competent authority, post the dispatch, UIL will not take back material on account of the same.</li>
+            <li><b>Quality:</b> All quality related complaint to be informed to us in writing within 72 hours of receipt of material at site. Thereafter UIL may not accept any quality complaints.</li>
+            <li><b>Weigh Bridge Tolerance:</b> Industry Standard Weigh Bridge tolerance of 0.5% applicable.</li>
+            <li><b>LD Clause / Penalty:</b> No LD Clause / Penalty in any form acceptable for any reason even if mentioned in PO.</li>
+            <li><b>Validity:</b> {!jsonData['tc_offer_validity']}</li>
+            <li><b>Price variation:</b> <apex:outputText value="{!jsonData['tc_price_variation']}" escape="false"/></li>
+            <li><b>Confidentiality:</b> (A) During the term of this Agreement, each party (the “disclosing party”) may communicate to the other party (the “receiving party”) information which it considers to be confidential (“Confidential Information”). All Confidential Information shall be specifically designated as confidential. Such Confidential Information may include, without limitation, trade secrets, know-how, inventions, technical data or specifications, testing methods, business or financial information, research and development activities, product and marketing plans, and customer and supplier information. Confidential Information that is disclosed orally or visually shall be documented in a written notice prepared by the disclosing party and delivered to the receiving party within thirty (30) days of the date of disclosure; such notice shall summarize the Confidential Information disclosed to the receiving party and reference to the time and place of disclosure. (B) The receiving party agrees that it shall: (a) maintain all Confidential Information in strict confidence, except that the receiving party may disclose or permit the disclosure of any Confidential Information to its directors, officers, employees, consultants, and advisors who are obligated to maintain the confidential nature of such Confidential Information and who need to know such Confidential Information for the purpose set forth in this Agreement; (b) use all Confidential Information solely for the purpose set forth in this Agreement; and (c) allow its directors, officers, employees, consultants, and advisors to reproduce the Confidential Information only to the extent necessary to effect the purposes set forth in this Agreement, with all such reproductions being considered Confidential Information. (C) The obligations of the receiving party under Clause B above shall not apply to the extent that the receiving party can demonstrate that certain Confidential Information: (a) was in the public domain prior to the time of its disclosure under this Agreement; (b) entered the public domain after the time of its disclosure under this Agreement through means other than an unauthorized disclosure resulting from an act or omission by the receiving party; (c) was independently developed or discovered by receiving party without use of the Confidential Information; (d) is or was disclosed to the receiving party at any time, whether prior to or after the time of its disclosure under this Agreement, by a third party having no fiduciary relationship with the disclosing party and having no obligation of confidentiality with respect to such Confidential Information; or (e) is required to be disclosed to comply with application laws or regulation, or with a court or administrative order, provided that, the disclosing party receives prior written notice of such disclosure and that the receiving party takes all reasonable and lawful actions to obtain confidential treatment for such disclosure and, if possible, to minimize the extent of such disclosure. (D) The obligations set forth in this Article shall remain in effect for a period of five (5) years after the expiration or the earlier termination of this Agreement.</li>
+            <li><b>Force Majeure:</b> (a) Neither Party will be liable for any failure to perform its obligations hereunder, other than payment obligations, due to unforeseen circumstances or causes beyond the Party’s reasonable control, including, without limitation, acts of God, war, riot, embargoes, acts of civil or military authorities, acts of terrorism or sabotage, electronic viruses, worms or corrupting microcode, fire, flood, earthquake, accident, strikes, radiation, inability to secure transportation, failure of communications or electrical lines, facilities, fuel, energy, labour or materials. In an event of force majeure, either Party’s time for delivery or other performance will be extended for a period equal to the duration of the delay caused thereby. The Party subject to the force majeure shall (A)give notice of suspension of its obligations as soon as reasonably practicable stating the date and extent of such suspension and the cause thereof, (B)use its best efforts to remedy or remove such force majeure with the least practicable delay, and (C)resume the performance of its obligations as soon as reasonably practicable after the remediation or removal of the cause. Notwithstanding anything to the contrary herein, if an event of force majeure can reasonably be expected to prevent the affected Party from performing its obligations for a period of at least three (3) months, then the other Party may terminate this Agreement upon not less than fifteen days written notice to the affected Party.</li>
+            <li><b>Governing LAW, Arbitration and Jurisdiction:</b> The Courts at Kolkata shall have exclusive jurisdiction over all unresolved disputes relating to this Agreement. The Parties expressly consent to this jurisdiction and waive, as well as undertake, that they will not assert any claim, with respect to personal applicability, inconvenience of forum, venue or any other hardship related to jurisdiction. Should there be any dispute or difference of opinion regarding this contract, both the parties will make all efforts to amicably settle such disputes. Efforts at reaching an amicable settlement will be deemed to have failed as soon as one of the contractual parties informs the other in writing about such a deadlock. If efforts at amicable settlement fail, all disputes arising out of this contract or its validity will be finally decided in accordance with the provisions of the Arbitration and Conciliation Act 1996, as amended from time to time. The arbitration proceedings shall be headed by a sole arbitrator. The decision of the sole arbitrator shall be binding upon the parties. The arbitration proceedings shall be held at KOLKATA, India and conducted in English language.</li>
+            <li><b>Miscellaneous:</b> The Company would issue various work orders from time to time during the tenure of this agreement and the present Agreement contains the general terms and conditions of the contract which would govern and administer the work order issued by the Company from time to time. Any specific terms and conditions not mentioned in this agreement but mentioned in the work order shall prevail and govern the contract. Any specific terms and conditions mentioned herein but not mentioned in the work order shall also continue to prevail and govern the contract. However, in the event of any conflicting interpretation of any clauses of this Agreement with the work order, the present agreement shall prevail over the work order.</li>
+            <li><b>Quotation to have Overriding Effect:</b> The terms and conditions of this quotation shall override/supersede the terms and conditions mentioned in the Purchase order, notwithstanding the fact that the Purchase Order has been signed and stamped by Utkarsh India Limited. Any subsequent placement of Purchase Order post submission of this or any other revised Quotation shall automatically be deemed as acceptance of this clause.</li>
+        </ol>
+
+        <apex:outputPanel rendered="{!NOT(ISBLANK(quoteNotes))}" layout="block" style="margin-top: 15px;">
+            <p><b>Notes / Remarks:</b><br/>
+            <apex:outputText value="{!quoteNotes}" escape="false" /></p>
+        </apex:outputPanel>
+
+        <div style="margin-top: 40px; page-break-inside: avoid;">
+            <p>Thanking you,</p>
+            <br/><br/>
+            <p>
+                <b>{!$User.FirstName} {!$User.LastName}</b><br/>
+                {!$User.Title}<br/>
+                Mob:- {!$User.MobilePhone}<br/>
+                E-Mail: - {!$User.Email}<br/>
+                <b>For UTKARSH INDIA LIMITED</b> Web: www.utkarshindia.in
+            </p>
+        </div>
+
+    </body>
+</apex:page>
