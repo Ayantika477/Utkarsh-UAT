@@ -59,6 +59,7 @@ public static TenderInfo getTenderInfo(Id recordId) {
                Address_Book__r.Name
         FROM Tender_Addressbook_Junc__c
         WHERE Tender__c = :recordId
+        WITH SYSTEM_MODE
         LIMIT 1
     ];
 
@@ -103,7 +104,7 @@ public static TenderInfo getTenderInfo(Id recordId) {
             Phone     = phone,
             AccountId = accountId
         );
-        insert c;
+        Database.insert(c,AccessLevel.SYSTEM_MODE);
         return c.Id;
     }
     
@@ -126,7 +127,7 @@ public static void updateTenderChoice(
         'Steel Tubular Poles'               => 'Steel_Tubular_Pole_Department',
         'Polymer'                           => 'PVC',
         'Transmission & Telecom Tower'      => 'Transmission_Tower_Department',
-        'Pre Engineering Building'          => 'PEB_Department',
+        'Pre Engineering Building'          => 'PEB',
         'Solar Structure'                   => 'Solar_Structure_Department',
         'Railway Electrification Structure' => 'Core_Department',
         'Steel Pipes'                       => 'Steel_Pipes_Department'
@@ -151,6 +152,7 @@ public static void updateTenderChoice(
         SELECT Id,
                Name,
                Department_Name__c,
+               OwnerId,
                Comments__c
         FROM Tender__c
         WHERE Id = :tenderId
@@ -175,9 +177,32 @@ public static void updateTenderChoice(
         ];
 
         if (hod != null) {
+
+        if (
+            choice == 'Reject and Create Project' ||
+            choice == 'Reject and Close'
+        ) {
+            notifyHodRejection(tender, hod.Id);
+        } else {
             notifyHod(tender, hod.Id);
         }
     }
+}
+
+// "Tender Direct Participation approval submission" and "...Rejection approval submission"
+// notifications not required per Tender & Project validation sheet rows 26-27 (2026-10-29).
+// Uncomment both blocks to reactivate.
+// if (choice == 'Accept and participate' && tender.OwnerId != null) {
+//     notifyTenderOwner(tender, tender.OwnerId);
+// }
+//
+// if (
+//     (choice == 'Reject and Create Project' ||
+//      choice == 'Reject and Close') &&
+//     tender.OwnerId != null
+// ) {
+//     notifyTenderOwnerRejection(tender, tender.OwnerId);
+// }
 
     Tender__c t = new Tender__c(
         Id                     = tenderId,
@@ -187,7 +212,7 @@ public static void updateTenderChoice(
         HOD_choice__c          = ''
     );
 
-    Database.update(t);
+    Database.update(t, AccessLevel.SYSTEM_MODE);
 }
 
 private static void notifyHod(Tender__c tender, Id hodId) {
@@ -201,8 +226,8 @@ private static void notifyHod(Tender__c tender, Id hodId) {
     ];
 
     Messaging.CustomNotification notification = new Messaging.CustomNotification();
-    notification.setTitle('Tender needs review');
-    notification.setBody('Please review "' + tender.Name + '".');
+    notification.setTitle('Tender Direct Participation Awaiting Approval');
+    notification.setBody('A direct tender participation has been submitted for your approval. Please review and take action. "' + tender.Name + '".');
     notification.setNotificationTypeId(notifType.Id);
     notification.setTargetId(tender.Id);
 
@@ -212,6 +237,42 @@ private static void notifyHod(Tender__c tender, Id hodId) {
         System.debug('Failed to send review notification: ' + e.getMessage());
     }
 }
+
+private static void notifyTenderOwner(Tender__c tender, Id ownerId) {
+
+    CustomNotificationType notifType = [
+        SELECT Id
+        FROM CustomNotificationType
+        WHERE DeveloperName = 'Tender_Approval_Notification'
+        WITH SYSTEM_MODE
+        LIMIT 1
+    ];
+
+    Messaging.CustomNotification notification =
+        new Messaging.CustomNotification();
+
+    notification.setTitle(
+        'Tender Direct Participation approval submission'
+    );
+
+    notification.setBody(
+        'Your direct tender participation has been sent to the HOD for approval.'
+    );
+
+    notification.setNotificationTypeId(notifType.Id);
+    notification.setTargetId(tender.Id);
+
+    try {
+        notification.send(new Set<String>{ String.valueOf(ownerId) });
+    } catch (Exception e) {
+        System.debug(
+            'Failed to send tender owner notification: ' +
+            e.getMessage()
+        );
+    }
+}
+
+
    
 private static String appendComment(String existingComments, String newComment) {
 
@@ -226,5 +287,80 @@ private static String appendComment(String existingComments, String newComment) 
     }
 
     return entry + '\n' + existingComments;
+}
+
+private static void notifyHodRejection(Tender__c tender, Id hodId) {
+
+    CustomNotificationType notifType = [
+        SELECT Id
+        FROM CustomNotificationType
+        WHERE DeveloperName = 'Tender_Approval_Notification'
+        WITH SYSTEM_MODE
+        LIMIT 1
+    ];
+
+    Messaging.CustomNotification notification =
+        new Messaging.CustomNotification();
+
+    notification.setTitle(
+        'Tender Direct Participation Rejection Awaiting Approval'
+    );
+
+    notification.setBody(
+        'A direct tender participation rejection has been submitted for your approval. Please review and take action.'
+    );
+
+    notification.setNotificationTypeId(notifType.Id);
+    notification.setTargetId(tender.Id);
+
+    try {
+        notification.send(
+            new Set<String>{ String.valueOf(hodId) }
+        );
+    } catch (Exception e) {
+        System.debug(
+            'Failed to send direct participation rejection notification to HOD: ' +
+            e.getMessage()
+        );
+    }
+}
+
+private static void notifyTenderOwnerRejection(
+    Tender__c tender,
+    Id ownerId
+) {
+
+    CustomNotificationType notifType = [
+        SELECT Id
+        FROM CustomNotificationType
+        WHERE DeveloperName = 'Tender_Approval_Notification'
+        WITH SYSTEM_MODE
+        LIMIT 1
+    ];
+
+    Messaging.CustomNotification notification =
+        new Messaging.CustomNotification();
+
+    notification.setTitle(
+        'Tender Direct Participation Rejection approval submission'
+    );
+
+    notification.setBody(
+        'Your direct tender participation rejection has been sent to the HOD for approval.'
+    );
+
+    notification.setNotificationTypeId(notifType.Id);
+    notification.setTargetId(tender.Id);
+
+    try {
+        notification.send(
+            new Set<String>{ String.valueOf(ownerId) }
+        );
+    } catch (Exception e) {
+        System.debug(
+            'Failed to send direct participation rejection submission notification to Tender Owner: ' +
+            e.getMessage()
+        );
+    }
 }
 }

@@ -7,58 +7,57 @@
                 <template if:true={selectedDashboardTarget}>
                     <div class="dashboard-wrapper">
 
-                        <div class="slds-grid slds-grid_align-end slds-m-bottom_medium slds-gutters_small">
-                            <div class="slds-col">
+                        <div class="overview-filter-bar slds-m-bottom_medium">
+                            <div class="filter-col filter-target">
+                                <label class="filter-label">Target</label>
                                 <lightning-combobox value={selectedTargetId} options={targetDropdownOptions}
                                     onchange={handleTargetChange} variant="label-hidden"
-                                    style="width: 250px;"></lightning-combobox>
+                                    class="filter-combobox"></lightning-combobox>
                             </div>
-                            <div class="slds-col">
+                            <div class="filter-col filter-cycle">
+                                <label class="filter-label">Cycle Period</label>
                                 <lightning-combobox value={selectedCycle} options={cycleDropdownOptions}
                                     onchange={handleCycleChange} variant="label-hidden"
-                                    style="width: 150px;"></lightning-combobox>
+                                    class="filter-combobox"></lightning-combobox>
                             </div>
                         </div>
 
-                        <div class="slds-box slds-box_xx-small slds-theme_default slds-m-bottom_medium header-stats-card">
-                            <div class="slds-grid slds-grid_vertical-align-center slds-p-around_small">
+                        <div class="header-stats-card slds-m-bottom_medium">
+                            <div class="header-stats-grid">
 
-                                <div class="slds-col slds-size_1-of-5 slds-text-align_center">
-                                    <div class="slds-text-color_weak slds-text-heading_small slds-m-bottom_x-small">
-                                        Achievement</div>
-                                    <lightning-progress-ring value={overallAchievement} size="large"
-                                        variant="warning"></lightning-progress-ring>
-                                    <div class="slds-m-top_x-small">
-                                        <h1 class="slds-text-heading_small orange-text"><b>{overallAchievement}%</b>
-                                        </h1>
+                                <div class="header-stat-item stat-item-achievement">
+                                    <div class="stat-label">Achievement</div>
+                                    <div class="stat-ring-wrap">
+                                        <lightning-progress-ring value={overallAchievement} size="large"
+                                            variant="warning"></lightning-progress-ring>
+                                    </div>
+                                    <div class="stat-achievement-number">
+                                        <b>{overallAchievement}%</b>
                                     </div>
                                 </div>
 
-                                <div class="slds-col slds-size_1-of-5">
-                                    <div class="slds-text-color_weak slds-text-heading_small slds-m-bottom_x-small">
-                                        Target Name</div>
-                                    <div class="slds-text-heading_medium slds-m-bottom_xx-small">
-                                        <b>{selectedDashboardTarget.Name}</b></div>
+                                <div class="header-stat-item stat-item-target">
+                                    <div class="stat-label">Target Name</div>
+                                    <div class="stat-target-name" title={selectedDashboardTarget.Name}>
+                                        <b>{selectedDashboardTarget.Name}</b>
+                                    </div>
                                     <span class="blue-badge">For - {selectedDashboardTarget.Assign_To_Type__c}</span>
                                 </div>
 
-                                <div class="slds-col slds-size_1-of-5">
-                                    <div class="slds-text-color_weak slds-text-heading_small slds-m-bottom_x-small">
-                                        Module</div>
-                                    <div><b>Module Name:</b> {selectedDashboardTarget.Target_Module__c}</div>
-                                    <div><b>Measurement:</b> {selectedDashboardTarget.Metric__c}</div>
+                                <div class="header-stat-item stat-item-module">
+                                    <div class="stat-label">Module & Metric</div>
+                                    <div class="stat-line"><b>Module:</b> {selectedDashboardTarget.Target_Module__c}</div>
+                                    <div class="stat-line"><b>Metric:</b> {selectedDashboardTarget.Metric__c}</div>
                                 </div>
 
-                                <div class="slds-col slds-size_1-of-5">
-                                    <div class="slds-text-color_weak slds-text-heading_small slds-m-bottom_x-small">
-                                        Current Cycle</div>
-                                    <div><b>{currentCycleDisplay}</b></div>
+                                <div class="header-stat-item stat-item-cycle">
+                                    <div class="stat-label">Current Cycle</div>
+                                    <div class="stat-cycle-value"><b>{currentCycleDisplay}</b></div>
                                 </div>
 
-                                <div class="slds-col slds-size_1-of-5">
-                                    <div class="slds-text-color_weak slds-text-heading_small slds-m-bottom_x-small">
-                                        Frequency</div>
-                                    <div>{selectedDashboardTarget.Frequency__c}</div>
+                                <div class="header-stat-item stat-item-frequency">
+                                    <div class="stat-label">Frequency</div>
+                                    <div class="stat-freq-value">{selectedDashboardTarget.Frequency__c}</div>
                                 </div>
 
                             </div>
@@ -215,89 +214,169 @@
                 <lightning-tab label="Targets" icon-name="utility:bullseye" value="targets">
 
                     <template if:false={isCreatingTarget}>
-                        <div class="slds-grid slds-grid_align-spread slds-p-bottom_medium slds-p-horizontal_medium">
-                            <div class="slds-text-heading_small"><strong>Targets ({existingTargets.length})</strong>
+                        <div class="targets-header-bar slds-p-bottom_medium slds-p-horizontal_medium">
+                            <div class="targets-header-info">
+                                <h2 class="targets-header-title">
+                                    Targets <span class="targets-count-pill">{existingTargets.length}</span>
+                                </h2>
+                                <p class="targets-header-subtitle">View, configure, and manage target allocations across teams and employees</p>
                             </div>
                             <lightning-button label="+ Add Target" variant="brand"
-                                onclick={handleAddTarget}></lightning-button>
+                                class="btn-add-target" onclick={handleAddTarget}></lightning-button>
                         </div>
 
                         <template if:true={existingTargets.length}>
-                            <div
-                                class="slds-box slds-box_xx-small slds-theme_default slds-m-horizontal_medium slds-p-around_none">
-                                <table class="slds-table slds-table_cell-buffer slds-table_bordered custom-list-table">
-                                    <thead>
-                                        <tr class="slds-line-height_reset">
-                                            <th scope="col">
-                                                <div class="slds-truncate" title="Target Name">Target Name</div>
-                                            </th>
-                                            <th scope="col">
-                                                <div class="slds-truncate" title="Module">Module</div>
-                                            </th>
-                                            <th scope="col">
-                                                <div class="slds-truncate" title="Assigned To">Assigned To</div>
-                                            </th>
-                                            <th scope="col">
-                                                <div class="slds-truncate" title="Created By">Created By</div>
-                                            </th>
-                                            <th scope="col">
-                                                <div class="slds-truncate" title="Status">Status</div>
-                                            </th>
-                                            <th scope="col">
-                                                <div class="slds-truncate" title="Actions">Actions</div>
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <template for:each={existingTargets} for:item="target">
-                                            <tr key={target.Id} class="slds-hint-parent">
-                                                <td>
-                                                    <div class="slds-truncate">{target.Name}</div>
-                                                </td>
-                                                <td>
-                                                    <div class="slds-truncate">{target.Target_Module__c}</div>
-                                                </td>
-                                                <td>
-                                                    <div
-                                                        class="slds-truncate slds-grid slds-grid_vertical-align-center">
-                                                        {target.assignedToDisplay}
-                                                        <template if:true={target.hasExtra}>
-                                                            <span
-                                                                class="extra-count-badge slds-m-left_x-small">{target.extraCountText}</span>
-                                                        </template>
-                                                    </div>
-                                                </td>
-                                                <td>
-                                                    <div class="slds-truncate">
-                                                        <strong>{target.createdByName}</strong><br />
-                                                        <span
-                                                            class="slds-text-color_weak slds-text-body_small">{target.createdOnDisplay}</span>
-                                                    </div>
-                                                </td>
-                                                <td><span class={target.statusClass}>{target.Status__c}</span></td>
-
-                                                <td>
-                                                    <lightning-button-icon icon-name="utility:edit" variant="bare"
-                                                        class="icon-blue slds-m-right_medium" data-id={target.Id}
-                                                        onclick={handleEdit}></lightning-button-icon>
-                                                    <lightning-button-icon icon-name="utility:delete" variant="bare"
-                                                        class="icon-red" data-id={target.Id}
-                                                        onclick={handleDelete}></lightning-button-icon>
-                                                </td>
+                            <div class="targets-view-wrapper slds-m-horizontal_medium">
+                                <!-- Desktop Custom Table View (screens > 768px) -->
+                                <div class="custom-desktop-table-container">
+                                    <table class="custom-desktop-table">
+                                        <thead>
+                                            <tr>
+                                                <th scope="col" class="th-name">Target Name</th>
+                                                <th scope="col" class="th-module">Module</th>
+                                                <th scope="col" class="th-assigned">Assigned To</th>
+                                                <th scope="col" class="th-created">Created By</th>
+                                                <th scope="col" class="th-status">Status</th>
+                                                <th scope="col" class="th-actions slds-text-align_right">Actions</th>
                                             </tr>
-                                        </template>
-                                    </tbody>
-                                </table>
-                                <div
-                                    class="slds-p-around_small slds-text-align_right slds-text-color_weak slds-border_top">
-                                    <strong>Total Rows: {existingTargets.length}</strong>
+                                        </thead>
+                                        <tbody>
+                                            <template for:each={existingTargets} for:item="target">
+                                                <tr key={target.Id} class="custom-desktop-tr">
+                                                    <td class="td-name">
+                                                        <div class="target-name-cell">
+                                                            <div class="target-icon-badge">
+                                                                <lightning-icon icon-name="utility:target" size="x-small"></lightning-icon>
+                                                            </div>
+                                                            <span class="target-name-text" title={target.Name}>{target.Name}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td class="td-module">
+                                                        <span class="module-chip">{target.Target_Module__c}</span>
+                                                    </td>
+                                                    <td class="td-assigned">
+                                                        <div class="assigned-cell">
+                                                            <span class="assigned-names-text" title={target.assignedToDisplay}>{target.assignedToDisplay}</span>
+                                                            <template if:true={target.hasExtra}>
+                                                                <span class="extra-count-badge" title={target.extraCountText}>{target.extraCountText}</span>
+                                                            </template>
+                                                        </div>
+                                                    </td>
+                                                    <td class="td-created">
+                                                        <div class="created-cell">
+                                                            <strong class="created-name">{target.createdByName}</strong>
+                                                            <span class="created-date">{target.createdOnDisplay}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td class="td-status">
+                                                        <span class={target.statusClass}>
+                                                            <span class="status-indicator-dot"></span>
+                                                            {target.Status__c}
+                                                        </span>
+                                                    </td>
+                                                    <td class="td-actions slds-text-align_right">
+                                                        <div class="actions-button-group">
+                                                            <lightning-button-icon icon-name="utility:edit" variant="border-filled"
+                                                                alternative-text="Edit Target" title="Edit"
+                                                                class="action-btn action-btn-edit" data-id={target.Id}
+                                                                onclick={handleEdit}></lightning-button-icon>
+                                                            <lightning-button-icon icon-name="utility:delete" variant="border-filled"
+                                                                alternative-text="Delete Target" title="Delete"
+                                                                class="action-btn action-btn-delete" data-id={target.Id}
+                                                                onclick={handleDelete}></lightning-button-icon>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                    <div class="custom-table-footer">
+                                        <span class="total-count-text">Total Targets: <strong>{existingTargets.length}</strong></span>
+                                    </div>
+                                </div>
+
+                                <!-- Mobile Cards View (screens <= 768px) -->
+                                <div class="custom-mobile-cards-container">
+                                    <template for:each={existingTargets} for:item="target">
+                                        <div key={target.Id} class="mobile-target-card">
+                                            <!-- Card Header: Name and Status Badge -->
+                                            <div class="mobile-card-header">
+                                                <div class="mobile-card-title-group">
+                                                    <div class="mobile-target-icon-badge">
+                                                        <lightning-icon icon-name="utility:target" size="x-small"></lightning-icon>
+                                                    </div>
+                                                    <span class="mobile-card-title">{target.Name}</span>
+                                                </div>
+                                                <span class={target.statusClass}>
+                                                    <span class="status-indicator-dot"></span>
+                                                    {target.Status__c}
+                                                </span>
+                                            </div>
+
+                                            <!-- Card Body: Structured Metadata with Borders & Spacing -->
+                                            <div class="mobile-card-body">
+                                                <div class="mobile-info-row">
+                                                    <span class="mobile-info-label">
+                                                        <lightning-icon icon-name="utility:layers" size="xx-small" class="slds-m-right_xx-small"></lightning-icon>
+                                                        Module
+                                                    </span>
+                                                    <span class="mobile-info-value">
+                                                        <span class="module-chip">{target.Target_Module__c}</span>
+                                                    </span>
+                                                </div>
+
+                                                <div class="mobile-info-row">
+                                                    <span class="mobile-info-label">
+                                                        <lightning-icon icon-name="utility:groups" size="xx-small" class="slds-m-right_xx-small"></lightning-icon>
+                                                        Assigned To
+                                                    </span>
+                                                    <span class="mobile-info-value">
+                                                        <span class="assigned-names-text">{target.assignedToDisplay}</span>
+                                                        <template if:true={target.hasExtra}>
+                                                            <span class="extra-count-badge slds-m-left_xx-small">{target.extraCountText}</span>
+                                                        </template>
+                                                    </span>
+                                                </div>
+
+                                                <div class="mobile-info-row">
+                                                    <span class="mobile-info-label">
+                                                        <lightning-icon icon-name="utility:user" size="xx-small" class="slds-m-right_xx-small"></lightning-icon>
+                                                        Created By
+                                                    </span>
+                                                    <span class="mobile-info-value created-info">
+                                                        <strong>{target.createdByName}</strong>
+                                                        <span class="created-date-mobile">({target.createdOnDisplay})</span>
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <!-- Card Footer: Prominent Touch Actions with Borders & Spacing -->
+                                            <div class="mobile-card-actions">
+                                                <lightning-button label="Edit" icon-name="utility:edit"
+                                                    variant="neutral" class="mobile-action-btn mobile-edit-btn"
+                                                    data-id={target.Id} onclick={handleEdit}></lightning-button>
+                                                <lightning-button label="Delete" icon-name="utility:delete"
+                                                    variant="neutral" class="mobile-action-btn mobile-delete-btn"
+                                                    data-id={target.Id} onclick={handleDelete}></lightning-button>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <div class="mobile-cards-footer">
+                                        <span>Total Targets: <strong>{existingTargets.length}</strong></span>
+                                    </div>
                                 </div>
                             </div>
                         </template>
 
                         <template if:false={existingTargets.length}>
-                            <div class="slds-box slds-theme_default slds-m-horizontal_medium slds-text-align_center">
-                                <p>No targets found.</p>
+                            <div class="empty-targets-state slds-m-horizontal_medium">
+                                <div class="empty-targets-icon-wrapper">
+                                    <lightning-icon icon-name="utility:target" size="medium"></lightning-icon>
+                                </div>
+                                <h3 class="empty-targets-title">No Targets Configured</h3>
+                                <p class="empty-targets-desc">Get started by creating your first performance target with period-based metrics.</p>
+                                <lightning-button label="+ Add Target" variant="brand"
+                                    class="slds-m-top_small" onclick={handleAddTarget}></lightning-button>
                             </div>
                         </template>
                     </template>

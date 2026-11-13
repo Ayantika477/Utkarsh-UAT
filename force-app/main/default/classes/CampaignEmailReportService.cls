@@ -12,6 +12,21 @@ public with sharing class CampaignEmailReportService {
   public static final String PRODUCT_NAME_EMAIL = 'Email';
   private static final Integer DEFAULT_LIMIT = 1000;
   private static final Integer LOOKBACK_HOURS = 48;
+  private static final String CAMPAIGN_EMAIL_TRIGGER_SUFFIX = 'Campaign_Manual';
+
+  public class SubjectOption {
+    @AuraEnabled public String label;
+    @AuraEnabled public String value;
+  }
+
+  private class CampaignSendMatchIndex {
+    public Set<String> messageIds = new Set<String>();
+    public Set<String> bulkIds = new Set<String>();
+
+    public Boolean isEmpty() {
+      return messageIds.isEmpty() && bulkIds.isEmpty();
+    }
+  }
 
   private class CalloutResult {
     public String endpointPath;
@@ -61,6 +76,10 @@ public with sharing class CampaignEmailReportService {
   }
 
   public static FetchResult fetchAndSave() {
+    return fetchAndSave(null);
+  }
+
+  public static FetchResult fetchAndSave(String campaignEmailSubject) {
     Integer statusCode;
     String responseBody;
     String endpointPath = EMAIL_REPORTS_MERGED_PATH;
@@ -104,9 +123,43 @@ public with sharing class CampaignEmailReportService {
       );
     }
 
-    FetchResult result = persistResponse(responseBody);
+    FetchResult result = persistResponse(responseBody, campaignEmailSubject);
     result.integrationLogId = logId;
     return result;
+  }
+
+  /**
+   * @description Returns campaign email subject options for the report filter dropdown.
+   * @return Distinct subject options from Infobip templates and sent Email Logs.
+   */
+  public static List<SubjectOption> getCampaignEmailSubjectOptions() {
+    Map<String, SubjectOption> optionsByKey = new Map<String, SubjectOption>();
+
+    try {
+      for (BWM_InfobipEmailTemplateService.SubjectOption templateOption :
+        BWM_InfobipEmailTemplateService.fetchCampaignEmailSubjectOptions()) {
+        addSubjectOption(optionsByKey, templateOption == null ? null : templateOption.value);
+      }
+    } catch (Exception ex) {
+      // Fall back to Email Log subjects when Infobip is unavailable.
+    }
+
+    addSubjectOptionsFromEmailLogs(optionsByKey);
+    List<SubjectOption> options = new List<SubjectOption>(optionsByKey.values());
+    options.sort(new SubjectOptionLabelComparator());
+    return options;
+  }
+
+  /**
+   * @description Returns campaign email subject options from Email Log records only.
+   * @return Distinct subject options without external callouts.
+   */
+  public static List<SubjectOption> getCampaignEmailSubjectOptionsFromLogs() {
+    Map<String, SubjectOption> optionsByKey = new Map<String, SubjectOption>();
+    addSubjectOptionsFromEmailLogs(optionsByKey);
+    List<SubjectOption> options = new List<SubjectOption>(optionsByKey.values());
+    options.sort(new SubjectOptionLabelComparator());
+    return options;
   }
 
   @TestVisible
@@ -283,6 +336,11 @@ public with sharing class CampaignEmailReportService {
 
   @TestVisible
   static FetchResult persistResponse(String responseBody) {
+    return persistResponse(responseBody, null);
+  }
+
+  @TestVisible
+  static FetchResult persistResponse(String responseBody, String campaignEmailSubject) {
     Map<String, Object> payload = parseObjectMap(responseBody);
     if (payload == null) {
       throw new AuraHandledException('Email report API returned invalid JSON.');
@@ -300,6 +358,7 @@ public with sharing class CampaignEmailReportService {
 
     Datetime fetchedAt = System.now();
     List<Campaign_Report__c> reports = new List<Campaign_Report__c>();
+    List<EmailReportRow> parsedRows = new List<EmailReportRow>();
 
     if (results.isEmpty()) {
       reports.add(buildEmailReport(null, fetchedAt, responseBody));
@@ -308,8 +367,16 @@ public with sharing class CampaignEmailReportService {
         if (!(rowObj instanceof Map<String, Object>)) {
           continue;
         }
-        EmailReportRow row = parseEmailReportRow((Map<String, Object>) rowObj);
-        result.rows.add(row);
+        parsedRows.add(parseEmailReportRow((Map<String, Object>) rowObj));
+      }
+    }
+
+    result.rows = filterRowsByCampaignSubject(parsedRows, campaignEmailSubject);
+
+    if (result.rows.isEmpty() && parsedRows.isEmpty()) {
+      // Keep existing empty-response behavior.
+    } else {
+      for (EmailReportRow row : result.rows) {
         reports.add(buildEmailReport(row, fetchedAt, responseBody));
       }
     }
@@ -386,6 +453,284 @@ public with sharing class CampaignEmailReportService {
     }
 
     return summaryRows;
+  }
+
+  @TestVisible
+  static List<EmailReportRow> filterRowsByCampaignSubject(
+    List<EmailReportRow> rows,
+    String campaignEmailSubject
+  ) {
+    if (rows == null) {
+      return new List<EmailReportRow>();
+    }
+    if (String.isBlank(campaignEmailSubject)) {
+      return rows;
+    }
+
+    CampaignSendMatchIndex matchIndex = buildCampaignSendMatchIndex(
+      campaignEmailSubject.trim()
+    );
+    if (matchIndex.isEmpty()) {
+      return new List<EmailReportRow>();
+    }
+
+    List<EmailReportRow> filteredRows = new List<EmailReportRow>();
+    for (EmailReportRow row : rows) {
+      if (matchesCampaignSend(row, matchIndex)) {
+        filteredRows.add(row);
+      }
+    }
+    return filteredRows;
+  }
+
+  @TestVisible
+  static CampaignSendMatchIndex buildCampaignSendMatchIndex(String campaignEmailSubject) {
+    CampaignSendMatchIndex matchIndex = new CampaignSendMatchIndex();
+    if (String.isBlank(campaignEmailSubject)) {
+      return matchIndex;
+    }
+
+    String subject = campaignEmailSubject.trim();
+    Datetime sentSince = System.now().addHours(-1 * LOOKBACK_HOURS);
+    Set<String> templateIds = resolveTemplateIdsForSubject(subject);
+    Set<String> safeTemplateIds = filterSafeTemplateIds(subject, templateIds, sentSince);
+    Set<String> templateNames = resolveTemplateNamesForIds(safeTemplateIds);
+
+    List<Email_Log__c> campaignLogs;
+    if (safeTemplateIds.isEmpty()) {
+      campaignLogs = [
+        SELECT Response_Payload__c
+        FROM Email_Log__c
+        WHERE Trigger_Point__c LIKE :('%' + CAMPAIGN_EMAIL_TRIGGER_SUFFIX)
+          AND Status__c = 'Sent'
+          AND CreatedDate >= :sentSince
+          AND (
+            Campaign_Email_Subject__c = :subject
+            OR Template_Name__c = :subject
+          )
+      ];
+    } else {
+      campaignLogs = [
+        SELECT Response_Payload__c
+        FROM Email_Log__c
+        WHERE Trigger_Point__c LIKE :('%' + CAMPAIGN_EMAIL_TRIGGER_SUFFIX)
+          AND Status__c = 'Sent'
+          AND CreatedDate >= :sentSince
+          AND (
+            Campaign_Email_Subject__c = :subject
+            OR Template_Name__c = :subject
+            OR (
+              Template_Id__c IN :safeTemplateIds
+              AND (
+                Campaign_Email_Subject__c = null
+                OR Campaign_Email_Subject__c = :subject
+              )
+              AND (
+                Template_Name__c = null
+                OR Template_Name__c = :subject
+                OR Template_Name__c IN :templateNames
+              )
+            )
+          )
+      ];
+    }
+
+    for (Email_Log__c logRecord : campaignLogs) {
+      addPayloadIds(logRecord.Response_Payload__c, matchIndex);
+    }
+
+    return matchIndex;
+  }
+
+  @TestVisible
+  static Set<String> resolveTemplateIdsForSubject(String campaignEmailSubject) {
+    Set<String> templateIds = new Set<String>();
+    if (String.isBlank(campaignEmailSubject)) {
+      return templateIds;
+    }
+
+    String subject = campaignEmailSubject.trim();
+    for (Email_Log__c logRecord : [
+      SELECT Template_Id__c
+      FROM Email_Log__c
+      WHERE Trigger_Point__c LIKE :('%' + CAMPAIGN_EMAIL_TRIGGER_SUFFIX)
+        AND Template_Id__c != null
+        AND (
+          Campaign_Email_Subject__c = :subject
+          OR Template_Name__c = :subject
+        )
+    ]) {
+      templateIds.add(logRecord.Template_Id__c);
+    }
+
+    try {
+      templateIds.addAll(
+        BWM_InfobipEmailTemplateService.resolveTemplateIdsForSubject(subject)
+      );
+    } catch (Exception ex) {
+      // Continue with Email Log template ids only.
+    }
+
+    return templateIds;
+  }
+
+  @TestVisible
+  static Set<String> filterSafeTemplateIds(
+    String campaignEmailSubject,
+    Set<String> templateIds,
+    Datetime sentSince
+  ) {
+    Set<String> safeTemplateIds = new Set<String>(templateIds);
+    if (safeTemplateIds.isEmpty() || String.isBlank(campaignEmailSubject)) {
+      return safeTemplateIds;
+    }
+
+    String subject = campaignEmailSubject.trim();
+    for (AggregateResult aggregateResult : [
+      SELECT Template_Id__c templateId
+      FROM Email_Log__c
+      WHERE Trigger_Point__c LIKE :('%' + CAMPAIGN_EMAIL_TRIGGER_SUFFIX)
+        AND Status__c = 'Sent'
+        AND CreatedDate >= :sentSince
+        AND Template_Id__c IN :safeTemplateIds
+        AND Campaign_Email_Subject__c != null
+        AND Campaign_Email_Subject__c != :subject
+      GROUP BY Template_Id__c
+    ]) {
+      safeTemplateIds.remove((String) aggregateResult.get('templateId'));
+    }
+
+    return safeTemplateIds;
+  }
+
+  private static Set<String> resolveTemplateNamesForIds(Set<String> templateIds) {
+    Set<String> templateNames = new Set<String>();
+    if (templateIds == null || templateIds.isEmpty()) {
+      return templateNames;
+    }
+
+    try {
+      for (BWM_InfobipEmailTemplateService.TemplateOption templateOption :
+        BWM_InfobipEmailTemplateService.fetchTemplates()) {
+        if (
+          templateOption != null &&
+          String.isNotBlank(templateOption.value) &&
+          templateIds.contains(templateOption.value) &&
+          String.isNotBlank(templateOption.label)
+        ) {
+          templateNames.add(templateOption.label.trim());
+        }
+      }
+    } catch (Exception ex) {
+      for (Email_Log__c logRecord : [
+        SELECT Template_Name__c
+        FROM Email_Log__c
+        WHERE Template_Id__c IN :templateIds AND Template_Name__c != null
+        LIMIT 200
+      ]) {
+        templateNames.add(logRecord.Template_Name__c.trim());
+      }
+    }
+
+    return templateNames;
+  }
+
+  @TestVisible
+  static void addPayloadIds(String responsePayload, CampaignSendMatchIndex matchIndex) {
+    if (matchIndex == null || String.isBlank(responsePayload)) {
+      return;
+    }
+
+    Map<String, Object> payload = parseObjectMap(responsePayload);
+    if (payload == null) {
+      return;
+    }
+
+    String bulkId = asString(payload.get('bulkId'));
+    if (String.isNotBlank(bulkId)) {
+      matchIndex.bulkIds.add(bulkId);
+    }
+
+    List<Object> messages = payload.get('messages') instanceof List<Object>
+      ? (List<Object>) payload.get('messages')
+      : new List<Object>();
+    for (Object messageObj : messages) {
+      if (!(messageObj instanceof Map<String, Object>)) {
+        continue;
+      }
+      Map<String, Object> messageMap = (Map<String, Object>) messageObj;
+      String messageId = asString(messageMap.get('messageId'));
+      if (String.isNotBlank(messageId)) {
+        matchIndex.messageIds.add(messageId);
+      }
+    }
+  }
+
+  private static Boolean matchesCampaignSend(
+    EmailReportRow row,
+    CampaignSendMatchIndex matchIndex
+  ) {
+    if (row == null || matchIndex == null) {
+      return false;
+    }
+    if (
+      String.isNotBlank(row.messageId) &&
+      matchIndex.messageIds.contains(row.messageId)
+    ) {
+      return true;
+    }
+    return String.isNotBlank(row.bulkId) &&
+      matchIndex.bulkIds.contains(row.bulkId);
+  }
+
+  private static void addSubjectOptionsFromEmailLogs(
+    Map<String, SubjectOption> optionsByKey
+  ) {
+    for (Email_Log__c logRecord : [
+      SELECT Campaign_Email_Subject__c, Template_Name__c
+      FROM Email_Log__c
+      WHERE Trigger_Point__c LIKE :('%' + CAMPAIGN_EMAIL_TRIGGER_SUFFIX)
+        AND (Campaign_Email_Subject__c != null OR Template_Name__c != null)
+      ORDER BY CreatedDate DESC
+      LIMIT 1000
+    ]) {
+      addSubjectOption(optionsByKey, logRecord.Campaign_Email_Subject__c);
+      if (String.isBlank(logRecord.Campaign_Email_Subject__c)) {
+        addSubjectOption(optionsByKey, logRecord.Template_Name__c);
+      }
+    }
+  }
+
+  private static void addSubjectOption(
+    Map<String, SubjectOption> optionsByKey,
+    String subject
+  ) {
+    if (optionsByKey == null || String.isBlank(subject)) {
+      return;
+    }
+
+    String normalizedSubject = subject.trim();
+    String dedupeKey = normalizedSubject.toLowerCase();
+    if (optionsByKey.containsKey(dedupeKey)) {
+      return;
+    }
+
+    SubjectOption option = new SubjectOption();
+    option.label = normalizedSubject;
+    option.value = normalizedSubject;
+    optionsByKey.put(dedupeKey, option);
+  }
+
+  private class SubjectOptionLabelComparator implements Comparator<SubjectOption> {
+    public Integer compare(SubjectOption first, SubjectOption second) {
+      String firstLabel = first == null || first.label == null
+        ? ''
+        : first.label.toLowerCase();
+      String secondLabel = second == null || second.label == null
+        ? ''
+        : second.label.toLowerCase();
+      return firstLabel.compareTo(secondLabel);
+    }
   }
 
   @TestVisible

@@ -1,9 +1,6 @@
 @isTest
-private class TenderListingBatchTest {
+private without sharing class TenderListingBatchTest {
 
-    // ============================================================
-    // Helper: Get number of CMDT products
-    // ============================================================
     private static Integer getProductCount() {
         return [
             SELECT COUNT()
@@ -11,43 +8,30 @@ private class TenderListingBatchTest {
         ];
     }
 
-    // ============================================================
-    // Mock for Count + Listing APIs
-    // ============================================================
     private class TenderListingMock implements HttpCalloutMock {
-
         public HttpResponse respond(HttpRequest req) {
-
             HttpResponse res = new HttpResponse();
             res.setHeader('Content-Type', 'application/json');
             res.setStatusCode(200);
 
             if (req.getEndpoint().contains('tender-listing-data-count')) {
-
                 res.setBody(
                     '{"Success":true,"Message":"OK","TotalRecord":1,' +
                     '"Data":[{"count":2}],"StatusCode":200}'
                 );
-
             } else if (req.getEndpoint().contains('tender-listing-data')) {
-
                 res.setBody(buildListingResponse());
-
             } else {
-
                 res.setStatusCode(404);
                 res.setBody('{}');
             }
-
             return res;
         }
 
         private String buildListingResponse() {
-
             return '{'
                 + '"Success":true,"Message":"OK","TotalRecord":2,"StatusCode":200,'
                 + '"Data":['
-
                 + '{'
                     + '"tenderid":1001,'
                     + '"sourcetenderid":"SRC-1001",'
@@ -81,7 +65,6 @@ private class TenderListingBatchTest {
                     + '],'
                     + '"zipdocumentdownload":"http://example.com/zip1"'
                 + '},'
-
                 + '{'
                     + '"tenderid":1002,'
                     + '"sourcetenderid":"SRC-1002",'
@@ -105,114 +88,61 @@ private class TenderListingBatchTest {
                     + '"location":['
                         + '{"tenderid":1002,"country":"India","state":"MH","city":"Mumbai"}'
                     + '],'
-                    + '"documents":[],' 
+                    + '"documents":[],'
                     + '"zipdocumentdownload":null'
                 + '}'
-
                 + ']'
             + '}';
         }
     }
 
-    // ============================================================
-    // Mock for Zero Count
-    // ============================================================
     private class ZeroCountMock implements HttpCalloutMock {
-
         public HttpResponse respond(HttpRequest req) {
-
             HttpResponse res = new HttpResponse();
             res.setStatusCode(200);
             res.setHeader('Content-Type', 'application/json');
-
             res.setBody(
                 '{"Success":true,"Message":"OK","TotalRecord":0,' +
                 '"Data":[{"count":0}],"StatusCode":200}'
             );
-
             return res;
         }
     }
 
-    // ============================================================
-    // Test: New Tenders Created
-    // ============================================================
     @isTest
     static void testBatchCreatesNewTenders() {
-
         Integer productCount = getProductCount();
-
         if (productCount == 0) {
             return;
         }
 
-        Test.setMock(
-            HttpCalloutMock.class,
-            new TenderListingMock()
-        );
+        Test.setMock(HttpCalloutMock.class, new TenderListingMock());
 
         Test.startTest();
-
-        // IMPORTANT:
-        // Use total CMDT count as batch size so only ONE execute()
-        // invocation happens inside this test.
-        Database.executeBatch(
-            new TenderListingBatch(1),
-            productCount
-        );
-
+        Database.executeBatch(new TenderListingBatch(1), productCount);
         Test.stopTest();
 
         List<Tender__c> created = [
-            SELECT Id,
-                   External_Tender_Id__c,
-                   Common_Key__c,
-                   Base_Common_Key__c,
-                   Corrigendum_Info__c,
-                   MailType__c
+            SELECT Id, External_Tender_Id__c, Common_Key__c, Base_Common_Key__c,
+                   Corrigendum_Info__c, MailType__c
             FROM Tender__c
             WHERE External_Tender_Id__c IN ('1001', '1002')
         ];
 
-        System.assertEquals(
-            2,
-            created.size(),
-            'Both tenders from the mock listing response should be upserted.'
-        );
+        System.assertEquals(2, created.size(), 'Both tenders from the mock listing response should be upserted.');
 
         for (Tender__c t : created) {
-
-            System.assert(
-                t.Common_Key__c.contains('-Tender-'),
-                'New tenders should get a Tender-N common key.'
-            );
-
-            System.assertEquals(
-                1,
-                t.MailType__c,
-                'MailType should be stamped from the batch constructor.'
-            );
+            System.assert(t.Common_Key__c.contains('-Tender-'), 'New tenders should get a Tender-N common key.');
+            System.assertEquals(1, t.MailType__c, 'MailType should be stamped from the batch constructor.');
         }
 
-        List<Integration_Log__c> logs = [
-            SELECT Id, Stage__c
-            FROM Integration_Log__c
-        ];
-
-        System.assert(
-            !logs.isEmpty(),
-            'Integration logs should be written.'
-        );
+        List<Integration_Log__c> logs = [SELECT Id, Stage__c FROM Integration_Log__c];
+        System.assert(!logs.isEmpty(), 'Integration logs should be written.');
     }
 
-    // ============================================================
-    // Test: Corrigendum Skip Logic
-    // ============================================================
     @isTest
     static void testCorrigendumSkipLogic() {
-
         Integer productCount = getProductCount();
-
         if (productCount == 0) {
             return;
         }
@@ -224,28 +154,15 @@ private class TenderListingBatchTest {
             Corrigendum_Info__c = false
         );
 
-        insert existing;
+        insert as system existing;
 
-        Test.setMock(
-            HttpCalloutMock.class,
-            new TenderListingMock()
-        );
+        Test.setMock(HttpCalloutMock.class, new TenderListingMock());
 
         Test.startTest();
-
-        // IMPORTANT: use productCount, not 1
-        Database.executeBatch(
-            new TenderListingBatch(2),
-            productCount
-        );
-
+        Database.executeBatch(new TenderListingBatch(2), productCount);
         Test.stopTest();
 
-        Tender__c reQueried = [
-            SELECT Id, Common_Key__c
-            FROM Tender__c
-            WHERE Id = :existing.Id
-        ];
+        Tender__c reQueried = [SELECT Id, Common_Key__c FROM Tender__c WHERE Id = :existing.Id];
 
         System.assertEquals(
             'PreExisting-Tender-1',
@@ -253,70 +170,30 @@ private class TenderListingBatchTest {
             'Existing tender with no corrigendum should be skipped.'
         );
 
-        List<Tender__c> newOnes = [
-            SELECT Id
-            FROM Tender__c
-            WHERE External_Tender_Id__c = '1002'
-        ];
-
-        System.assertEquals(
-            1,
-            newOnes.size(),
-            'Tender 1002 should be created.'
-        );
+        List<Tender__c> newOnes = [SELECT Id FROM Tender__c WHERE External_Tender_Id__c = '1002'];
+        System.assertEquals(1, newOnes.size(), 'Tender 1002 should be created.');
     }
 
-    // ============================================================
-    // Test: Zero Count
-    // ============================================================
     @isTest
     static void testZeroCountProductIsSkippedGracefully() {
-
         Integer productCount = getProductCount();
-
         if (productCount == 0) {
             return;
         }
 
-        Test.setMock(
-            HttpCalloutMock.class,
-            new ZeroCountMock()
-        );
+        Test.setMock(HttpCalloutMock.class, new ZeroCountMock());
 
         Test.startTest();
-
-        // IMPORTANT: use productCount
-        Database.executeBatch(
-            new TenderListingBatch(1),
-            productCount
-        );
-
+        Database.executeBatch(new TenderListingBatch(1), productCount);
         Test.stopTest();
 
-        List<Tender__c> created = [
-            SELECT Id
-            FROM Tender__c
-        ];
-
-        System.assertEquals(
-            0,
-            created.size(),
-            'Zero-count product should create no tenders.'
-        );
+        List<Tender__c> created = [SELECT Id FROM Tender__c];
+        System.assertEquals(0, created.size(), 'Zero-count product should create no tenders.');
     }
 
-    // ============================================================
-    // Test: Default Constructor
-    // ============================================================
     @isTest
     static void testDefaultConstructorDoesNotThrow() {
-
         TenderListingBatch batch = new TenderListingBatch();
-
-        System.assertNotEquals(
-            null,
-            batch,
-            'Default constructor should succeed.'
-        );
+        System.assertNotEquals(null, batch, 'Default constructor should succeed.');
     }
 }

@@ -62,7 +62,7 @@ private class TenderAcceptanceControllerTest {
             IsActive = true,
             Departments__c = 'High_Mast_Department'
         );
-        insert hodUser;
+        Database.insert(hodUser,AccessLevel.SYSTEM_MODE);
 
         // --- Tender record (Name is auto-generated, not writeable) ---
         Tender__c tender = new Tender__c(

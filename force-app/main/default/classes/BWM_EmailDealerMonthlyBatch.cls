@@ -1,3 +1,8 @@
+/**
+ * @description   Batch and Schedulable for monthly dealer email sends.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_EmailDealerMonthlyBatch implements Database.Batchable<SObject>, Schedulable {
   public Database.QueryLocator start(Database.BatchableContext context) {
     return Database.getQueryLocator(
@@ -42,6 +47,11 @@ public without sharing class BWM_EmailDealerMonthlyBatch implements Database.Bat
   }
 
   public void finish(Database.BatchableContext context) {
+    System.debug(
+      LoggingLevel.INFO,
+      'BWM_EmailDealerMonthlyBatch finished. JobId=' +
+        (context == null ? 'null' : String.valueOf(context.getJobId()))
+    );
   }
 
   public void execute(SchedulableContext context) {

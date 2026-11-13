@@ -106,10 +106,180 @@ private class CampaignEmailReportServiceTest {
     Test.setMock(HttpCalloutMock.class, new EmailReportsMock());
 
     Test.startTest();
-    CampaignEmailReportService.FetchResult result = CampaignEmailReportController.fetchEmailCampaignReport();
+    CampaignEmailReportService.FetchResult result =
+      CampaignEmailReportController.fetchEmailCampaignReport(null);
     Test.stopTest();
 
     System.assertEquals(2, result.reportIds.size());
+  }
+
+  @IsTest
+  static void filterRowsByCampaignSubjectMatchesEmailLogPayload() {
+    insert new Email_Log__c(
+      Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+      Campaign_Email_Subject__c = 'Welcome Subject',
+      Status__c = 'Sent',
+      To_Email__c = 'user@example.com',
+      Response_Payload__c =
+        '{"bulkId":"bulk-1","messages":[{"messageId":"msg-1","destination":"user@example.com"}]}'
+    );
+
+    CampaignEmailReportService.EmailReportRow matchedRow = new CampaignEmailReportService.EmailReportRow();
+    matchedRow.messageId = 'msg-1';
+    matchedRow.recipient = 'user@example.com';
+
+    CampaignEmailReportService.EmailReportRow otherRow = new CampaignEmailReportService.EmailReportRow();
+    otherRow.messageId = 'msg-2';
+    otherRow.recipient = 'other@example.com';
+
+    Test.startTest();
+    List<CampaignEmailReportService.EmailReportRow> filteredRows = CampaignEmailReportService.filterRowsByCampaignSubject(
+      new List<CampaignEmailReportService.EmailReportRow>{ matchedRow, otherRow },
+      'Welcome Subject'
+    );
+    Test.stopTest();
+
+    System.assertEquals(1, filteredRows.size());
+    System.assertEquals('msg-1', filteredRows[0].messageId);
+  }
+
+  @IsTest
+  static void filterRowsByCampaignSubjectDoesNotMatchSameRecipientOtherSubject() {
+    insert new List<Email_Log__c>{
+      new Email_Log__c(
+        Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+        Campaign_Email_Subject__c = 'Subject A',
+        Status__c = 'Sent',
+        To_Email__c = 'user@example.com',
+        Response_Payload__c =
+          '{"bulkId":"bulk-a","messages":[{"messageId":"msg-a","destination":"user@example.com"}]}'
+      ),
+      new Email_Log__c(
+        Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+        Campaign_Email_Subject__c = 'Subject B',
+        Status__c = 'Sent',
+        To_Email__c = 'user@example.com',
+        Response_Payload__c =
+          '{"bulkId":"bulk-b","messages":[{"messageId":"msg-b","destination":"user@example.com"}]}'
+      )
+    };
+
+    CampaignEmailReportService.EmailReportRow subjectARow = new CampaignEmailReportService.EmailReportRow();
+    subjectARow.messageId = 'msg-a';
+    subjectARow.recipient = 'user@example.com';
+
+    CampaignEmailReportService.EmailReportRow subjectBRow = new CampaignEmailReportService.EmailReportRow();
+    subjectBRow.messageId = 'msg-b';
+    subjectBRow.recipient = 'user@example.com';
+
+    Test.startTest();
+    List<CampaignEmailReportService.EmailReportRow> filteredRows = CampaignEmailReportService.filterRowsByCampaignSubject(
+      new List<CampaignEmailReportService.EmailReportRow>{ subjectARow, subjectBRow },
+      'Subject A'
+    );
+    Test.stopTest();
+
+    System.assertEquals(1, filteredRows.size());
+    System.assertEquals('msg-a', filteredRows[0].messageId);
+  }
+
+  @IsTest
+  static void filterSafeTemplateIdsExcludesTemplatesWithConflictingSubjects() {
+    insert new List<Email_Log__c>{
+      new Email_Log__c(
+        Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+        Campaign_Email_Subject__c = 'test',
+        Template_Id__c = '205000000069951',
+        Status__c = 'Sent',
+        To_Email__c = 'one@example.com'
+      ),
+      new Email_Log__c(
+        Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+        Campaign_Email_Subject__c = 'solar_promo_may_2026',
+        Template_Id__c = '205000000069951',
+        Status__c = 'Sent',
+        To_Email__c = 'two@example.com'
+      )
+    };
+
+    Set<String> safeTemplateIds = CampaignEmailReportService.filterSafeTemplateIds(
+      'test',
+      new Set<String>{ '205000000069951' },
+      System.now().addHours(-1)
+    );
+
+    System.assertEquals(true, safeTemplateIds.isEmpty());
+  }
+
+  @IsTest
+  static void filterRowsByCampaignSubjectIncludesLegacyTemplateSends() {
+    insert new List<Email_Log__c>{
+      new Email_Log__c(
+        Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+        Campaign_Email_Subject__c = 'Welcome Subject',
+        Template_Id__c = '205000000067199',
+        Status__c = 'Sent',
+        Response_Payload__c =
+          '{"bulkId":"bulk-a","messages":[{"messageId":"msg-a","destination":"one@example.com"}]}'
+      ),
+      new Email_Log__c(
+        Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+        Template_Id__c = '205000000067199',
+        Status__c = 'Sent',
+        Response_Payload__c =
+          '{"bulkId":"bulk-b","messages":[{"messageId":"msg-b","destination":"two@example.com"}]}'
+      )
+    };
+
+    CampaignEmailReportService.EmailReportRow rowA = new CampaignEmailReportService.EmailReportRow();
+    rowA.messageId = 'msg-a';
+    rowA.recipient = 'one@example.com';
+
+    CampaignEmailReportService.EmailReportRow rowB = new CampaignEmailReportService.EmailReportRow();
+    rowB.messageId = 'msg-b';
+    rowB.recipient = 'two@example.com';
+
+    CampaignEmailReportService.EmailReportRow otherRow = new CampaignEmailReportService.EmailReportRow();
+    otherRow.messageId = 'msg-other';
+    otherRow.recipient = 'other@example.com';
+
+    List<CampaignEmailReportService.EmailReportRow> filteredRows =
+      CampaignEmailReportService.filterRowsByCampaignSubject(
+        new List<CampaignEmailReportService.EmailReportRow>{ rowA, rowB, otherRow },
+        'Welcome Subject'
+      );
+
+    Set<String> filteredIds = new Set<String>();
+    for (CampaignEmailReportService.EmailReportRow row : filteredRows) {
+      filteredIds.add(row.messageId);
+    }
+    System.assertEquals(true, filteredIds.contains('msg-a'));
+    System.assertEquals(true, filteredIds.contains('msg-b'));
+    System.assertEquals(false, filteredIds.contains('msg-other'));
+  }
+
+  @IsTest
+  static void fetchAndSaveFiltersBySelectedSubject() {
+    insert new Email_Log__c(
+      Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+      Campaign_Email_Subject__c = 'Welcome Subject',
+      Status__c = 'Sent',
+      To_Email__c = 'user@example.com',
+      Response_Payload__c =
+        '{"bulkId":"bulk-1","messages":[{"messageId":"msg-1","destination":"user@example.com"}]}'
+    );
+
+    Test.setMock(HttpCalloutMock.class, new EmailReportsMock());
+
+    Test.startTest();
+    CampaignEmailReportService.FetchResult result = CampaignEmailReportService.fetchAndSave(
+      'Welcome Subject'
+    );
+    Test.stopTest();
+
+    System.assertEquals(1, result.rows.size());
+    System.assertEquals(1, result.summaryRows.size());
+    System.assertEquals('user@example.com', result.summaryRows[0].recipient);
   }
 
   @IsTest
@@ -171,6 +341,205 @@ private class CampaignEmailReportServiceTest {
     System.assertEquals(2, results.size());
     Map<String, Object> newest = (Map<String, Object>) results[0];
     System.assertEquals('logs-only', newest.get('messageId'));
+  }
+
+  private class ThrowingCalloutMock implements HttpCalloutMock {
+    public HTTPResponse respond(HTTPRequest request) {
+      throw new CalloutException('connection failed');
+    }
+  }
+
+  @IsTest
+  static void getCampaignEmailSubjectOptionsFromLogsReturnsDistinctSubjects() {
+    insert new List<Email_Log__c>{
+      new Email_Log__c(
+        Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+        Campaign_Email_Subject__c = 'Welcome Subject',
+        Status__c = 'Sent',
+        To_Email__c = 'one@example.com'
+      ),
+      new Email_Log__c(
+        Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+        Campaign_Email_Subject__c = 'welcome subject',
+        Status__c = 'Sent',
+        To_Email__c = 'two@example.com'
+      ),
+      new Email_Log__c(
+        Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+        Template_Name__c = 'Legacy Template',
+        Status__c = 'Sent',
+        To_Email__c = 'three@example.com'
+      )
+    };
+
+    Test.startTest();
+    List<CampaignEmailReportService.SubjectOption> options =
+      CampaignEmailReportService.getCampaignEmailSubjectOptionsFromLogs();
+    List<CampaignEmailReportService.SubjectOption> controllerOptions =
+      CampaignEmailReportController.getCampaignEmailSubjectOptionsFromLogs();
+    Test.stopTest();
+
+    System.assert(options.size() >= 2, 'Expected subject options from Email Logs');
+    System.assertEquals(options.size(), controllerOptions.size());
+  }
+
+  @IsTest
+  static void getCampaignEmailSubjectOptionsFallsBackToLogs() {
+    insert new Email_Log__c(
+      Trigger_Point__c = 'Email_Lead_Campaign_Manual',
+      Campaign_Email_Subject__c = 'Fallback Subject',
+      Status__c = 'Sent',
+      To_Email__c = 'user@example.com'
+    );
+    Test.setMock(HttpCalloutMock.class, new EmailReportsErrorMock());
+
+    Test.startTest();
+    List<CampaignEmailReportService.SubjectOption> options =
+      CampaignEmailReportService.getCampaignEmailSubjectOptions();
+    List<CampaignEmailReportService.SubjectOption> controllerOptions =
+      CampaignEmailReportController.getCampaignEmailSubjectOptions();
+    Test.stopTest();
+
+    System.assert(!options.isEmpty(), 'Expected fallback subject options');
+    System.assertEquals(options.size(), controllerOptions.size());
+  }
+
+  @IsTest
+  static void fetchAndSaveSurfacesCalloutException() {
+    Test.setMock(HttpCalloutMock.class, new ThrowingCalloutMock());
+
+    Boolean threw = false;
+    Test.startTest();
+    try {
+      CampaignEmailReportService.fetchAndSave();
+    } catch (Exception ex) {
+      threw = true;
+      System.assert(
+        ex instanceof AuraHandledException,
+        'Expected AuraHandledException for callout failure'
+      );
+    }
+    Test.stopTest();
+
+    System.assert(threw, 'Expected callout failure to surface');
+    System.assertEquals(
+      1,
+      [SELECT COUNT() FROM Integration_Log__c WHERE Status__c = 'Failed']
+    );
+  }
+
+  @IsTest
+  static void helperMethodsCoverEmptyAndStatusBranches() {
+    System.assertEquals(false, CampaignEmailReportService.hasResultRows(null));
+    System.assertEquals(false, CampaignEmailReportService.hasResultRows('{'));
+    System.assertEquals(false, CampaignEmailReportService.hasResultRows('{"results":[]}'));
+    System.assertEquals(
+      true,
+      CampaignEmailReportService.hasResultRows('{"results":[{"messageId":"x"}]}')
+    );
+    System.assert(String.isNotBlank(CampaignEmailReportService.buildSentSinceParam(48)));
+
+    String merged = CampaignEmailReportService.mergeResponseBodies(
+      '{"results":[{"bulkId":"b1","to":"a@example.com","sentAt":"2026-07-16T08:00:00.000+0000"}]}',
+      '{"results":[{"bulkId":"b1","destination":"a@example.com","sentAt":"2026-07-16T08:00:00.000+0000"},{"messageId":"m2","sentAt":"2026-07-16T09:00:00.000+0000"}]}'
+    );
+    System.assert(merged.contains('m2'));
+
+    String emptyPersistBody = '{"results":[]}';
+    CampaignEmailReportService.FetchResult emptyResult =
+      CampaignEmailReportService.persistResponse(emptyPersistBody);
+    System.assertEquals(0, emptyResult.rows.size());
+    System.assert(!emptyResult.reportIds.isEmpty());
+
+    CampaignEmailReportService.EmailReportRow opened = new CampaignEmailReportService.EmailReportRow();
+    opened.recipient = 'open@example.com';
+    opened.status = 'OPENED';
+    CampaignEmailReportService.EmailReportRow failed = new CampaignEmailReportService.EmailReportRow();
+    failed.recipient = 'fail@example.com';
+    failed.status = 'UNDELIVERABLE';
+    failed.errorName = 'HARD_BOUNCE';
+    CampaignEmailReportService.EmailReportRow pending = new CampaignEmailReportService.EmailReportRow();
+    pending.recipient = null;
+    pending.status = 'PENDING';
+    CampaignEmailReportService.EmailReportRow delivered = new CampaignEmailReportService.EmailReportRow();
+    delivered.recipient = 'open@example.com';
+    delivered.status = 'DELIVERED_TO_HANDSET';
+
+    List<CampaignEmailReportService.EmailSummaryRow> summaries =
+      CampaignEmailReportService.buildSummaryRows(
+        new List<CampaignEmailReportService.EmailReportRow>{
+          opened,
+          failed,
+          pending,
+          delivered,
+          null
+        }
+      );
+    System.assert(summaries.size() >= 3);
+    CampaignEmailReportService.EmailSummaryRow totals =
+      CampaignEmailReportService.buildSummary(
+        new List<CampaignEmailReportService.EmailReportRow>{ opened, failed, pending }
+      );
+    System.assert(totals.total >= 3);
+
+    System.assertEquals(
+      0,
+      CampaignEmailReportService.filterRowsByCampaignSubject(null, 'x').size()
+    );
+    System.assertEquals(
+      1,
+      CampaignEmailReportService.filterRowsByCampaignSubject(
+        new List<CampaignEmailReportService.EmailReportRow>{ opened },
+        '  '
+      )
+        .size()
+    );
+    System.assertEquals(
+      0,
+      CampaignEmailReportService.filterRowsByCampaignSubject(
+        new List<CampaignEmailReportService.EmailReportRow>{ opened },
+        'Missing Subject'
+      )
+        .size()
+    );
+    System.assertEquals(
+      0,
+      CampaignEmailReportService.resolveTemplateIdsForSubject('').size()
+    );
+    System.assertEquals(
+      0,
+      CampaignEmailReportService.filterSafeTemplateIds(
+        '',
+        new Set<String>(),
+        System.now()
+      )
+        .size()
+    );
+
+    CampaignEmailReportService.EmailReportRow parsed =
+      CampaignEmailReportService.parseEmailReportRow(
+        new Map<String, Object>{
+          'messageId' => 'mid-1',
+          'destination' => 'dest@example.com',
+          'messageCount' => 2,
+          'attemptCount' => 3L,
+          'timeToFirstAttempt' => 1.5,
+          'status' => new Map<String, Object>{
+            'name' => 'CLICKED',
+            'description' => 'Clicked'
+          },
+          'price' => new Map<String, Object>{
+            'pricePerMessage' => 2,
+            'currency' => 'INR'
+          },
+          'error' => new Map<String, Object>{
+            'name' => 'OK',
+            'description' => 'ok'
+          }
+        }
+      );
+    System.assertEquals('dest@example.com', parsed.recipient);
+    System.assertEquals('CLICKED', parsed.status);
   }
 
   @IsTest

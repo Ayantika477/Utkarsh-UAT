@@ -308,6 +308,10 @@
                 <li><apex:outputText value="{!dynamicPaymentTerms}" escape="false" /></li>
                 <li><b>Loading Charges:</b> Loading charges of INR 300 per MT shall be applicable extra and shall be charged over and above the quoted prices.</li>
                 <li><b>Material Lifting &amp; Storage Charges:</b> The Buyer shall arrange lifting/dispatch of the inspected material within 3 days from the date of inspection acceptance or notification of material readiness, whichever is earlier. In case of delay in lifting the material, full balance payment shall remain due as per the agreed payment terms, and the Supplier reserves the right to levy storage charges at the rate of 5% of the total contract value for every week of delay until the material is dispatched.</li>
+                <li>Final BOM, tonnage, and drawings shall be mutually finalized and agreed upon prior to order confirmation.</li>
+                <li>Billing shall be considered on the basis of the actual finished weight. Any alternate billing basis, if applicable, shall be subject to corresponding price revision.</li>
+                <li>The final BOM with confirmed quantities and approved drawings shall be provided and frozen at the time of order finalization.</li>
+                <li>The above-mentioned prices are exclusive of taxes. GST @ 18% shall be charged extra.</li>
             </ol>
         </li>
         <li><b>Scope of Work:</b> Manufacturing, Galvanizing and Supply of Solar -MMS</li>

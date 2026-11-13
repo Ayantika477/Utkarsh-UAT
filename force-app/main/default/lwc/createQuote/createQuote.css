@@ -782,7 +782,9 @@ lightning-combobox {
     letter-spacing: 0.5px;
     text-transform: uppercase;
     border-right: 1px solid #dddbda;
-    white-space: nowrap;
+     white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
     background-color: #ffffff;
 }
 
@@ -798,7 +800,9 @@ lightning-combobox {
     font-size: 13px;
     color: #3e3e3c;
     border-right: 1px solid #dddbda;
-    white-space: nowrap;
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
     min-height: 36px;
 }
 
@@ -1478,5 +1482,310 @@ lightning-combobox {
     .cell-status lightning-helptext .slds-popover {
         max-width: 220px;
         white-space: normal;
+    }
+}
+/* ════════════════════════════════════════════════════════════════════════
+   MOBILE — SOLAR CONFIG HOST MODAL. Deepanjan (22nd August 2026)
+
+   Symptom: on the phone the Solar Structure config modal came up UNDER the
+   department page — the blue "… - Department" bar and the section list sat
+   on top of it.
+
+   Two causes, both in this parent component, so the child's own stylesheet
+   (solarStructureConfig.css) could never reach them across the shadow
+   boundary:
+
+   1. STACKING — createQuote wraps <c-solar-structure-config> in its own
+      SLDS modal shell, and stock .slds-modal is only z-index 9001. The
+      mobile .template-sidebar rule above is z-index 99999 !important, so
+      the sidebar wins and paints over the whole nested modal. The child's
+      9999999 cannot help: it is trapped inside the wrapper's stacking
+      context.
+
+   2. TRANSFORM — SLDS puts transform: translate(0,0) on
+      .slds-modal__container. Any transform other than none makes that box
+      the containing block for fixed descendants, so the child's
+      position: fixed / inset: 0 resolved against the 95%-wide wrapper box
+      instead of the viewport — full-screen, but in the wrong place.
+
+   Scoped to .solar-host-modal, a marker class added to the solar wrapper
+   <section> only. Steel Pipe, Export Steel Pipe, PEB and QFR modals are
+   NOT touched. Everything is inside @media (max-width: 600px); desktop and
+   tablet are unaffected. Additions only — nothing above removed.
+   ════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 600px) {
+
+    /* 1. Lift the wrapper above .template-sidebar (99999) and the page
+          masks (9999 / 10000), and make it the full screen itself. */
+    .solar-host-modal {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 9999997 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    .steel-host-modal {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 9999997 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    /* 2. Kill the SLDS entrance transform so the child's position: fixed
+          resolves against the viewport again. Also drop the inline
+          width/max-width: 95% and let the wrapper fill the screen. */
+    .solar-host-modal .slds-modal__container {
+        transform: none !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
+    .steel-host-modal .slds-modal__container{
+        transform: none !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
+
+    /* The child renders its own header, so the wrapper's duplicate
+       "Solar Structure Configuration" bar is hidden on the phone. */
+    .solar-host-modal .slds-modal__header {
+        display: none !important;
+    }
+    .steel-host-modal .slds-modal__header  {
+        display: none !important;
+    }
+
+    /* Beats the inline min-height: 50vh; the child fills this box. */
+    .solar-host-modal .slds-modal__content {
+        flex: 1 1 0% !important;
+        min-height: 0 !important;
+        height: auto !important;
+        max-height: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: hidden !important;   /* the child scrolls internally */
+        border-radius: 0 !important;
+    }
+
+    .steel-host-modal .slds-modal__content {
+        flex: 1 1 0% !important;
+        min-height: 0 !important;
+        height: auto !important;
+        max-height: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: hidden !important;   /* the child scrolls internally */
+        border-radius: 0 !important;
+    }
+}
+/* ════════════════════════════════════════════════════════════════════════
+   MOBILE — PEB HOST MODALS. Deepanjan (27th August 2026)
+
+   Every declaration below was applied live in the browser console at
+   360px and confirmed working before being written here.
+
+   Measured state of the QFR wrapper before the fix:
+
+       SECTION   w 360px  pos fixed     z 9001
+       CONTAINER w 296px  pos relative  transform matrix(1,0,0,1,0,0)
+
+   1. z-index 9001 lost to the mobile .template-sidebar rule above
+      (99999 !important) — the "PEB - Department" bar painted over the
+      modal. Lifted to 9999997.
+
+   2. The container sat at 296px inside a 360px section: 64px lost, which
+      cut the SPECIFICATION column off on the right.
+
+   3. transform was matrix(1,0,0,1,0,0), not none. SLDS puts its entrance
+      transform on .slds-modal__container, and any transform other than
+      none makes that box the containing block for fixed descendants.
+
+   4. HEIGHT: SLDS centres the container inside a flex .slds-modal, so the
+      container kept sizing to its content and the modal floated with gaps
+      above and below. display: block on the section is what stops that.
+
+      height is given as a cascade — 100% then 100vh then 100dvh — and the
+      viewport units are what matter. On the Salesforce mobile app the
+      section does NOT get the full screen: the app's record-page
+      container becomes its containing block, so height: 100% inherited
+      that shorter box and the page showed through below the modal.
+      Viewport units ignore the ancestor. This is exactly what the solar
+      child modal already does, which is why solar was correct on the
+      phone while this was not. 100% is kept first as a fallback.
+
+   Header is KEPT: unlike the solar child, these two children are plain
+   <lightning-card>s, so this wrapper header carries the only close
+   button. It gets the solar blue because .slds-modal__close uses an
+   inverse (white) icon, invisible on the default white header once
+   pulled inside it.
+
+   Scoped to .peb-host-modal — a marker class on those two <section>s
+   only. Inside @media (max-width: 600px), so desktop is untouched.
+   Append-only; nothing above this line is changed.
+   ════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 600px) {
+
+    .peb-host-modal {
+        display: block !important;   /* SLDS flex-centres the container */
+        position: fixed !important;
+        inset: 0 !important;
+        height: 100vh !important;
+        height: 100dvh !important;   /* viewport, not the ancestor box */
+        z-index: 9999997 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .peb-host-modal .slds-modal__container {
+        transform: none !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        height: 100% !important;
+        height: 100vh !important;
+        height: 100dvh !important;   /* wins where supported */
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
+
+    .peb-host-modal .slds-modal__header {
+        position: relative !important;
+        flex-shrink: 0 !important;
+        border-bottom: 0 !important;
+        background: linear-gradient(135deg, #0b5cab, #1589ee) !important;
+        padding: 0.85rem 2.75rem 0.85rem 1rem !important;
+    }
+
+    .peb-host-modal .slds-modal__header h2 {
+        color: #ffffff !important;
+        font-size: 1rem !important;
+        line-height: 1.3 !important;
+        text-align: left !important;
+    }
+
+    .peb-host-modal .slds-modal__close {
+        position: absolute !important;
+        top: 50% !important;
+        right: 0.5rem !important;
+        bottom: auto !important;
+        left: auto !important;
+        transform: translateY(-50%) !important;
+        margin: 0 !important;
+    }
+
+    .peb-host-modal .slds-modal__content {
+        flex: 1 1 0% !important;
+        min-height: 0 !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow-y: auto !important;
+        padding: 0.5rem 0.4rem 1rem !important;
+    }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   MOBILE — QUOTE CLONE MODAL. Deepanjan (7th September 2026)
+
+   Same recipe as the PEB / Solar host modals above, scoped to the
+   .clone-quote-modal marker class so nothing else is touched:
+   1. z-index 9999997 so the modal is not painted over by the mobile
+      .template-sidebar (99999) and the page masks.
+   2. transform: none on the container (SLDS entrance transform otherwise
+      breaks position: fixed for descendants) and a full-screen sheet.
+   3. Header and footer stay put; only the body scrolls, so Create/Cancel are
+      always reachable with the keyboard open.
+   Desktop keeps stock slds-modal_small - everything is inside the media query
+   except the result-list cap, which is a plain scroll guard on both.
+   ════════════════════════════════════════════════════════════════════════ */
+.clone-quote-results .slds-listbox__option { cursor: pointer; }
+.clone-quote-entity-icon lightning-icon { --sds-c-icon-color-background: #fcb95b; }
+.clone-quote-meta { margin-top: 0.25rem; }
+/* The dropdown must not be clipped by the modal body. */
+.clone-quote-body { overflow: visible; }
+
+@media (max-width: 600px) {
+    .clone-quote-modal {
+        position: fixed !important;
+        inset: 0 !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        z-index: 9999997 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    .clone-quote-modal .slds-modal__container {
+        transform: none !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
+    .clone-quote-modal .slds-modal__header {
+        flex: 0 0 auto !important;
+        border-radius: 0 !important;
+    }
+    .clone-quote-modal .clone-quote-body {
+        flex: 1 1 0% !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 0 !important;
+    }
+    .clone-quote-modal .clone-quote-footer {
+        flex: 0 0 auto !important;
+        border-radius: 0 !important;
+        padding-bottom: calc(0.75rem + env(safe-area-inset-bottom)) !important;
+    }
+    .clone-quote-modal .clone-quote-footer lightning-button {
+        display: inline-block;
+        min-width: 45%;
+    }
+    .clone-quote-results { position: static; max-height: none; box-shadow: none; }
+    .clone-quote-modal .clone-quote-body { overflow-y: auto !important; }
+
+    /* The button sits under the green "finalized" banner; full width on the phone. */
+    .clone-quote-action lightning-button { display: block; width: 100%; }
+}
+
+/* Approver column in the Quotes tab. Deepanjan (18th September 2026) */
+.cell-approver {
+    flex: 1.2;
+    min-width: 110px;
+}
+@media (max-width: 768px) {
+    .cell-approver { min-width: 90px; }
+}
+@media (max-width: 600px) {
+    .cell-approver {
+        min-width: 80px;
+        white-space: nowrap;
+        align-self: center;
+        display: flex;
+        align-items: center;
     }
 }

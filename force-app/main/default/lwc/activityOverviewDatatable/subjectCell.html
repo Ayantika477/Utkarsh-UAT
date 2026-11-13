@@ -1,0 +1,14 @@
+<template>
+    <span style={typeAttributes.cellStyle}>
+        <template lwc:if={typeAttributes.overdue}>
+            <lightning-icon
+                icon-name="utility:warning"
+                variant="error"
+                size="xx-small"
+                class="slds-m-right_xx-small"
+                alternative-text="Overdue">
+            </lightning-icon>
+        </template>
+        <a href={typeAttributes.url} target="_self" style={typeAttributes.cellStyle}>{value}</a>
+    </span>
+</template>

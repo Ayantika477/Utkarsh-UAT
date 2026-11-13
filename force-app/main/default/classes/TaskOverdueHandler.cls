@@ -54,7 +54,6 @@ public class TaskOverdueHandler {
             return;
         }
 
-        // Fetch Opportunities
         Map<Id, Opportunity> oppMap = new Map<Id, Opportunity>();
         if (!overdueOppIds.isEmpty()) {
             for (Opportunity o : [
@@ -69,7 +68,6 @@ public class TaskOverdueHandler {
             }
         }
 
-        // Fetch Leads
         Map<Id, Lead> leadMap = new Map<Id, Lead>();
         if (!overdueLeadIds.isEmpty()) {
             for (Lead l : [
@@ -84,12 +82,10 @@ public class TaskOverdueHandler {
             }
         }
 
-        // Collect owner Ids
         Set<Id> ownerIds = new Set<Id>();
         for (Opportunity o : oppMap.values()) ownerIds.add(o.OwnerId);
         for (Lead l      : leadMap.values())  ownerIds.add(l.OwnerId);
 
-        // Fetch owner emails
         Map<Id, String> ownerEmailMap = new Map<Id, String>();
         for (User u : [
             SELECT Id, Email
@@ -146,7 +142,10 @@ public class TaskOverdueHandler {
                 String ownerEmail = ownerEmailMap.get(ownerId);
 
                 Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
-                mail.setToAddresses(new List<String>{ ownerEmail });
+                // mail.setToAddresses(new List<String>{ ownerEmail });
+                // ownerEmailMap only holds active Users, keyed by User Id - send to the Id
+                // so the email counts as internal.
+                mail.setTargetObjectId(ownerId);
                 mail.setSaveAsActivity(false);
                 mail.setSubject('Overdue Task Alert - ' + t.Subject);
 
@@ -162,16 +161,58 @@ public class TaskOverdueHandler {
                 mail.setPlainTextBody(body);
                 emails.add(mail);
                 System.debug('Queued immediate email to owner: ' + ownerEmail);
+            } else if (ownerId != null) {
+                // Owner is inactive, has no email, or is a Queue.
+                System.debug(
+                    'TaskOverdueHandler: no active User Id for owner ' + ownerId +
+                    ' on Task ' + t.Id + ' - email address fallback is disabled, email not sent.'
+                );
             }
         }
 
         if (!emails.isEmpty()) {
-            Messaging.sendEmail(emails);
-            System.debug('Sent ' + emails.size() + ' immediate overdue alert(s).');
+            try {
+                Messaging.sendEmail(emails, false);
+                System.debug('Sent ' + emails.size() + ' immediate overdue alert(s).');
+            } catch (Exception ex) {
+                String message = ex.getMessage() == null ? '' : ex.getMessage().toUpperCase();
+                if (
+                    message.contains('SINGLE_EMAIL_LIMIT_EXCEEDED') ||
+                    message.contains('EMAIL LIMIT EXCEEDED')
+                ) {
+                    System.debug(
+                        LoggingLevel.WARN,
+                        'Task overdue immediate email skipped due to email limit: ' +
+                        ex.getMessage()
+                    );
+                } else {
+                    System.debug(
+                        LoggingLevel.ERROR,
+                        'Task overdue immediate email failed: ' +
+                        ex.getMessage() +
+                        '\nStack Trace: ' +
+                        ex.getStackTraceString()
+                    );
+                }
+            }
         }
 
-        if (!oppsToUpdate.isEmpty())  update oppsToUpdate;
-        if (!leadsToUpdate.isEmpty()) update leadsToUpdate;
+        try {
+            if (!oppsToUpdate.isEmpty()) {
+                Database.update(oppsToUpdate, false);
+            }
+            if (!leadsToUpdate.isEmpty()) {
+                Database.update(leadsToUpdate, false);
+            }
+        } catch (Exception ex) {
+            System.debug(
+                LoggingLevel.ERROR,
+                'Task overdue stamp update failed: ' +
+                ex.getMessage() +
+                '\nStack Trace: ' +
+                ex.getStackTraceString()
+            );
+        }
 
         System.debug('===== TaskOverdueHandler END =====');
     }

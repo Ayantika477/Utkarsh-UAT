@@ -1,0 +1,13 @@
+<apex:page standardController="Lead" recordSetVar="leads" showHeader="false" sidebar="false" standardStylesheets="false">
+    <apex:includeLightning />
+    <div id="leadNewLeadFlowLex"></div>
+    <script>
+        $Lightning.use("c:leadNewLeadFlowOutApp", function () {
+            $Lightning.createComponent(
+                "c:leadNewLeadFlowWrapper",
+                {},
+                "leadNewLeadFlowLex"
+            );
+        });
+    </script>
+</apex:page>

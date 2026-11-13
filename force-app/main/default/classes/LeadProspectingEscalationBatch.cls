@@ -364,9 +364,26 @@ implements Database.Batchable<SObject>{
 
             );
  
-            Messaging.SingleEmailMessage mail =
+            // Messaging.SingleEmailMessage mail =
+            //
+            //     LeadProspectingEscalationEmailService.buildEmail(
+            //
+            //         dept24Map.get(dept),
+            //
+            //         recipients,
+            //
+            //         24,
+            //
+            //         dept
+            //
+            //     );
+            //
+            // if(mail != null){
+            //
+            //     emailMessages.add(mail);
+            List<Messaging.SingleEmailMessage> mails =
 
-                LeadProspectingEscalationEmailService.buildEmail(
+                LeadProspectingEscalationEmailService.buildEmails(
 
                     dept24Map.get(dept),
 
@@ -377,11 +394,11 @@ implements Database.Batchable<SObject>{
                     dept
 
                 );
- 
-            if(mail != null){
 
-                emailMessages.add(mail);
- 
+            if(!mails.isEmpty()){
+
+                emailMessages.addAll(mails);
+
                 System.debug(
 
                     '24 Hour Email Added for Department: ' +
@@ -446,9 +463,26 @@ implements Database.Batchable<SObject>{
 
             );
  
-            Messaging.SingleEmailMessage mail =
+            // Messaging.SingleEmailMessage mail =
+            //
+            //     LeadProspectingEscalationEmailService.buildEmail(
+            //
+            //         dept48Map.get(dept),
+            //
+            //         recipients,
+            //
+            //         48,
+            //
+            //         dept
+            //
+            //     );
+            //
+            // if(mail != null){
+            //
+            //     emailMessages.add(mail);
+            List<Messaging.SingleEmailMessage> mails =
 
-                LeadProspectingEscalationEmailService.buildEmail(
+                LeadProspectingEscalationEmailService.buildEmails(
 
                     dept48Map.get(dept),
 
@@ -459,11 +493,11 @@ implements Database.Batchable<SObject>{
                     dept
 
                 );
- 
-            if(mail != null){
 
-                emailMessages.add(mail);
- 
+            if(!mails.isEmpty()){
+
+                emailMessages.addAll(mails);
+
                 System.debug(
 
                     '48 Hour Email Added for Department: ' +
@@ -502,9 +536,26 @@ implements Database.Batchable<SObject>{
 
             );
  
-            Messaging.SingleEmailMessage mail =
+            // Messaging.SingleEmailMessage mail =
+            //
+            //     LeadProspectingEscalationEmailService.buildEmail(
+            //
+            //         leads72,
+            //
+            //         recipients,
+            //
+            //         72,
+            //
+            //         'All Departments'
+            //
+            //     );
+            //
+            // if(mail != null){
+            //
+            //     emailMessages.add(mail);
+            List<Messaging.SingleEmailMessage> mails =
 
-                LeadProspectingEscalationEmailService.buildEmail(
+                LeadProspectingEscalationEmailService.buildEmails(
 
                     leads72,
 
@@ -515,11 +566,11 @@ implements Database.Batchable<SObject>{
                     'All Departments'
 
                 );
- 
-            if(mail != null){
 
-                emailMessages.add(mail);
- 
+            if(!mails.isEmpty()){
+
+                emailMessages.addAll(mails);
+
                 System.debug(
 
                     '72 Hour Email Added'

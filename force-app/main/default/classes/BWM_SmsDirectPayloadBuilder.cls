@@ -1,4 +1,15 @@
+/**
+ * @description   Builds direct SMS API payloads for campaign and messaging sends.
+ *                Owner contact phone slots use User Mobile → Phone only; blank stays
+ *                blank (never corporate / WhatsApp_From / NA).
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_SmsDirectPayloadBuilder {
+  private static final Pattern SMS_PLACEHOLDER_PATTERN = Pattern.compile(
+    '\\{#([^#]+)#\\}'
+  );
+
   @TestVisible
   private static Map<String, Map<String, Object>> templateByName;
 
@@ -47,20 +58,45 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
       );
     }
 
-    String journeyName = BWM_JourneyDefinitionService.findJourneyNameBySmsTemplateName(
-      normalizedTemplateName
-    );
     BWM_Template_Mapping__mdt mapping =
-      BWM_JourneyDefinitionService.findMappingBySmsTemplateName(
+      BWM_JourneyDefinitionService.findMappingByChannelTemplate(
+        'SMS',
+        normalizedTemplateName,
+        record
+      );
+    Map<String, Object> autoMappings = BWM_MessagePayloadBuilder.smsMappingsForCampaign(
+      mapping,
+      record
+    );
+    Map<String, Object> variableMappings;
+    if (autoMappings.isEmpty()) {
+      String journeyName = BWM_JourneyDefinitionService.findJourneyNameBySmsTemplateName(
         normalizedTemplateName
       );
-    Map<String, Object> variableMappings = resolveVariableMappings(
-      settings,
-      record,
-      mapping,
-      journeyName,
-      normalizedTemplateName
-    );
+      Map<String, Object> journeyMappings = resolveJourneyVariableMappings(
+        settings,
+        record,
+        mapping,
+        journeyName
+      );
+      variableMappings = finalizeVariableMappings(
+        settings,
+        record,
+        templateMap,
+        journeyMappings
+      );
+    } else {
+      variableMappings = new Map<String, Object>();
+      for (String key : autoMappings.keySet()) {
+        variableMappings.put(
+          key,
+          normalizeSmsVariableValue(
+            autoMappings.get(key) == null ? '' : String.valueOf(autoMappings.get(key)),
+            settings
+          )
+        );
+      }
+    }
 
     String senderId = String.isNotBlank(settings == null ? null : settings.SMS_From__c)
       ? settings.SMS_From__c.trim()
@@ -77,28 +113,82 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
           'peid' => resolvePeid(settings),
           'chainvalue' => resolveChainValue(settings)
         },
-        'params' => toVarParams(variableMappings)
+        'params' => toVarParams(variableMappings, extractPlaceholderTypes(templateMap))
       }
     };
 
-    return JSON.serialize(payload);
+    return BWM_JourneyDefinitionService.applyScheduledDateTime(
+      JSON.serialize(payload),
+      BWM_CampaignScheduleContext.scheduledDateTime
+    );
   }
 
   private static Map<String, Object> toVarParams(
-    Map<String, Object> variableMappings
+    Map<String, Object> variableMappings,
+    List<String> placeholderTypes
   ) {
     Map<String, Object> params = new Map<String, Object>();
     if (variableMappings == null || variableMappings.isEmpty()) {
       return params;
     }
 
-    for (String key : variableMappings.keySet()) {
-      String paramKey = String.isNotBlank(key) && key.startsWith('var')
-        ? key
-        : 'var' + key;
-      params.put(paramKey, variableMappings.get(key));
+    Map<String, Integer> typeOccurrence = new Map<String, Integer>();
+    Integer placeholderCount = placeholderTypes == null ? 0 : placeholderTypes.size();
+
+    for (String mappingKey : variableMappings.keySet()) {
+      Object value = variableMappings.get(mappingKey);
+      if (value == null) {
+        continue;
+      }
+
+      String paramKey = String.isNotBlank(mappingKey) && mappingKey.startsWith('var')
+        ? mappingKey
+        : 'var' + mappingKey;
+      params.put(paramKey, value);
+
+      Integer placeholderIndex = parsePlaceholderIndex(mappingKey);
+      if (
+        placeholderIndex == null ||
+        placeholderIndex < 0 ||
+        placeholderIndex >= placeholderCount
+      ) {
+        continue;
+      }
+
+      String placeholderType = placeholderTypes[placeholderIndex];
+      if (String.isBlank(placeholderType)) {
+        continue;
+      }
+
+      Integer occurrence = typeOccurrence.containsKey(placeholderType)
+        ? typeOccurrence.get(placeholderType) + 1
+        : 1;
+      typeOccurrence.put(placeholderType, occurrence);
+
+      String typeKey = occurrence == 1
+        ? placeholderType
+        : placeholderType + String.valueOf(occurrence);
+      params.put(typeKey, value);
     }
+
     return params;
+  }
+
+  private static Integer parsePlaceholderIndex(String mappingKey) {
+    if (String.isBlank(mappingKey)) {
+      return null;
+    }
+
+    String normalizedKey = mappingKey.trim();
+    if (normalizedKey.startsWith('var')) {
+      normalizedKey = normalizedKey.substring(3);
+    }
+
+    if (!Pattern.matches('^\\d+$', normalizedKey)) {
+      return null;
+    }
+
+    return Integer.valueOf(normalizedKey) - 1;
   }
 
   private static String resolvePeid(BWM_Messaging_Settings__mdt settings) {
@@ -113,40 +203,182 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
   private static final String DEFAULT_SMS_CHAIN_VALUE =
     '1701159714233362956,140200000077';
 
-  private static Map<String, Object> resolveVariableMappings(
+  private static Map<String, Object> resolveJourneyVariableMappings(
     BWM_Messaging_Settings__mdt settings,
     SObject record,
     BWM_Template_Mapping__mdt mapping,
-    String journeyName,
-    String templateName
+    String journeyName
   ) {
-    if (String.isNotBlank(journeyName)) {
-      Map<String, Object> templateMappings =
-        BWM_JourneyDefinitionService.getSmsVariableMappingsTemplate(journeyName);
-      if (!templateMappings.isEmpty()) {
-        Map<String, Object> resolvedMappings = (Map<String, Object>) BWM_JourneyPayloadResolver.resolveDataPayload(
-          record,
-          templateMappings,
-          mapping
-        );
-        Map<String, Object> variableMappings = new Map<String, Object>();
-        for (String key : resolvedMappings.keySet()) {
-          Object rawValue = resolvedMappings.get(key);
-          String value = rawValue == null ? '' : String.valueOf(rawValue).trim();
-          if (String.isNotBlank(value)) {
-            variableMappings.put(key, value);
-          }
-        }
-        if (!variableMappings.isEmpty()) {
-          return variableMappings;
-        }
-      }
+    Map<String, Object> variableMappings = new Map<String, Object>();
+    if (String.isBlank(journeyName)) {
+      return variableMappings;
     }
 
-    Map<String, Object> templateMap = templateByName == null
-      ? null
-      : templateByName.get(normalizeName(templateName));
-    return buildVariableMappingsFromTemplateText(settings, record, templateMap);
+    Map<String, Object> templateMappings =
+      BWM_JourneyDefinitionService.getSmsVariableMappingsTemplate(journeyName);
+    if (templateMappings.isEmpty()) {
+      return variableMappings;
+    }
+
+    Map<String, Object> resolvedMappings = (Map<String, Object>) BWM_JourneyPayloadResolver.resolveDataPayload(
+      record,
+      templateMappings,
+      mapping
+    );
+    for (String key : resolvedMappings.keySet()) {
+      Object rawValue = resolvedMappings.get(key);
+      variableMappings.put(
+        key,
+        rawValue == null ? '' : String.valueOf(rawValue).trim()
+      );
+    }
+    return variableMappings;
+  }
+
+  private static Map<String, Object> finalizeVariableMappings(
+    BWM_Messaging_Settings__mdt settings,
+    SObject record,
+    Map<String, Object> templateMap,
+    Map<String, Object> journeyMappings
+  ) {
+    Map<String, Object> fallbackMappings = buildVariableMappingsFromTemplateText(
+      settings,
+      record,
+      templateMap
+    );
+    List<String> placeholderTypes = extractPlaceholderTypes(templateMap);
+    if (placeholderTypes.isEmpty()) {
+      return normalizeVariableMappingValues(
+        settings,
+        mergeVariableMappings(journeyMappings, fallbackMappings)
+      );
+    }
+
+    String templateText = readTemplateText(templateMap);
+    Map<String, Object> finalizedMappings = new Map<String, Object>();
+    for (Integer index = 0; index < placeholderTypes.size(); index++) {
+      String key = String.valueOf(index + 1);
+      String value = readMappingValue(journeyMappings, key);
+      if (String.isBlank(value)) {
+        value = readMappingValue(fallbackMappings, key);
+      }
+      Boolean phoneSlot = isOwnerPhonePlaceholderSlot(
+        placeholderTypes[index],
+        templateText,
+        index
+      );
+      if (phoneSlot) {
+        value = BWM_FieldValueResolver.resolveSmsOwnerPhoneSlot(record, value);
+      }
+      value = normalizeSmsVariableValue(value, settings);
+      finalizedMappings.put(key, valueOrEmptySlot(value, phoneSlot));
+    }
+    return finalizedMappings;
+  }
+
+  private static Map<String, Object> mergeVariableMappings(
+    Map<String, Object> primaryMappings,
+    Map<String, Object> fallbackMappings
+  ) {
+    Map<String, Object> mergedMappings = new Map<String, Object>();
+    if (fallbackMappings != null) {
+      mergedMappings.putAll(fallbackMappings);
+    }
+    if (primaryMappings == null) {
+      return mergedMappings;
+    }
+
+    for (String key : primaryMappings.keySet()) {
+      String primaryValue = readMappingValue(primaryMappings, key);
+      if (String.isNotBlank(primaryValue)) {
+        mergedMappings.put(key, primaryValue);
+        continue;
+      }
+      // Intentional blank from journey (e.g. Owner.Phone empty) must clear any
+      // digit fallback — never keep corporate / WhatsApp_From in that slot.
+      String fallbackValue = readMappingValue(mergedMappings, key);
+      if (String.isBlank(fallbackValue) || looksLikePhoneDigits(fallbackValue)) {
+        mergedMappings.put(key, '');
+      }
+    }
+    return mergedMappings;
+  }
+
+  private static Map<String, Object> normalizeVariableMappingValues(
+    BWM_Messaging_Settings__mdt settings,
+    Map<String, Object> variableMappings
+  ) {
+    Map<String, Object> normalizedMappings = new Map<String, Object>();
+    if (variableMappings == null) {
+      return normalizedMappings;
+    }
+
+    for (String key : variableMappings.keySet()) {
+      String rawValue = readMappingValue(variableMappings, key);
+      String value = normalizeSmsVariableValue(rawValue, settings);
+      // Preserve intentional blanks (owner phone empty). Do not coerce digit
+      // slots that were cleared from corporate fallback back into NA.
+      if (String.isBlank(value)) {
+        normalizedMappings.put(key, ' ');
+      } else {
+        normalizedMappings.put(key, value);
+      }
+    }
+    return normalizedMappings;
+  }
+
+  private static String readMappingValue(
+    Map<String, Object> variableMappings,
+    String key
+  ) {
+    if (variableMappings == null || !variableMappings.containsKey(key)) {
+      return '';
+    }
+    Object rawValue = variableMappings.get(key);
+    return rawValue == null ? '' : String.valueOf(rawValue).trim();
+  }
+
+  private static String normalizeSmsVariableValue(
+    String value,
+    BWM_Messaging_Settings__mdt settings
+  ) {
+    if (String.isBlank(value)) {
+      return value;
+    }
+
+    String trimmed = value.trim();
+    String digitsOnly = trimmed.replaceAll('[^0-9]', '');
+    if (digitsOnly.length() < 10) {
+      return trimmed;
+    }
+
+    String formattedPhone = formatSmsPhoneValue(trimmed, settings);
+    if (String.isBlank(formattedPhone)) {
+      return toLocalMobileDigits(digitsOnly, settings);
+    }
+    return toLocalMobileDigits(formattedPhone, settings);
+  }
+
+  private static String toLocalMobileDigits(
+    String digits,
+    BWM_Messaging_Settings__mdt settings
+  ) {
+    if (String.isBlank(digits)) {
+      return digits;
+    }
+
+    String countryCode = String.isBlank(
+        settings == null ? null : settings.Default_Country_Code__c
+      )
+      ? '91'
+      : settings.Default_Country_Code__c.replaceAll('[^0-9]', '');
+    if (digits.startsWith(countryCode) && digits.length() == countryCode.length() + 10) {
+      return digits.substring(countryCode.length());
+    }
+    if (digits.length() == 10) {
+      return digits;
+    }
+    return digits;
   }
 
   private static void ensureTemplateCacheLoaded(
@@ -182,6 +414,7 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
       return variableMappings;
     }
 
+    String templateText = readTemplateText(templateMap);
     List<String> values = buildVariableValues(
       settings,
       record,
@@ -190,13 +423,41 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
     );
     for (Integer index = 0; index < placeholderTypes.size(); index++) {
       String value = index < values.size() ? values[index] : '';
+      Boolean phoneSlot = isOwnerPhonePlaceholderSlot(
+        placeholderTypes[index],
+        templateText,
+        index
+      );
       variableMappings.put(
         String.valueOf(index + 1),
-        String.isNotBlank(value) ? value.trim() : 'NA'
+        valueOrEmptySlot(value, phoneSlot)
       );
     }
 
     return variableMappings;
+  }
+
+  /**
+   * @description Phone slots use a space when empty so the handset stays empty.
+   *              Other empty slots use NA.
+   */
+  private static String valueOrEmptySlot(String value, Boolean phoneSlot) {
+    String cleared = BWM_MessagePayloadBuilder.blankChannelSlot(value);
+    if (cleared != ' ') {
+      return cleared;
+    }
+    if (String.isNotBlank(value)) {
+      return ' ';
+    }
+    return phoneSlot == true ? ' ' : 'NA';
+  }
+
+  private static Boolean looksLikePhoneDigits(String value) {
+    if (String.isBlank(value)) {
+      return false;
+    }
+    String digitsOnly = value.trim().replaceAll('[^0-9]', '');
+    return digitsOnly.length() >= 10;
   }
 
   private static List<String> extractPlaceholderTypes(Map<String, Object> templateMap) {
@@ -210,7 +471,7 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
       return placeholderTypes;
     }
 
-    Matcher matcher = Pattern.compile('\\{#([^#]+)#\\}').matcher(templateText);
+    Matcher matcher = SMS_PLACEHOLDER_PATTERN.matcher(templateText);
     while (matcher.find()) {
       placeholderTypes.add(matcher.group(1).trim().toLowerCase());
     }
@@ -218,6 +479,11 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
     return placeholderTypes;
   }
 
+  /**
+   * @description Resolves SMS body values for template placeholders.
+   *              Call/contact phone slots use Owner Mobile → Phone only;
+   *              blank when both are empty (never corporate).
+   */
   private static List<String> buildVariableValues(
     BWM_Messaging_Settings__mdt settings,
     SObject record,
@@ -233,42 +499,16 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
       settings
     );
     String recordName = BWM_FieldValueResolver.resolveRecord(record, 'Name');
-    String supportPhoneOne = formatSmsPhoneValue(
-      resolveCorporateSupportPhone(settings, 1),
-      settings
-    );
-    String supportPhoneTwo = formatSmsPhoneValue(
-      resolveCorporateSupportPhone(settings, 2),
-      settings
-    );
-    String defaultSupportPhone = String.isNotBlank(supportPhoneOne)
-      ? supportPhoneOne
-      : formatSmsPhoneValue(settings.WhatsApp_From__c, settings);
 
-    Integer phoneSlot = 0;
     for (String placeholderType : placeholderTypes) {
       if (placeholderType == 'numeric') {
-        values.add(
-          pickPhoneValue(
-            phoneSlot == 0 ? defaultSupportPhone : supportPhoneTwo,
-            ownerPhone,
-            defaultSupportPhone
-          )
-        );
-        phoneSlot++;
+        values.add(ownerPhone);
         continue;
       }
 
       if (placeholderType == 'alphanumeric') {
         if (looksLikePhoneSlot(templateText, values.size())) {
-          values.add(
-            pickPhoneValue(
-              phoneSlot == 0 ? defaultSupportPhone : supportPhoneTwo,
-              ownerPhone,
-              defaultSupportPhone
-            )
-          );
-          phoneSlot++;
+          values.add(ownerPhone);
         } else if (String.isNotBlank(departmentName)) {
           values.add(departmentName);
         } else if (String.isNotBlank(recordName)) {
@@ -281,14 +521,7 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
 
       if (placeholderType == 'var') {
         if (looksLikePhoneSlot(templateText, values.size())) {
-          values.add(
-            pickPhoneValue(
-              phoneSlot == 0 ? defaultSupportPhone : supportPhoneTwo,
-              ownerPhone,
-              defaultSupportPhone
-            )
-          );
-          phoneSlot++;
+          values.add(ownerPhone);
         } else if (String.isNotBlank(ownerName)) {
           values.add(ownerName);
         } else if (String.isNotBlank(departmentName)) {
@@ -305,12 +538,26 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
     return values;
   }
 
+  private static Boolean isOwnerPhonePlaceholderSlot(
+    String placeholderType,
+    String templateText,
+    Integer placeholderIndex
+  ) {
+    if (placeholderType == 'numeric') {
+      return true;
+    }
+    if (placeholderType == 'alphanumeric' || placeholderType == 'var') {
+      return looksLikePhoneSlot(templateText, placeholderIndex);
+    }
+    return false;
+  }
+
   private static Boolean looksLikePhoneSlot(String templateText, Integer placeholderIndex) {
     if (String.isBlank(templateText)) {
       return false;
     }
 
-    Matcher matcher = Pattern.compile('\\{#([^#]+)#\\}').matcher(templateText);
+    Matcher matcher = SMS_PLACEHOLDER_PATTERN.matcher(templateText);
     Integer currentIndex = 0;
     while (matcher.find()) {
       if (currentIndex == placeholderIndex) {
@@ -328,20 +575,6 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
     return false;
   }
 
-  private static String pickPhoneValue(
-    String primaryPhone,
-    String secondaryPhone,
-    String fallbackPhone
-  ) {
-    if (String.isNotBlank(primaryPhone)) {
-      return primaryPhone;
-    }
-    if (String.isNotBlank(secondaryPhone)) {
-      return secondaryPhone;
-    }
-    return String.isNotBlank(fallbackPhone) ? fallbackPhone : 'NA';
-  }
-
   private static String formatSmsPhoneValue(
     String rawPhone,
     BWM_Messaging_Settings__mdt settings
@@ -357,19 +590,6 @@ public without sharing class BWM_SmsDirectPayloadBuilder {
     return String.isBlank(formattedPhone)
       ? rawPhone.trim()
       : formattedPhone.replaceAll('[^0-9]', '');
-  }
-
-  private static String resolveCorporateSupportPhone(
-    BWM_Messaging_Settings__mdt settings,
-    Integer slot
-  ) {
-    if (settings == null) {
-      return null;
-    }
-
-    return slot == 1
-      ? settings.Corporate_Support_Contact_1_Phone__c
-      : settings.Corporate_Support_Contact_2_Phone__c;
   }
 
   private static String readTemplateName(Map<String, Object> templateMap) {

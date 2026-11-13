@@ -4,13 +4,22 @@
      <isExposed>true</isExposed>
    <targets>
         <target>lightning__RecordAction</target>
+        <target>lightning__RecordPage</target>
+        <target>lightning__FlowScreen</target>
     </targets>
     <targetConfigs>
-        <targetConfig targets="lightning__RecordAction">
-            <actionType>ScreenAction</actionType>
+         <targetConfig targets="lightning__RecordPage">
             <objects>
                 <object>Tender__c</object>
             </objects>
+            <supportedFormFactors>
+                <supportedFormFactor type="Large" />
+                <supportedFormFactor type="Small" />
+            </supportedFormFactors>
         </targetConfig>
+        <targetConfig targets="lightning__FlowScreen">
+        <!-- declare @api properties here, e.g.: -->
+        <property name="recordId" type="String" label="Record Id" />
+    </targetConfig>
     </targetConfigs>
 </LightningComponentBundle>

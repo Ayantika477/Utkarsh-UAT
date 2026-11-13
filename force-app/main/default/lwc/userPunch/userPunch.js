@@ -205,10 +205,16 @@ export default class UserPunch extends LightningElement {
         return (requests || []).map(req => {
             const type = (req.type || 'WFH').toLowerCase();
             const status = (req.status || 'Pending').toLowerCase();
+            const remarks = (req.remarks || '').trim();
+            const approverName = (req.approverName || '').trim();
             return {
                 ...req,
                 type: req.type || 'WFH',
                 status: req.status || 'Pending',
+                remarks,
+                approverName,
+                hasRemarks: remarks.length > 0,
+                hasApprover: approverName.length > 0,
                 formattedDate: this.formatDateString(req.requestDate),
                 typeBorderClass: `up-wfh-border-${type}`,
                 typeBadgeClass: `up-type-badge type-${type}`,
@@ -303,7 +309,10 @@ export default class UserPunch extends LightningElement {
         this.requestNote = event.target.value;
     }
 
-    selectPublicTransport() { this.transportType = 'Public Transport'; }
+    selectPublicTransport() { 
+        this.transportType = 'Public Transport'; 
+        this.vehicleType = '';
+    }
     selectPrivateVehicle() { 
         this.transportType = 'Private Vehicle'; 
     }
@@ -419,12 +428,16 @@ export default class UserPunch extends LightningElement {
 
         this.isSubmittingReq = true;
 
+        this.detectDevice();
+
         submitWFHRequest({
             reqDate: this.varReqDate,
             startTimeStr: this.wfhReqStart,
             endTimeStr: this.wfhReqEnd,
             catagory : this.selectedValue,
-            requestNote: this.requestNote
+            requestNote: this.requestNote,
+            deviceOS: this.deviceOS,
+            deviceModel: this.deviceModel
         })
         .then(() => {
             this.showToast('Success', `${this.selectedValue} request submitted successfully.`, 'success');
@@ -496,8 +509,8 @@ export default class UserPunch extends LightningElement {
     get hasActiveMode() {
         return !!this.lastPunchType;
     }
-    get isWFHApprovedForToggle() { return this.isWFHApprovedForToday; }
-    get isWFOApprovedForToggle() { return this.isWFOApproved; }
+    /* get isWFHApprovedForToggle() { return this.isWFHApprovedForToday; }
+    get isWFOApprovedForToggle() { return this.isWFOApproved; } */
 
     get isMarketVisitActiveMode() {
         return this.lastPunchType === 'Market Visit';
@@ -655,7 +668,7 @@ export default class UserPunch extends LightningElement {
         return this.wfhRequestStatusTomorrow === 'Approved';
     }
 
-    get isWFHTimely() {
+    /* get isWFHTimely() {
         if (!this.isWFHApprovedForToday || !this.wfhStartTime || !this.wfhEndTime) return false;
         
         const now = new Date();
@@ -669,7 +682,52 @@ export default class UserPunch extends LightningElement {
 
     get wfhButtonDisabled() {
         return !this.isWFHApprovedForToday || !this.isWFHTimely;
+    } */
+
+
+    get isWFHApprovedForToggle() {
+        return this.isWFHApprovedForToday && this.isWFHTimely;
     }
+
+    get isWFOApprovedForToggle() {
+        return this.isWFOApproved && this.isWFOTimely;
+    }
+
+    get isWFHTimely() {
+        return this.isApprovedRequestActive('WFH');
+    }
+
+    get isWFOTimely() {
+        return this.isApprovedRequestActive('WFO');
+    }
+
+    isApprovedRequestActive(type) {
+        const today = new Date().toISOString().split('T')[0];
+
+        const now = new Date();
+        const currentMillis =
+            (now.getHours() * 3600000) +
+            (now.getMinutes() * 60000) +
+            (now.getSeconds() * 1000);
+
+        return (this.wfhRequests || []).some(req => {
+            if (
+                req.type !== type ||
+                req.status !== 'Approved' ||
+                req.requestDate !== today ||
+                !req.startTime ||
+                !req.endTime
+            ) {
+                return false;
+            }
+
+            const start = this.parseTime(req.startTime);
+            const end = this.parseTime(req.endTime);
+
+            return currentMillis >= start && currentMillis <= end;
+        });
+    }
+
 
     get wfhButtonTitle() {
         if (!this.isWFHApprovedForToday) return 'WFH is only available if approved for today.';
@@ -698,9 +756,17 @@ export default class UserPunch extends LightningElement {
         return `${h}:${m}`;
     }
 
-    get activationUrl() {
+    /* get activationUrl() {
         const baseUrl = 'https://momentum-customer-397--utkarshuat.sandbox.my.salesforce-sites.com/logging/services/apexrest/updatelocation?';
         return `${baseUrl}myId=${this.userId}`;
+    } */
+    get activationUrl() {
+        const hostname = window.location.hostname;
+
+        const siteDomain = hostname
+            .replace('.lightning.force.com', '.my.salesforce-sites.com');
+
+        return `https://${siteDomain}/logging/services/apexrest/updatelocation?myId=${this.userId}`;
     }
 
     get doneButtonDisabled() {
@@ -802,9 +868,43 @@ export default class UserPunch extends LightningElement {
         return Promise.resolve(null);
     }
 
-    callPunchNow(lat, lng, battery) {
+    detectDevice() {
         const ua = navigator.userAgent;
         let os = 'Unknown OS';
+        let device = 'Unknown Device';
+
+        if (/Android/i.test(ua)) {
+            os = 'Android';
+            const modelMatch = ua.match(/\(([^;]+);\s*([^;]+);\s*([^;)]+)\)/);
+            device = (modelMatch && modelMatch.length > 3)
+                ? modelMatch[3].trim()
+                : 'Android Phone';
+        } else if (/iPhone/i.test(ua)) {
+            os = 'iOS';
+            device = 'iPhone';
+        } else if (/iPad/i.test(ua)) {
+            os = 'iOS';
+            device = 'iPad';
+        } else if (/Macintosh/i.test(ua)) {
+            os = 'macOS';
+            device = 'Mac';
+        } else if (/Windows/i.test(ua)) {
+            os = 'Windows';
+            device = 'PC';
+        }
+
+        this.deviceOS = os;
+        this.deviceModel = device;
+
+        return {
+            os,
+            device
+        };
+    }
+
+    callPunchNow(lat, lng, battery) {
+        const ua = navigator.userAgent;
+        /* let os = 'Unknown OS';
         let device = 'Unknown Device';
 
         if (/Android/i.test(ua)) {
@@ -824,6 +924,10 @@ export default class UserPunch extends LightningElement {
             os = 'Windows';
             device = 'PC';
         }
+
+        this.deviceOS = os;
+        this.deviceModel = device; */
+        const { os, device } = this.detectDevice();
 
         punchNowAsUser({
             latitude:             lat,
@@ -1179,7 +1283,7 @@ export default class UserPunch extends LightningElement {
         }
     }
 
-    processCapture(video, canvas, type) {
+    /*processCapture(video, canvas, type) {
         canvas.width  = video.videoWidth  || 640;
         canvas.height = video.videoHeight || 480;
         const ctx = canvas.getContext('2d');
@@ -1201,6 +1305,64 @@ export default class UserPunch extends LightningElement {
         ctx.fillText(stamp, canvas.width / 2, canvas.height - bannerH / 2);
 
         return canvas.toDataURL('image/jpeg');
+    }*/
+    processCapture(video, canvas, type) {
+        console.log('inside processCapture');
+        const maxDimension = 1280;
+
+        let width = video.videoWidth || 640;
+        let height = video.videoHeight || 480;
+
+        // Resize while maintaining aspect ratio
+        if (width > maxDimension || height > maxDimension) {
+            const scale = Math.min(
+                maxDimension / width,
+                maxDimension / height
+            );
+
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+
+        ctx.drawImage(video, 0, 0, width, height);
+
+        // Timestamp
+        const now = new Date();
+        const stamp = `${type} - ${now.toLocaleString('en-IN')}`;
+
+        const bannerH = 32;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(0, height - bannerH, width, bannerH);
+
+        ctx.fillStyle = '#DAA520';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        ctx.fillText(
+            stamp,
+            width / 2,
+            height - bannerH / 2
+        );
+
+        // Compress JPEG
+        // return canvas.toDataURL('image/jpeg', 0.7);
+        let quality = 0.7;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+        // Rough estimate: base64 length * 0.75 = byte size
+        while (dataUrl.length * 0.75 > 1_000_000 && quality > 0.3) {
+            quality -= 0.1;
+            dataUrl = canvas.toDataURL('image/jpeg', quality);
+        }
+
+        return dataUrl;
     }
 
     /**
@@ -1310,6 +1472,8 @@ export default class UserPunch extends LightningElement {
             this.dayActivityMeetings = '';
             this.dayActivityOpenNotes = '';
             this.showDayActivityModal = true;
+            // Same as the Check-In modal: keeps the form in view on mobile
+            window.scrollTo({ top: 0, behavior: 'smooth' });
             return;
         }
 
@@ -1367,6 +1531,7 @@ export default class UserPunch extends LightningElement {
 
     submitEndActiveMode(dayActivity = {}) {
         this.isUpdatingMode = true;
+        this.detectDevice();
         updatePunchTypeAndOdometer({
             punchType: '',
             transportType: '',
@@ -1379,7 +1544,9 @@ export default class UserPunch extends LightningElement {
             noOfEmails: dayActivity.noOfEmails != null ? dayActivity.noOfEmails : null,
             noOfOffersSent: dayActivity.noOfOffersSent != null ? dayActivity.noOfOffersSent : null,
             noOfMeetings: dayActivity.noOfMeetings != null ? dayActivity.noOfMeetings : null,
-            openNotes: dayActivity.openNotes || null
+            openNotes: dayActivity.openNotes || null,
+            deviceOS: this.deviceOS,
+            deviceModel: this.deviceModel
         })
         .then((result) => {
             const endedMode = this.lastPunchType;
@@ -1457,6 +1624,14 @@ export default class UserPunch extends LightningElement {
                     this.showToast('Action Required', 'Please capture an odometer reading.', 'error');
                     return;
                 }
+                if (!this.extractedOdometer) {
+                    this.showToast(
+                        'Action Required',
+                        'Please capture a valid odometer image and wait for the reading to be extracted.',
+                        'error'
+                    );
+                    return;
+                }
                 if (this.isExtractingOdometer) {
                     this.showToast('Action Required', 'Please wait for odometer extraction to complete.', 'error');
                     return;
@@ -1470,6 +1645,30 @@ export default class UserPunch extends LightningElement {
 
         this.isUpdatingMode = true;
 
+        if (this.lastPunchType === 'Market Visit' &&
+            this.lastTransportType === 'Private Vehicle') {
+
+            if (!this.odometerPreview) {
+                this.showToast(
+                    'Action Required',
+                    'Please capture an odometer image before ending the Market Visit.',
+                    'error'
+                );
+                return;
+            }
+
+            if (!this.extractedOdometer) {
+                this.showToast(
+                    'Action Required',
+                    'Please capture a valid odometer image and wait for the reading to be extracted.',
+                    'error'
+                );
+                return;
+            }
+        }
+
+        this.detectDevice();
+
         updatePunchTypeAndOdometer({
             punchType: this.punchType,
             transportType: this.transportType,
@@ -1477,7 +1676,9 @@ export default class UserPunch extends LightningElement {
             odometerReading: this.odometerReading ? Number(this.odometerReading) : null,
             extractedOdometer: this.extractedOdometer ? Number(this.extractedOdometer) : null,
             odometerImageBase64: this.odometerPreview || null,
-            fileName: 'odometer_update.jpg'
+            fileName: 'odometer_update.jpg',
+            deviceOS: this.deviceOS,
+            deviceModel: this.deviceModel
         })
         .then((result) => {
             this.isUpdatingMode = false;

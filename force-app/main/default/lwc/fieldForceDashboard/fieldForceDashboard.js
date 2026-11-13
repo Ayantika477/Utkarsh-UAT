@@ -1,9 +1,8 @@
 import { LightningElement, track, wire } from 'lwc';
 import { refreshApex } from '@salesforce/apex';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
-import CURRENT_USER_ID from '@salesforce/user/Id';
 import getAvailableSalespeople from '@salesforce/apex/FieldForceDashboardController.getAvailableSalespeople';
-import isCurrentUserAdmin from '@salesforce/apex/FieldForceDashboardController.isCurrentUserAdmin';
+import canCurrentUserApproveWfh from '@salesforce/apex/FieldForceDashboardController.canCurrentUserApproveWfh';
 import getDailyDashboardData from '@salesforce/apex/FieldForceDashboardController.getDailyDashboardData';
 import getMultipleUsersDailySummary from '@salesforce/apex/FieldForceDashboardController.getMultipleUsersDailySummary';
 import getTeamWFHRequests from '@salesforce/apex/FieldForceDashboardController.getTeamWFHRequests';
@@ -23,6 +22,7 @@ export default class FieldForceDashboard extends LightningElement {
     @track mapMarkers = [];
     @track trackLocations = [];
     @track visitNodes = [];
+    @track punchMarkers = [];
     @track isLoading = true;
     @track activeTab = 'overview';
     @track overviewSearchTerm = '';
@@ -48,15 +48,24 @@ export default class FieldForceDashboard extends LightningElement {
     @track showImageModal = false;
     @track modalImageUrl = '';
 
+    // WFH/WFO Day Activity Log Modal Properties
+    @track showActivityModal = false;
+    @track activityDetails = {};
+    scrollActivityModalIntoView = false;
+    activityModalTrigger = null;
+    @track showActivityOverlay = false;
+    @track activityOverlayStyle = '';
+
     @track selfWfhRequests = [];
     @track teamWfhRequests = [];
-    @track isAdminUser = false;
+    @track canApproveWfhRequests = false;
 
     wiredDashboardResult;
     wiredWfhRequestsResult;
     wiredSalespeopleResult;
     wiredSummariesResult;
     isMapInitialized = false;
+    _tabOverflowStyled = false;
 
     get mapUrl() {
         return MAP_CONTAINER;
@@ -73,18 +82,59 @@ export default class FieldForceDashboard extends LightningElement {
         // Listen for MAP_READY from mapContainer iframe
         window.addEventListener('message', this.handleMapMessage);
 
-        // Fetch admin status
-        isCurrentUserAdmin()
-            .then(result => {
-                this.isAdminUser = result || false;
+        canCurrentUserApproveWfh()
+            .then(canApprove => {
+                this.canApproveWfhRequests = canApprove || false;
+                this.applyWfhApprovalFlags();
             })
             .catch(error => {
-                console.error('Error fetching admin status:', error);
+                console.error('Error fetching WFH approval access:', error);
+                this.canApproveWfhRequests = false;
             });
     }
 
     disconnectedCallback() {
         window.removeEventListener('message', this.handleMapMessage);
+    }
+
+    applyTabOverflowStyles() {
+        if (this._tabOverflowStyled) {
+            return;
+        }
+        const tabset = this.template.querySelector('.dashboard-tabs');
+        if (!tabset || !tabset.shadowRoot) {
+            return;
+        }
+        try {
+            if (tabset.shadowRoot.querySelector('#ffd-mobile-tabs')) {
+                this._tabOverflowStyled = true;
+                return;
+            }
+            const style = document.createElement('style');
+            style.id = 'ffd-mobile-tabs';
+            style.textContent = `
+                .slds-tabs_scoped__nav,
+                .slds-tabs_default__nav {
+                    overflow-x: auto !important;
+                    overflow-y: hidden;
+                    flex-wrap: nowrap !important;
+                    -webkit-overflow-scrolling: touch;
+                    scrollbar-width: none;
+                }
+                .slds-tabs_scoped__nav::-webkit-scrollbar,
+                .slds-tabs_default__nav::-webkit-scrollbar {
+                    display: none;
+                }
+                .slds-tabs_scoped__item,
+                .slds-tabs_default__item {
+                    flex-shrink: 0 !important;
+                }
+            `;
+            tabset.shadowRoot.appendChild(style);
+            this._tabOverflowStyled = true;
+        } catch (e) {
+            this._tabOverflowStyled = true;
+        }
     }
 
     handleMapMessage = (event) => {
@@ -151,14 +201,17 @@ export default class FieldForceDashboard extends LightningElement {
 
     handleOverviewTabActive() {
         this.activeTab = 'overview';
+        this.isSingleView = false;
     }
 
     handleTrackingTabActive() {
         this.activeTab = 'tracking';
+        this.isSingleView = false;
     }
 
     handleWfhTabActive() {
         this.activeTab = 'requests';
+        this.isSingleView = false;
         this.loadTeamWfhRequests();
     }
 
@@ -168,30 +221,74 @@ export default class FieldForceDashboard extends LightningElement {
         }
         getTeamWFHRequests({ userIds: this.availableUserIds })
             .then(result => {
-                this.teamWfhRequests = result.map(req => {
-                    return {
-                        ...req,
-                        formattedDate: this.formatDateString(req.requestDate),
-                        typeBorderClass: `wfh-border-${req.type.toLowerCase()}`,
-                        typeBadgeClass: `wfh-badge type-${req.type.toLowerCase()}`,
-                        statusBadgeClass: `wfh-status-badge status-${req.status.toLowerCase()}`,
-                        isPending: req.status === 'Pending' && (req.approverId === CURRENT_USER_ID || this.isAdminUser)
-                    };
-                });
+                this.teamWfhRequests = result.map(req => this.formatDashboardWfhRequest(req));
             })
             .catch(error => {
                 console.error('Error loading team WFH requests:', error);
             });
     }
 
-    handleUserClickInTable(event) {
-        const uid = event.currentTarget.dataset.id;
-        if (uid) {
-            this.isLoading = true;
-            this.isMapInitialized = false;
-            this.selectedEmployeeId = uid;
-            this.isSingleView = true;
-            this.processListSummaryData();
+    get activityModalTitle() {
+        return `Day Activity Log - ${this.activityDetails.userName || ''}`;
+    }
+
+    buildActivityDetails(reqId) {
+        const req = (this.teamWfhRequests || []).find(r => r.requestId === reqId);
+        if (!req) {
+            return null;
+        }
+        const display = (val) => (val === null || val === undefined ? '—' : val);
+        const openNotes = (req.openNotes || '').trim();
+        return {
+            userName: req.userName,
+            type: req.type,
+            typeBadgeClass: req.typeBadgeClass,
+            formattedDate: req.formattedDate,
+            emailsDisplay: display(req.noOfEmails),
+            meetingsDisplay: display(req.noOfMeetings),
+            offersDisplay: display(req.noOfOffersSent),
+            callsDisplay: display(req.noOfPhoneCalls),
+            openNotes,
+            hasOpenNotes: openNotes.length > 0
+        };
+    }
+
+    handleViewActivityDetails(event) {
+        const details = this.buildActivityDetails(event.currentTarget.dataset.id);
+        if (!details) {
+            return;
+        }
+        this.activityDetails = details;
+        this.activityModalTrigger = event.currentTarget;
+        this.showActivityModal = true;
+        this.scrollActivityModalIntoView = true;
+    }
+
+    // Mobile cards: open the Day Activity Log over the tapped card instead of a page-level modal
+    handleViewActivityDetailsMobile(event) {
+        const details = this.buildActivityDetails(event.currentTarget.dataset.id);
+        if (!details) {
+            return;
+        }
+        const card = event.currentTarget.closest('.mobile-data-card');
+        const top = card ? card.offsetTop : 0;
+        this.activityDetails = details;
+        this.activityOverlayStyle = `top: ${top}px;`;
+        this.showActivityOverlay = true;
+    }
+
+    closeActivityOverlay() {
+        this.showActivityOverlay = false;
+        this.activityDetails = {};
+    }
+
+    closeActivityDetails() {
+        this.showActivityModal = false;
+        this.activityDetails = {};
+        // Return the user to the row they opened the modal from (mobile scrolls up to show the modal)
+        if (this.activityModalTrigger) {
+            this.activityModalTrigger.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            this.activityModalTrigger = null;
         }
     }
 
@@ -201,21 +298,49 @@ export default class FieldForceDashboard extends LightningElement {
         this.wiredWfhRequestsResult = result;
         const { error, data } = result;
         if (data) {
-            this.selfWfhRequests = data.map(req => {
-                return {
-                    ...req,
-                    formattedDate: this.formatDateString(req.requestDate),
-                    typeBorderClass: `wfh-border-${req.type.toLowerCase()}`,
-                    typeBadgeClass: `wfh-badge type-${req.type.toLowerCase()}`,
-                    statusBadgeClass: `wfh-status-badge status-${req.status.toLowerCase()}`,
-                    isPending: req.status === 'Pending' && (req.approverId === CURRENT_USER_ID || this.isAdminUser)
-                };
-            });
+            this.selfWfhRequests = data.map(req => this.formatDashboardWfhRequest(req));
         } else {
             this.selfWfhRequests = [];
         }
         if (error) {
             console.error('Error loading WFH requests in dashboard:', error);
+        }
+    }
+
+    formatDashboardWfhRequest(req) {
+        const remarks = (req.remarks || '').trim();
+        const requestNote = (req.requestNote || '').trim();
+        const approverName = (req.approverName || '').trim();
+        const type = (req.type || 'WFH').toLowerCase();
+        const status = (req.status || 'Pending').toLowerCase();
+        return {
+            ...req,
+            remarks,
+            requestNote,
+            approverName,
+            hasRemarks: remarks.length > 0,
+            hasRequestNote: requestNote.length > 0,
+            hasApprover: approverName.length > 0,
+            formattedDate: this.formatDateString(req.requestDate),
+            typeBorderClass: `wfh-border-${type}`,
+            typeBadgeClass: `wfh-badge type-${type}`,
+            statusBadgeClass: `wfh-status-badge status-${status}`,
+            isPending: req.status === 'Pending' && this.canApproveWfhRequests
+        };
+    }
+
+    applyWfhApprovalFlags() {
+        if (this.teamWfhRequests && this.teamWfhRequests.length > 0) {
+            this.teamWfhRequests = this.teamWfhRequests.map(req => ({
+                ...req,
+                isPending: req.status === 'Pending' && this.canApproveWfhRequests
+            }));
+        }
+        if (this.selfWfhRequests && this.selfWfhRequests.length > 0) {
+            this.selfWfhRequests = this.selfWfhRequests.map(req => ({
+                ...req,
+                isPending: req.status === 'Pending' && this.canApproveWfhRequests
+            }));
         }
     }
 
@@ -248,12 +373,14 @@ export default class FieldForceDashboard extends LightningElement {
             this.timelineData = this.processTimeline(data.timeline || []);
             this.trackLocations = data.trackLocations || [];
             this.visitNodes = data.visitNodes || [];
+            this.punchMarkers = data.punchMarkers || [];
         } else {
             this.summary = {};
             this.mapMarkers = [];
             this.timelineData = [];
             this.trackLocations = [];
             this.visitNodes = [];
+            this.punchMarkers = [];
         }
 
         if (error) {
@@ -314,8 +441,9 @@ export default class FieldForceDashboard extends LightningElement {
             }
 
             let attendanceMeta = '';
-            if (isActive && usr.punchInTime && usr.punchInTime !== 'N/A') {
-                attendanceMeta = 'In since ' + usr.punchInTime;
+            const sinceTime = usr.activeSinceTime || usr.punchInTime;
+            if (isActive && sinceTime && sinceTime !== 'N/A') {
+                attendanceMeta = 'In since ' + sinceTime;
             } else if (usr.punchOutTime && usr.punchOutTime !== 'N/A') {
                 attendanceMeta = 'Out at ' + usr.punchOutTime;
             } else if (usr.lastActivityTime) {
@@ -324,6 +452,7 @@ export default class FieldForceDashboard extends LightningElement {
 
             return {
                 ...usr,
+                totalHours: this.formatHoursLabel(usr.totalHours),
                 sidebarClass: sidebarClass,
                 dotClass: `sidebar-status-dot ${isShortHours ? 'short-hours' : (isActive ? 'online' : 'offline')}`,
                 accentClass: accentClass,
@@ -426,6 +555,18 @@ export default class FieldForceDashboard extends LightningElement {
     }
 
     renderedCallback() {
+        this.applyTabOverflowStyles();
+
+        // In the Salesforce mobile app, position:fixed is anchored to the page container rather than
+        // the viewport, so a modal opened far down the list renders off-screen. Bring it into view.
+        if (this.scrollActivityModalIntoView) {
+            const modal = this.template.querySelector('.activity-modal-content');
+            if (modal) {
+                this.scrollActivityModalIntoView = false;
+                modal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
         if (!this.isSingleView) {
             this.isMapInitialized = false;
             return;
@@ -445,7 +586,10 @@ export default class FieldForceDashboard extends LightningElement {
     initializeMap(iframe) {
         let lat = 28.5355; // Default center
         let lng = 77.3910;
-        if (this.mapMarkers && this.mapMarkers.length > 0) {
+        if (this.punchMarkers && this.punchMarkers.length > 0) {
+            lat = this.punchMarkers[0].latitude;
+            lng = this.punchMarkers[0].longitude;
+        } else if (this.mapMarkers && this.mapMarkers.length > 0) {
             lat = this.mapMarkers[0].location.Latitude;
             lng = this.mapMarkers[0].location.Longitude;
         } else if (this.trackLocations && this.trackLocations.length > 0) {
@@ -509,7 +653,8 @@ export default class FieldForceDashboard extends LightningElement {
             iframe.contentWindow.postMessage({ 
                 type: 'DRAW_PATH', 
                 path: path,
-                visitNodes: this.visitNodes
+                visitNodes: this.visitNodes,
+                punchMarkers: this.punchMarkers
             }, '*');
         }
     }
@@ -686,11 +831,51 @@ export default class FieldForceDashboard extends LightningElement {
     }
 
     get workingHoursLabel() {
-        return this.summary && this.summary.totalHours ? this.summary.totalHours : 'N/A';
+        // Use the team summary (getMultipleUsersDailySummary) hours for the selected employee so the
+        // detail view matches the list/cards; fall back to the daily dashboard value if not available
+        const listEntry = (this.listSummaryData || []).find(usr => usr.userId === this.selectedEmployeeId);
+        if (listEntry && listEntry.totalHours) {
+            return listEntry.totalHours;
+        }
+        return this.summary && this.summary.totalHours ? this.formatHoursLabel(this.summary.totalHours) : 'N/A';
+    }
+
+    // Converts decimal hours (e.g. 7.5) to "07h 30m"
+    formatHoursMinutes(decimalHours) {
+        const totalMinutes = Math.round((Number(decimalHours) || 0) * 60);
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        return `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m`;
+    }
+
+    // Converts Apex hour labels (e.g. "7.50 hrs (Active)") to "07h 30m (Active)"; other text (e.g. "N/A") is kept as is
+    formatHoursLabel(label) {
+        if (!label) {
+            return label;
+        }
+        return String(label).replace(/(\d+(?:\.\d+)?)\s*hrs/, (match, hrs) => this.formatHoursMinutes(hrs));
     }
 
     get totalDistanceLabel() {
         return this.summary && this.summary.totalDistanceKm != null ? `${this.summary.totalDistanceKm} km` : '0.00 km';
+    }
+
+    get odometerDistanceLabel() {
+        return this.summary && this.summary.odometerDistanceKm != null
+            ? `${this.summary.odometerDistanceKm} km`
+            : '0.00 km';
+    }
+
+    get distanceDeviationLabel() {
+        return this.summary && this.summary.distanceDeviationKm != null
+            ? `${this.summary.distanceDeviationKm} km`
+            : '0.00 km';
+    }
+
+    get distanceDeviationPercentLabel() {
+        return this.summary && this.summary.distanceDeviationPercent != null
+            ? `${this.summary.distanceDeviationPercent}%`
+            : '0.00%';
     }
 
     get batteryPercentLabel() {
@@ -719,18 +904,28 @@ export default class FieldForceDashboard extends LightningElement {
     get hasMapMarkers() {
         const hasMarkers = this.mapMarkers && this.mapMarkers.length > 0;
         const hasTracks = this.trackLocations && this.trackLocations.length > 0;
-        return hasMarkers || hasTracks;
+        const hasPunches = this.punchMarkers && this.punchMarkers.length > 0;
+        const hasVisits = this.visitNodes && this.visitNodes.length > 0;
+        return hasMarkers || hasTracks || hasPunches || hasVisits;
     }
 
     // Action handlers
     handleUserCardClick(event) {
         const uid = event.currentTarget.dataset.id;
         if (uid) {
-            this.isLoading = true;
-            this.isMapInitialized = false;
-            this.selectedEmployeeId = uid;
             this.isSingleView = true;
-            this.processListSummaryData();
+            if (this.selectedEmployeeId === uid) {
+                this.isLoading = false;
+                this.processListSummaryData();
+                if (this.wiredDashboardResult) {
+                    refreshApex(this.wiredDashboardResult);
+                }
+            } else {
+                this.isLoading = true;
+                this.isMapInitialized = false;
+                this.selectedEmployeeId = uid;
+                this.processListSummaryData();
+            }
         }
     }
 
@@ -738,11 +933,19 @@ export default class FieldForceDashboard extends LightningElement {
         event.stopPropagation(); // Prevent card bubble click
         const uid = event.currentTarget.dataset.id;
         if (uid) {
-            this.isLoading = true;
-            this.isMapInitialized = false;
-            this.selectedEmployeeId = uid;
             this.isSingleView = true;
-            this.processListSummaryData();
+            if (this.selectedEmployeeId === uid) {
+                this.isLoading = false;
+                this.processListSummaryData();
+                if (this.wiredDashboardResult) {
+                    refreshApex(this.wiredDashboardResult);
+                }
+            } else {
+                this.isLoading = true;
+                this.isMapInitialized = false;
+                this.selectedEmployeeId = uid;
+                this.processListSummaryData();
+            }
         }
     }
 
@@ -845,6 +1048,7 @@ export default class FieldForceDashboard extends LightningElement {
         const remarks = this.dashboardRemarksMap[reqId] || '';
         try {
             await updateWFHStatus({ requestId: reqId, status: 'Approved', remarks: remarks });
+            this.applyLocalWfhStatusUpdate(reqId, 'Approved', remarks);
             this.showToast('Success', 'Request Approved Successfully', 'success');
             this.refreshDashboardWfh();
         } catch (error) {
@@ -857,11 +1061,32 @@ export default class FieldForceDashboard extends LightningElement {
         const remarks = this.dashboardRemarksMap[reqId] || '';
         try {
             await updateWFHStatus({ requestId: reqId, status: 'Rejected', remarks: remarks });
+            this.applyLocalWfhStatusUpdate(reqId, 'Rejected', remarks);
             this.showToast('Info', 'Request Rejected', 'info');
             this.refreshDashboardWfh();
         } catch (error) {
             this.showToast('Error', 'Failed to reject: ' + error.body.message, 'error');
         }
+    }
+
+    applyLocalWfhStatusUpdate(reqId, status, remarks) {
+        const patchList = (list) => {
+            if (!list || list.length === 0) {
+                return list;
+            }
+            return list.map(req => {
+                if (req.requestId !== reqId) {
+                    return req;
+                }
+                return this.formatDashboardWfhRequest({
+                    ...req,
+                    status,
+                    remarks
+                });
+            });
+        };
+        this.teamWfhRequests = patchList(this.teamWfhRequests);
+        this.selfWfhRequests = patchList(this.selfWfhRequests);
     }
 
     refreshDashboardWfh() {
@@ -895,6 +1120,7 @@ export default class FieldForceDashboard extends LightningElement {
 
     handleAnalyticsTabActive() {
         this.activeTab = 'analytics';
+        this.isSingleView = false;
         if (!this.analyticsStartDate || !this.analyticsEndDate) {
             this.calculateDateRange();
         }
@@ -983,8 +1209,8 @@ export default class FieldForceDashboard extends LightningElement {
                 return {
                     ...row,
                     outcomeFormatted: outcomeList.join(', ') || 'None',
-                    avgHoursFormatted: row.avgHoursPerDay != null ? `${row.avgHoursPerDay.toFixed(2)} hrs` : '0 hrs',
-                    totalWorkingHoursFormatted: row.totalWorkingHours != null ? `${row.totalWorkingHours.toFixed(2)} hrs` : '0 hrs',
+                    avgHoursFormatted: this.formatHoursMinutes(row.avgHoursPerDay),
+                    totalWorkingHoursFormatted: this.formatHoursMinutes(row.totalWorkingHours),
                     totalDistanceFormatted: row.totalDistanceKm != null ? `${row.totalDistanceKm.toFixed(2)} km` : '0 km',
                     avgVisitsFormatted: row.avgVisitsPerDay != null ? row.avgVisitsPerDay.toFixed(1) : '0'
                 };
@@ -1019,7 +1245,7 @@ export default class FieldForceDashboard extends LightningElement {
     }
 
     get analyticsTotalHours() {
-        return this.analyticsData.reduce((sum, row) => sum + (row.totalWorkingHours || 0), 0).toFixed(2);
+        return this.formatHoursMinutes(this.analyticsData.reduce((sum, row) => sum + (row.totalWorkingHours || 0), 0));
     }
 
     get analyticsTotalDistance() {

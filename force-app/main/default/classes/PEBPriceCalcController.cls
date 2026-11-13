@@ -152,6 +152,22 @@ public with sharing class PEBPriceCalcController {
     }
 
     /* ===================================================================== */
+    /* Return the Building Description PDF bytes for client-side extraction. */
+    /* ===================================================================== */
+    @AuraEnabled
+    public static String getBuildingDescriptionFileBase64(Id opportunityId, Id quoteId) {
+        try {
+            ContentVersion cv = findBuildingDescriptionPdf(opportunityId, quoteId);
+            if (cv == null || cv.VersionData == null) {
+                return null;
+            }
+            return EncodingUtil.base64Encode(cv.VersionData);
+        } catch (Exception e) {
+            throw new AuraHandledException('Unable to load building description file: ' + e.getMessage());
+        }
+    }
+
+    /* ===================================================================== */
     /* Persist the calculation                                               */
     /* ===================================================================== */
     @AuraEnabled
@@ -164,6 +180,26 @@ public with sharing class PEBPriceCalcController {
             update opp;
         } catch (Exception e) {
             throw new AuraHandledException('Unable to save calculation: ' + e.getMessage());
+        }
+    }
+
+    /**
+     * Clears the Price_Calculation_JSON__c field on the Opportunity so that
+     * staging data used for PDF generation does not linger on the record.
+     */
+    @AuraEnabled
+    public static void clearCalculation(Id opportunityId) {
+        try {
+            if (opportunityId == null) {
+                return;
+            }
+            Opportunity opp = new Opportunity(
+                Id = opportunityId,
+                Price_Calculation_JSON__c = null
+            );
+            update opp;
+        } catch (Exception e) {
+            throw new AuraHandledException('Unable to clear calculation: ' + e.getMessage());
         }
     }
 
@@ -241,6 +277,68 @@ public with sharing class PEBPriceCalcController {
         return pdfs[0];
     }
 
+    /**
+     * Locate the "Building Description.pdf" or QRF document linked to the Opportunity or Quote.
+     * When several files share that name, the most recently uploaded one wins.
+     */
+    public static ContentVersion findBuildingDescriptionPdf(Id opportunityId, Id quoteId) {
+        Set<Id> entityIds = new Set<Id>();
+        if (opportunityId != null) {
+            entityIds.add(opportunityId);
+            String oppStr = String.valueOf(opportunityId);
+            if (oppStr.startsWith('0Q0')) {
+                for (Quote q : [SELECT OpportunityId FROM Quote WHERE Id = :opportunityId LIMIT 1]) {
+                    if (q.OpportunityId != null) {
+                        entityIds.add(q.OpportunityId);
+                    }
+                }
+            }
+        }
+        if (quoteId != null) {
+            entityIds.add(quoteId);
+            for (Quote q : [SELECT OpportunityId FROM Quote WHERE Id = :quoteId LIMIT 1]) {
+                if (q.OpportunityId != null) {
+                    entityIds.add(q.OpportunityId);
+                }
+            }
+        }
+        if (entityIds.isEmpty()) {
+            return null;
+        }
+
+        Set<Id> docIds = new Set<Id>();
+        for (ContentDocumentLink link : [
+            SELECT ContentDocumentId
+            FROM ContentDocumentLink
+            WHERE LinkedEntityId IN :entityIds
+        ]) {
+            docIds.add(link.ContentDocumentId);
+        }
+        if (docIds.isEmpty()) {
+            return null;
+        }
+
+        List<ContentVersion> pdfs = [
+            SELECT Id, Title, FileExtension, VersionData, CreatedDate
+            FROM ContentVersion
+            WHERE ContentDocumentId IN :docIds
+              AND IsLatest = true
+              AND FileExtension = 'pdf'
+              AND (Title LIKE '%Building%Description%' OR Title LIKE '%Building Description%' OR Title LIKE '%QRF%' OR Title LIKE '%QFR%')
+            ORDER BY CreatedDate DESC
+        ];
+        if (pdfs.isEmpty()) {
+            return null;
+        }
+
+        for (ContentVersion cv : pdfs) {
+            if (cv.Title != null && cv.Title.trim().toLowerCase().contains('building description')) {
+                return cv;
+            }
+        }
+        return pdfs[0];
+    }
+
     /** Decode a PDF blob to text. Returns null when the bytes are not UTF-8 text. */
     private static String blobToText(Blob body) {
         if (body == null) {
@@ -289,13 +387,20 @@ public with sharing class PEBPriceCalcController {
         totals.put('G', valueForSection(text, new List<String>{ 'Galvalume Sheet - Wall', 'Galvalume Sheet -Wall' }));
         totals.put('H', valueForSection(text, new List<String>{ 'Packing Material', 'Packing' }));
 
-        // --- Section C (hardware) - unchanged logic -------------------------
-        // C1  = the value on the first "Anchor bolts" line.
-        // CRest = hardware TOTAL - C1 (the remaining bolt lines).
+        // --- Section C (hardware) ------------------------------------------
+        // C1    = the value on the first "Anchor bolts" line.
+        // CRest = remaining bolt lines (hardware TOTAL - C1 when TOTAL includes C1,
+        //         or hardware TOTAL directly when TOTAL <= C1 represents connection bolts).
         totals.put('C1', firstNumberAfter(text, new List<String>{ 'Anchor bolts', 'Anchor Bolt' }));
         Decimal hardwareTotal = firstTotalAfter(text, new List<String>{ 'HARD WARE', 'HARDWARE', 'A307' });
-        if (hardwareTotal != null && hardwareTotal > 0 && totals.get('C1') != null) {
-            Decimal rest = hardwareTotal - totals.get('C1');
+        if (hardwareTotal != null && hardwareTotal > 0) {
+            Decimal c1 = totals.get('C1');
+            Decimal rest;
+            if (c1 != null && c1 > 0 && hardwareTotal > c1) {
+                rest = hardwareTotal - c1;
+            } else {
+                rest = hardwareTotal;
+            }
             totals.put('CRest', rest > 0 ? rest : 0);
         }
 
@@ -318,27 +423,9 @@ public with sharing class PEBPriceCalcController {
      *   2. inline     "down spout pipe 110mm dia pvc @ 360m"
      */
     private static List<SpecialItem> parseSpecialItems(String rawText) {
-        List<SpecialItem> items = new List<SpecialItem>();
-        if (String.isBlank(rawText)) {
-            return items;
-        }
-        String text = rawText.replaceAll('[\\r\\n]+', '\n');
-
-        Matcher head = Pattern.compile('(?im)^\\s*(?:special\\s*)?notes?\\s*:?\\s*$|(?i)(?:special\\s*note|notes?)\\s*:\\s*').matcher(text);
-        if (!head.find()) {
-            return items;
-        }
-        String body = text.substring(head.end());
-        // Stop at the form footer if one follows the notes.
-        body = body.replaceAll('(?is)(FM-DES|RELEASE DATE).*$', '');
-
-        for (String line : body.split('[\n;]')) {
-            SpecialItem si = toSpecialItem(line);
-            if (si != null) {
-                items.add(si);
-            }
-        }
-        return items;
+        // Special items are no longer auto-extracted from the PDF.
+        // Users can add special items manually on the screen if needed.
+        return new List<SpecialItem>();
     }
 
     /** Turns one Note line into a SpecialItem. */
@@ -415,8 +502,8 @@ public with sharing class PEBPriceCalcController {
             if (back != null && back > 0) {
                 return back;
             }
-            // Otherwise take the first number after the label.
-            Decimal fwd = firstNumberIn(text.substring(idx + anchor.length(),
+            // Otherwise take the LAST number after the label to bypass inline specifications like "Grade 50".
+            Decimal fwd = lastNumberIn(text.substring(idx + anchor.length(),
                 Math.min(text.length(), idx + anchor.length() + 120)));
             if (fwd != null && fwd > 0) {
                 return fwd;

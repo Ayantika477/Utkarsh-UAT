@@ -95,6 +95,7 @@ public with sharing class InternalTicketController {
         /** Set when the field stays open despite the user having a department. */
         @AuraEnabled public String note          { get; set; }
         /** The raiser's own details, so the form can show who is logging the ticket. */
+        @AuraEnabled public String userId        { get; set; }
         @AuraEnabled public String userName      { get; set; }
         @AuraEnabled public String userPhone     { get; set; }
         @AuraEnabled public String userEmail     { get; set; }
@@ -118,6 +119,7 @@ public with sharing class InternalTicketController {
 
         User me = runningUser();
         if (me != null) {
+            context.userId    = me.Id;
             context.userName  = me.Name;
             // Phone is the desk number; MobilePhone is the fallback people actually answer.
             context.userPhone = String.isNotBlank(me.Phone) ? me.Phone : me.MobilePhone;
@@ -165,7 +167,7 @@ public with sharing class InternalTicketController {
     /** The running user's own record - name, contact details and department. */
     private static User runningUser() {
         List<User> users = [
-            SELECT Name, Phone, MobilePhone, Email, Department
+            SELECT Id, Name, Phone, MobilePhone, Email, Department
             FROM User
             WHERE Id = :UserInfo.getUserId()
             WITH SYSTEM_MODE
@@ -419,7 +421,7 @@ public with sharing class InternalTicketController {
         }
 
         // One read of the running user covers both the department lock and the
-        // Case_Created_By__c / Phone_Number__c / Email__c stamp below.
+        // Phone_Number__c / Email__c stamp below.
         UserContext userContext = getUserContext();
 
         // When the form locked the field, the value is re-derived here rather than
@@ -445,9 +447,8 @@ public with sharing class InternalTicketController {
         // Who raised it, read from the User record rather than the browser so the
         // stamp cannot be forged and stays right even if the form is bypassed.
         if (userContext != null) {
-            putIfCreateable(ticket, 'Case_Created_By__c', userContext.userName,  skipped);
-            putIfCreateable(ticket, 'Phone_Number__c',    userContext.userPhone, skipped);
-            putIfCreateable(ticket, 'Email__c',           userContext.userEmail, skipped);
+            putIfCreateable(ticket, 'Phone_Number__c', userContext.userPhone, skipped);
+            putIfCreateable(ticket, 'Email__c',        userContext.userEmail, skipped);
         }
         warnings.addAll(skipped);
 
@@ -461,13 +462,15 @@ public with sharing class InternalTicketController {
             throw new AuraHandledException('The ticket could not be saved: ' + describeDml(e));
         }
 
-        Case saved = [
-            SELECT Id, CaseNumber, OwnerId, Owner.Name, Subject, Description, Priority
-            FROM Case
-            WHERE Id = :ticket.Id
-            WITH SYSTEM_MODE
-            LIMIT 1
-        ];
+        // Read back through the elevated helper: the ticket is owned by the L1 user, so
+        // with private Case sharing the raiser cannot see what they just inserted.
+        Case saved = new Elevated().ticketById(ticket.Id);
+        if (saved == null) {
+            throw new AuraHandledException(
+                'The ticket was saved but could not be read back. Check Case sharing settings '
+                + 'for your profile.'
+            );
+        }
 
         TicketResult result = new TicketResult();
         result.caseId     = saved.Id;
@@ -490,6 +493,56 @@ public with sharing class InternalTicketController {
             result.warning = String.join(warnings, ' ');
         }
         return result;
+    }
+
+
+    // ------------------------------------------------------------------
+    // Elevated reads
+    // ------------------------------------------------------------------
+    /**
+     * Reads records this transaction has just created or is attaching to.
+     *
+     * WITH SYSTEM_MODE covers FLS and CRUD but NOT record sharing - that comes from
+     * "with sharing" on the outer class. A ticket is inserted owned by the L1 user, so
+     * with Case OWD set to Private the person who raised it has no share on it and the
+     * requery returns zero rows: "List has no rows for assignment to SObject". Admins
+     * never hit this because View All bypasses sharing.
+     *
+     * The elevation is deliberately narrow - it only reads back a record the running
+     * user created moments ago in the same transaction.
+     */
+    private without sharing class Elevated {
+
+        Case ticketById(Id caseId) {
+            List<Case> cases = [
+                SELECT Id, CaseNumber, OwnerId, Owner.Name, Subject, Description, Priority
+                FROM Case
+                WHERE Id = :caseId
+                WITH SYSTEM_MODE
+                LIMIT 1
+            ];
+            return cases.isEmpty() ? null : cases[0];
+        }
+
+        Id ownerOf(Id caseId) {
+            List<Case> cases = [
+                SELECT OwnerId FROM Case WHERE Id = :caseId WITH SYSTEM_MODE LIMIT 1
+            ];
+            return cases.isEmpty() ? null : cases[0].OwnerId;
+        }
+
+        Set<Id> linkedDocuments(Id caseId, Set<Id> docIds) {
+            Set<Id> linked = new Set<Id>();
+            for (ContentDocumentLink cdl : [
+                SELECT ContentDocumentId
+                FROM ContentDocumentLink
+                WHERE LinkedEntityId = :caseId AND ContentDocumentId IN :docIds
+                WITH SYSTEM_MODE
+            ]) {
+                linked.add(cdl.ContentDocumentId);
+            }
+            return linked;
+        }
     }
 
     /**
@@ -541,22 +594,14 @@ public with sharing class InternalTicketController {
             return 0;
         }
 
-        List<Case> cases = [SELECT OwnerId FROM Case WHERE Id = :caseId WITH SYSTEM_MODE LIMIT 1];
-        if (cases.isEmpty()) {
+        Elevated elevated = new Elevated();
+        Id ownerId = elevated.ownerOf(caseId);
+        if (ownerId == null) {
             return 0;
         }
-        Id ownerId = cases[0].OwnerId;
 
         // Skip anything already linked, so a retry cannot create duplicate links.
-        Set<Id> alreadyLinked = new Set<Id>();
-        for (ContentDocumentLink existing : [
-            SELECT ContentDocumentId
-            FROM ContentDocumentLink
-            WHERE LinkedEntityId = :caseId AND ContentDocumentId IN :docIds
-            WITH SYSTEM_MODE
-        ]) {
-            alreadyLinked.add(existing.ContentDocumentId);
-        }
+        Set<Id> alreadyLinked = elevated.linkedDocuments(caseId, docIds);
 
         List<ContentDocumentLink> newLinks = new List<ContentDocumentLink>();
         for (Id docId : docIds) {
@@ -698,9 +743,18 @@ public with sharing class InternalTicketController {
     private static Boolean sendAssignmentEmail(Case c, Id assigneeId, String moduleName, String department) {
         try {
             List<User> assignees = [
-                SELECT Id, Name, Email FROM User WHERE Id = :assigneeId WITH SYSTEM_MODE LIMIT 1
+                SELECT Id, Name, Email, IsActive FROM User WHERE Id = :assigneeId WITH SYSTEM_MODE LIMIT 1
             ];
             if (assignees.isEmpty() || String.isBlank(assignees[0].Email)) {
+                return false;
+            }
+            // Send to the assignee's User Id so the email counts as internal.
+            if (assignees[0].IsActive != true) {
+                System.debug(
+                    LoggingLevel.WARN,
+                    'InternalTicketController: no active User Id for recipient ' + assignees[0].Email +
+                    ' on Case ' + c.Id + ' - email address fallback is disabled, email not sent.'
+                );
                 return false;
             }
 
@@ -708,7 +762,8 @@ public with sharing class InternalTicketController {
                 + '/lightning/r/Case/' + c.Id + '/view';
 
             Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
-            mail.setToAddresses(new List<String>{ assignees[0].Email });
+            // mail.setToAddresses(new List<String>{ assignees[0].Email });
+            mail.setTargetObjectId(assignees[0].Id);
             mail.setSubject('Internal ticket ' + c.CaseNumber + ': ' + c.Subject);
             mail.setHtmlBody(
                 '<p>Hi ' + assignees[0].Name.escapeHtml4() + ',</p>'

@@ -30,7 +30,8 @@ export default class TargetManager extends LightningElement {
     trendChart;
     barChart;
     doughnutChart;
-    chartjsInitialized = false;
+    // chartjsInitialized = false;
+    chartjsLoaded = false;
     @track trendDataList = [];
 
     @track isTargetManager = false; 
@@ -125,7 +126,7 @@ export default class TargetManager extends LightningElement {
         }
     }
 
-    renderedCallback() {
+    /* renderedCallback() {
         if (this.chartjsInitialized) return;
         this.chartjsInitialized = true;
         
@@ -133,6 +134,26 @@ export default class TargetManager extends LightningElement {
             .then(() => {
                 if (this.trendDataList.length > 0 || this.dashboardEmployees.length > 0) {
                     this.renderChart();
+                }
+            })
+            .catch(error => {
+                console.error('Error loading Chart.js', error);
+            });
+    } */
+    renderedCallback() {
+        if (this.chartjsLoaded) return;
+
+        loadScript(this, chartjs)
+            .then(() => {
+                this.chartjsLoaded = true;
+
+                if (typeof window.Chart === 'function') {
+                    if (
+                        this.trendDataList.length > 0 ||
+                        this.dashboardEmployees.length > 0
+                    ) {
+                        this.renderChart();
+                    }
                 }
             })
             .catch(error => {
@@ -183,9 +204,16 @@ export default class TargetManager extends LightningElement {
                     let bottomEmps = [...sortedEmps].sort((a, b) => a.percentage - b.percentage);
                     this.bottomPerformers = bottomEmps.slice(0, 3).map(e => ({ id: e.id, name: e.name, perc: e.percentage + '%' }));
                 }
-                if (data.trendLines) {
+                /* if (data.trendLines) {
                     this.trendDataList = data.trendLines;
                     if (this.chartjsInitialized) {
+                        this.renderChart();
+                    }
+                } */
+                if (data.trendLines) {
+                    this.trendDataList = data.trendLines;
+
+                    if (this.chartjsLoaded && typeof window.Chart === 'function') {
                         this.renderChart();
                     }
                 }
@@ -199,6 +227,10 @@ export default class TargetManager extends LightningElement {
     // ALL 3 CHARTS DRAWN HERE
     // ==========================================
     renderChart() {
+        if (!this.chartjsLoaded || typeof window.Chart !== 'function') {
+            return;
+        }
+
         requestAnimationFrame(() => {
             
             // 1. TREND LINE CHART

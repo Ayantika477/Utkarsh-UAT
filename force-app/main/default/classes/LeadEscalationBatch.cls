@@ -230,17 +230,25 @@ implements Database.Batchable<SObject>{
                 + recipients
             );
 
-            Messaging.SingleEmailMessage mail =
-                LeadEscalationEmailService.buildEmail(
+            // Messaging.SingleEmailMessage mail =
+            //     LeadEscalationEmailService.buildEmail(
+            //         dept24Map.get(dept),
+            //         recipients,
+            //         24,
+            //         dept
+            //     );
+            //
+            // if(mail != null){
+            //     emailMessages.add(mail);
+            // }
+            emailMessages.addAll(
+                LeadEscalationEmailService.buildEmails(
                     dept24Map.get(dept),
                     recipients,
                     24,
                     dept
-                );
-
-            if(mail != null){
-                emailMessages.add(mail);
-            }
+                )
+            );
         }
 
         // 48 HOURS
@@ -275,17 +283,25 @@ implements Database.Batchable<SObject>{
                 + recipients
             );
 
-            Messaging.SingleEmailMessage mail =
-                LeadEscalationEmailService.buildEmail(
+            // Messaging.SingleEmailMessage mail =
+            //     LeadEscalationEmailService.buildEmail(
+            //         dept48Map.get(dept),
+            //         recipients,
+            //         48,
+            //         dept
+            //     );
+            //
+            // if(mail != null){
+            //     emailMessages.add(mail);
+            // }
+            emailMessages.addAll(
+                LeadEscalationEmailService.buildEmails(
                     dept48Map.get(dept),
                     recipients,
                     48,
                     dept
-                );
-
-            if(mail != null){
-                emailMessages.add(mail);
-            }
+                )
+            );
         }
 
         // 72 HOURS
@@ -310,17 +326,25 @@ implements Database.Batchable<SObject>{
                 + recipients
             );
 
-            Messaging.SingleEmailMessage mail =
-                LeadEscalationEmailService.buildEmail(
+            // Messaging.SingleEmailMessage mail =
+            //     LeadEscalationEmailService.buildEmail(
+            //         leads72,
+            //         recipients,
+            //         72,
+            //         'All Departments'
+            //     );
+            //
+            // if(mail != null){
+            //     emailMessages.add(mail);
+            // }
+            emailMessages.addAll(
+                LeadEscalationEmailService.buildEmails(
                     leads72,
                     recipients,
                     72,
                     'All Departments'
-                );
-
-            if(mail != null){
-                emailMessages.add(mail);
-            }
+                )
+            );
         }
 
         System.debug(

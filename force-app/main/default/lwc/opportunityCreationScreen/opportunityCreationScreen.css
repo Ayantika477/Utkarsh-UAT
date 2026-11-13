@@ -1,0 +1,9 @@
+.success-text {
+    color: rgb(40, 167, 69);
+    font-weight: bold;
+}
+
+.warn-text {
+    color: rgb(218, 10, 10);
+    font-weight: bold;
+}

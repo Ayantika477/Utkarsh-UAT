@@ -103,4 +103,68 @@ public with sharing class QuoteRateCardController {
             }
         }
     }
+
+    @AuraEnabled(cacheable=true)
+    public static Price_Calculator__mdt getHighMastAmounts(String recordDeveloperName) {
+        List<Price_Calculator__mdt> recs = [
+            SELECT DeveloperName, MasterLabel, Department__c, Base_Amount__c, Add_On_Amount__c
+            FROM Price_Calculator__mdt
+            WHERE DeveloperName = :recordDeveloperName
+            LIMIT 1
+        ];
+        return recs.isEmpty() ? null : recs[0];
+    }
+
+    @AuraEnabled
+    public static void saveHighMastAmounts(String developerName, Decimal baseAmount, Decimal addOn) {
+        if (String.isBlank(developerName)) {
+            throw new AuraHandledException('Developer Name is required.');
+        }
+
+        try {
+            // Preserve the existing MasterLabel instead of deriving it from the API name
+            String existingLabel;
+            for (Price_Calculator__mdt pc : [
+                    SELECT MasterLabel FROM Price_Calculator__mdt
+                    WHERE DeveloperName = :developerName LIMIT 1]) {
+                existingLabel = pc.MasterLabel;
+            }
+
+            Metadata.CustomMetadata cmd = new Metadata.CustomMetadata();
+            cmd.fullName = 'Price_Calculator__mdt.' + developerName;
+            cmd.label = String.isNotBlank(existingLabel)
+                        ? existingLabel
+                        : developerName.replaceAll('_', ' ');
+
+            // Only push fields that were actually supplied, so a null never blanks a live value
+            if (baseAmount != null) {
+                Metadata.CustomMetadataValue baseVal = new Metadata.CustomMetadataValue();
+                baseVal.field = 'Base_Amount__c';
+                baseVal.value = baseAmount;
+                cmd.values.add(baseVal);
+            }
+
+            if (addOn != null) {
+            Metadata.CustomMetadataValue addOnVal = new Metadata.CustomMetadataValue();
+            addOnVal.field = 'Add_On_Amount__c';
+            addOnVal.value = addOn;
+            cmd.values.add(addOnVal);
+            }
+
+            if (cmd.values.isEmpty()) {
+                throw new AuraHandledException('Nothing to update — both Base Amount and Add-On are blank.');
+            }
+
+            Metadata.DeployContainer mdContainer = new Metadata.DeployContainer();
+            mdContainer.addMetadata(cmd);
+
+            if (!Test.isRunningTest()) {
+                Metadata.Operations.enqueueDeployment(mdContainer, new QuoteRateCardCallback());
+            }
+        } catch (AuraHandledException ahe) {
+            throw ahe;
+        } catch (Exception e) {
+            throw new AuraHandledException('Failed to deploy High Mast amounts: ' + e.getMessage());
+        }
+    }
 }

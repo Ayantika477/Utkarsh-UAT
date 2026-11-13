@@ -1,3 +1,8 @@
+/**
+ * @description   Lead campaign RCS template fetch and direct send logic.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public with sharing class LeadManagementRcsService {
     private static final String TEMPLATES_PATH = '/api/v1/rcs/getTemplate';
 
@@ -19,6 +24,10 @@ public with sharing class LeadManagementRcsService {
         public List<String> messages = new List<String>();
     }
 
+    /**
+     * @description Loads approved RCS templates for Lead campaign sends.
+     * @return List of RcsTemplateOption values.
+     */
     public static List<RcsTemplateOption> fetchApprovedTemplates() {
         BWM_Messaging_Settings__mdt settings = getSettings();
         if (String.isBlank(settings.RCS_From__c)) {
@@ -82,6 +91,12 @@ public with sharing class LeadManagementRcsService {
         return templates;
     }
 
+    /**
+     * @description Sends an RCS template message to the selected Leads and aggregates results.
+     * @param leadIds Lead Ids to message.
+     * @param templateName Approved RCS template name.
+     * @return SendRcsResult with sent/skipped counts and messages.
+     */
     public static SendRcsResult sendToLeads(List<Id> leadIds, String templateName) {
         SendRcsResult result = new SendRcsResult();
 
@@ -146,6 +161,13 @@ public with sharing class LeadManagementRcsService {
                 phoneNumber
             );
 
+            if (Limits.getCallouts() >= Limits.getLimitCallouts()) {
+                result.skippedCount++;
+                result.messages.add(
+                    leadRecord.Name + ': Callout limit reached. Send fewer records or try again.'
+                );
+                continue;
+            }
             try {
                 BWM_ApiResponse apiResponse = BWM_ApiResponse.parse(
                     BWM_MessagingCallout.send(payload),
@@ -172,6 +194,12 @@ public with sharing class LeadManagementRcsService {
         return result;
     }
 
+    /**
+     * @description Formats Lead.Phone for RCS and suppresses numbers matching the WhatsApp/from number.
+     * @param leadRecord Lead whose phone is resolved.
+     * @param settings Messaging settings for formatting.
+     * @return Formatted phone, or null when blank/matching from number.
+     */
     private static String resolveLeadPhone(
         Lead leadRecord,
         BWM_Messaging_Settings__mdt settings
@@ -196,6 +224,12 @@ public with sharing class LeadManagementRcsService {
         return formattedPhone;
     }
 
+    /**
+     * @description Compares two phone values by digits only to detect identical numbers.
+     * @param phoneA First phone string.
+     * @param phoneB Second phone string.
+     * @return True when both are non-blank and digit-normalized values match.
+     */
     private static Boolean isSamePhoneNumber(String phoneA, String phoneB) {
         if (String.isBlank(phoneA) || String.isBlank(phoneB)) {
             return false;
@@ -203,6 +237,10 @@ public with sharing class LeadManagementRcsService {
         return phoneA.replaceAll('[^0-9]', '') == phoneB.replaceAll('[^0-9]', '');
     }
 
+    /**
+     * @description Loads messaging settings required for campaign sends.
+     * @return Active BWM_Messaging_Settings__mdt row.
+     */
     private static BWM_Messaging_Settings__mdt getSettings() {
         BWM_Messaging_Settings__mdt settings = BWM_SettingsService.getSettings();
         if (settings == null || String.isBlank(settings.API_Bearer_Token__c)) {
@@ -212,6 +250,12 @@ public with sharing class LeadManagementRcsService {
     }
 
     private class TemplateNameComparator implements System.Comparator<RcsTemplateOption> {
+        /**
+         * @description Compares RCS template options by label for ascending sort order.
+         * @param first Left RcsTemplateOption.
+         * @param second Right RcsTemplateOption.
+         * @return Negative, zero, or positive comparison result.
+         */
         public Integer compare(RcsTemplateOption first, RcsTemplateOption second) {
             String firstName = first == null || first.label == null ? '' : first.label;
             String secondName = second == null || second.label == null ? '' : second.label;

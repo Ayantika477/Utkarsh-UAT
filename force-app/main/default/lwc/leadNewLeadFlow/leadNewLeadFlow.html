@@ -1,0 +1,327 @@
+<template>
+    <lightning-card>
+        <div class="slds-var-p-horizontal_medium slds-is-relative">
+            <lightning-spinner lwc:if={busyOrLoading} alternative-text="Loading" size="medium"></lightning-spinner>
+
+            <!-- New Lead Screen for Admin / New Lead Screen for Others -->
+            <template lwc:if={isEntryStep}>
+                <template for:each={entrySections} for:item="section">
+                    <div key={section.key}>
+                    <template lwc:if={section.isRepeater}>
+                        <template lwc:if={repeaterVisible}>
+                            <div class="section-box">
+                                <template for:each={rowViews} for:item="row">
+                                    <div key={row.id} class="slds-box slds-m-bottom_small">
+                                        <div class="slds-col slds-size_1-of-1 slds-p-horizontal_xx-small">
+                                            <lightning-combobox
+                                                label={departmentRowLabel}
+                                                options={departmentRowOptions}
+                                                value={row.dept}
+                                                disabled
+                                                data-validate
+                                                data-name="rowDepartment"
+                                                data-id={row.id}
+                                                data-prop="dept"
+                                                onchange={handleRowChange}
+                                            ></lightning-combobox>
+                                        </div>
+                                        <div class="slds-col slds-size_1-of-1 slds-p-horizontal_xx-small">
+                                            <lightning-combobox
+                                                label={categoryRowLabel}
+                                                options={row.catOptions}
+                                                value={row.cat}
+                                                required
+                                                data-validate
+                                                data-name="rowCategory"
+                                                data-id={row.id}
+                                                data-prop="cat"
+                                                onchange={handleRowChange}
+                                            ></lightning-combobox>
+                                        </div>
+                                        <div class="slds-col slds-size_1-of-1 slds-p-horizontal_xx-small">
+                                            <lightning-combobox
+                                                label="UOM"
+                                                options={uomRowOptions}
+                                                value={row.uom}
+                                                required
+                                                data-validate
+                                                data-name="rowUom"
+                                                data-id={row.id}
+                                                data-prop="uom"
+                                                onchange={handleRowChange}
+                                            ></lightning-combobox>
+                                        </div>
+                                        <div class="slds-col slds-size_1-of-1 slds-p-horizontal_xx-small">
+                                            <lightning-input
+                                                type="number"
+                                                step="1"
+                                                label="Quantity"
+                                                value={row.qty}
+                                                required
+                                                data-validate
+                                                data-name="rowQuantity"
+                                                data-id={row.id}
+                                                data-prop="qty"
+                                                onchange={handleRowChange}
+                                            ></lightning-input>
+                                        </div>
+                                        <template lwc:if={row.canRemove}>
+                                            <div class="slds-col slds-p-horizontal_xx-small">
+                                                <lightning-button-icon
+                                                    icon-name="utility:delete"
+                                                    alternative-text="Remove"
+                                                    title="Remove"
+                                                    data-id={row.id}
+                                                    onclick={handleRemoveRow}
+                                                ></lightning-button-icon>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                                <lightning-button
+                                    class="slds-m-top_x-small"
+                                    label="Add"
+                                    icon-name="utility:add"
+                                    onclick={handleAddRow}
+                                ></lightning-button>
+                            </div>
+                        </template>
+                    </template>
+                    <template lwc:else>
+                        <div class="slds-section slds-is-open slds-m-bottom_small">
+                            <h3 class="slds-section__title slds-theme_shade">
+                                <span class="slds-truncate slds-p-horizontal_small">{section.title}</span>
+                            </h3>
+                            <div class="slds-grid slds-wrap slds-p-top_small">
+                                <template for:each={section.columns} for:item="column">
+                                    <div
+                                        key={column.key}
+                                        class="slds-col slds-size_1-of-1 slds-medium-size_1-of-2 slds-p-horizontal_small"
+                                    >
+                                        <template for:each={column.fields} for:item="field">
+                                            <div key={field.name}>
+                                                <template lwc:if={field.isText}>
+                                                    <lightning-input
+                                                        type="text"
+                                                        label={field.label}
+                                                        value={field.value}
+                                                        required={field.required}
+                                                        disabled={field.disabled}
+                                                        data-validate
+                                                        data-name={field.name}
+                                                        onchange={handleChange}
+                                                    ></lightning-input>
+                                                </template>
+                                                <template lwc:if={field.isEmail}>
+                                                    <lightning-input
+                                                        type="email"
+                                                        label={field.label}
+                                                        value={field.value}
+                                                        required={field.required}
+                                                        data-validate
+                                                        data-name={field.name}
+                                                        onchange={handleChange}
+                                                    ></lightning-input>
+                                                </template>
+                                                <template lwc:if={field.isPhone}>
+                                                    <lightning-input
+                                                        type="tel"
+                                                        label={field.label}
+                                                        value={field.value}
+                                                        required={field.required}
+                                                        data-validate
+                                                        data-name={field.name}
+                                                        onchange={handleChange}
+                                                    ></lightning-input>
+                                                </template>
+                                                <template lwc:if={field.isPicklist}>
+                                                    <lightning-combobox
+                                                        label={field.label}
+                                                        options={field.options}
+                                                        value={field.value}
+                                                        required={field.required}
+                                                        disabled={field.disabled}
+                                                        data-validate
+                                                        data-name={field.name}
+                                                        onchange={handleChange}
+                                                    ></lightning-combobox>
+                                                </template>
+                                                <template lwc:if={field.isCheckbox}>
+                                                    <lightning-input
+                                                        class="checkbox-field"
+                                                        type="checkbox"
+                                                        label={field.label}
+                                                        checked={field.checked}
+                                                        required={field.required}
+                                                        data-validate
+                                                        data-name={field.name}
+                                                        onchange={handleChange}
+                                                    ></lightning-input>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    </div>
+                </template>
+                <div class="slds-m-vertical_small slds-text-align_right">
+                    <lightning-button variant="brand" label="Next" onclick={handleEntryNext}></lightning-button>
+                </div>
+            </template>
+
+            <!-- Owner Screen for Admin -->
+            <template lwc:if={isOwnerStep}>
+                <lightning-combobox
+                    label="Choose Lead owner"
+                    options={ownerOptions}
+                    value={ownerId}
+                    required
+                    data-validate
+                    data-name="Choose_Lead_ownerAdmin"
+                    onchange={handleOwnerChange}
+                ></lightning-combobox>
+                <div class="slds-m-vertical_small slds-text-align_right">
+                    <lightning-button label="Previous" onclick={handleOwnerPrevious}></lightning-button>
+                    <lightning-button
+                        class="slds-m-left_x-small"
+                        variant="brand"
+                        label="Next"
+                        onclick={handleOwnerNext}
+                    ></lightning-button>
+                </div>
+            </template>
+
+            <!-- File Screen for Admin -->
+            <template lwc:if={isAdminFileStep}>
+                <div class="slds-grid slds-wrap">
+                    <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-2">
+                        <p class="size-caution">Keep your file size less than 25MB</p>
+                        <lightning-file-upload
+                            label="Upload Document"
+                            name="UploadDocumentAdmin"
+                            multiple
+                            onuploadfinished={handleAdminUploadFinished}
+                        ></lightning-file-upload>
+                        <template lwc:if={hasUploadedFileNames}>
+                            <p><strong>{uploadedFileNamesText}</strong></p>
+                        </template>
+                        <template lwc:if={uploadHasError}>
+                            <p class="upload-error">{uploadError}</p>
+                        </template>
+                    </div>
+                </div>
+                <div class="slds-m-vertical_small slds-text-align_right">
+                    <lightning-button variant="brand" label="Next" onclick={handleAdminFileNext}></lightning-button>
+                </div>
+            </template>
+
+            <!-- Confirm Lead Details Screen (Others) -->
+            <template lwc:if={isConfirmStep}>
+                <p class="slds-text-align_center slds-text-heading_small slds-m-bottom_small">
+                    <strong>Confirm Lead details below</strong>
+                </p>
+                <template for:each={confirmSections} for:item="section">
+                    <div key={section.key}>
+                    <template lwc:if={section.isRepeater}>
+                            <div class="section-box">
+                                <p class="slds-form-element__label">Product category</p>
+                                <lightning-datatable
+                                    key-field="id"
+                                    data={summaryRows}
+                                    columns={summaryColumns}
+                                    hide-checkbox-column
+                                ></lightning-datatable>
+                            </div>
+                    </template>
+                    <template lwc:else>
+                        <div class="slds-section slds-is-open slds-m-bottom_small">
+                            <h3 class="slds-section__title slds-theme_shade">
+                                <span class="slds-truncate slds-p-horizontal_small">{section.title}</span>
+                            </h3>
+                            <div class="slds-grid slds-wrap slds-p-top_small">
+                                <template for:each={section.columns} for:item="column">
+                                    <div
+                                        key={column.key}
+                                        class="slds-col slds-size_1-of-1 slds-medium-size_1-of-2 slds-p-horizontal_small"
+                                    >
+                                        <template for:each={column.fields} for:item="field">
+                                            <div key={field.name}>
+                                                <template lwc:if={field.isPicklist}>
+                                                    <lightning-combobox
+                                                        label={field.label}
+                                                        options={field.options}
+                                                        value={field.value}
+                                                        disabled
+                                                    ></lightning-combobox>
+                                                </template>
+                                                <template lwc:else>
+                                                    <lightning-input
+                                                        type="text"
+                                                        label={field.label}
+                                                        value={field.value}
+                                                        disabled
+                                                    ></lightning-input>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    </div>
+                </template>
+                <div class="slds-m-vertical_small slds-text-align_right">
+                    <lightning-button label="Previous" onclick={handleConfirmPrevious}></lightning-button>
+                    <lightning-button
+                        class="slds-m-left_x-small"
+                        variant="brand"
+                        label="Save Lead"
+                        onclick={handleSaveLead}
+                    ></lightning-button>
+                </div>
+            </template>
+
+            <!-- File Screen for Others -->
+            <template lwc:if={isOthersFileStep}>
+                <div class="slds-grid slds-wrap">
+                    <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-2">
+                        <p class="size-caution">Keep your file size less than 25MB</p>
+                        <lightning-file-upload
+                            label="Upload Document"
+                            name="UploadDocumentOthers"
+                            record-id={createdLeadId}
+                            multiple
+                            onuploadfinished={handleOthersUploadFinished}
+                        ></lightning-file-upload>
+                        <template lwc:if={uploadHasError}>
+                            <p class="upload-error">{uploadError}</p>
+                        </template>
+                    </div>
+                </div>
+                <div class="slds-m-vertical_small slds-text-align_right">
+                    <lightning-button variant="brand" label="Next" onclick={handleOthersFileNext}></lightning-button>
+                </div>
+            </template>
+
+            <!-- Success Screen -->
+            <template lwc:if={isSuccessStep}>
+                <p class="success-text">Lead has been created Successfully</p>
+                <div class="slds-m-vertical_small slds-text-align_right">
+                    <lightning-button variant="brand" label="Finish" onclick={handleFinish}></lightning-button>
+                </div>
+            </template>
+
+            <!-- FaultScreen -->
+            <template lwc:if={isFaultStep}>
+                <p class="fault-text">{faultMessage}</p>
+                <div class="slds-m-vertical_small slds-text-align_right">
+                    <lightning-button variant="brand" label="Finish" onclick={handleFinish}></lightning-button>
+                </div>
+            </template>
+        </div>
+    </lightning-card>
+</template>

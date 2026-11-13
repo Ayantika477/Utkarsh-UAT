@@ -472,10 +472,15 @@ export default class SolarStructureConfig extends LightningElement {
     }
 
     // All four Black variants price off the Black Metal base rate.
-    galvRateKeys(material) {
+    /*galvRateKeys(material) {
         return SolarStructureConfig.BLACK_VARIANTS.includes(material)
              ? [SolarStructureConfig.BLACK_METAL]
              : [material];
+    }*/
+
+    // All Black variants now price off their own distinct base rates and deltas
+    galvRateKeys(material) {
+        return [material];
     }
 
     // Black Metal and the four Black variants share every black-specific rule:
@@ -505,6 +510,14 @@ export default class SolarStructureConfig extends LightningElement {
     getGalvGradeOptions(material) {
         if (this.galvGradeMap && this.galvGradeMap[material]) {
             return this.galvGradeMap[material].map(opt => ({label: opt, value: opt}));
+        }
+
+        if (SolarStructureConfig.BLACK_VARIANTS.includes(material)) {
+            return [
+                {label: 'E350', value: 'E350'}, 
+                {label: 'E450', value: 'E450'}, 
+                {label: 'E550', value: 'E550'}
+            ];
         }
         // The Black variants inherit Black Metal's grade list.
         if (this.isBlackMaterial(material)) {

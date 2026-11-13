@@ -657,46 +657,45 @@ public class CrashBarrierQuoteController {
                 if(usancePer == '0'){
                     dynamicPaymentTerms = 'Against LC ' + interestFreeDays +' days.';
                 }else{
-                    dynamicPaymentTerms = 'Against LC ' + interestFreeDays + ' days (Usance ' + usancePer + ' days IFC).';
+                    dynamicPaymentTerms = 'Against ' + usancePer + ' days Usance LC (' + interestFreeDays + ' days IFC).';
                 }
             }
             else if (termType.equalsIgnoreCase('Advance')) dynamicPaymentTerms = '100% Advance before dispatch';
             else if (String.isNotBlank(termType)) dynamicPaymentTerms = termType;
             else dynamicPaymentTerms = '100% advance along with PI.';
             
-            // ─── Dynamic Freight Terms Logic ───────────────────────
-            // 1. Safe extraction of variables
             String freightIncoterms = jsonData.get('freight_incoterms') != null ? String.valueOf(jsonData.get('freight_incoterms')) : '';
+            // 1. Determine address prefix
             Boolean useShipping = jsonData.get('has_transportation_address') == true;
-
-            // 2. Build destination address efficiently
+            String prefix = useShipping ? 'sa_' : 'ba_';
+            
+            // 2. Build destination address dynamically
             String destination = '';
-            if (useShipping) {
-                List<String> addressParts = new List<String>();
-                List<String> fields = new List<String>{'sa_street', 'sa_city', 'sa_state', 'sa_zip_code', 'sa_country'};
-                
-                for (String field : fields) {
-                    Object valObj = jsonData.get(field);
-                    if (valObj != null) {
-                        String val = String.valueOf(valObj).trim();
-                        if (String.isNotBlank(val) && !val.equalsIgnoreCase('Not Found') && !val.equalsIgnoreCase('null')) {
-                            addressParts.add(val);
-                        }
+            List<String> addressParts = new List<String>();
+            List<String> fieldSuffixes = new List<String>{'street', 'city', 'state', 'zip_code', 'country'};
+            
+            for (String suffix : fieldSuffixes) {
+                Object valObj = jsonData.get(prefix + suffix);
+                if (valObj != null) {
+                    String val = String.valueOf(valObj).trim();
+                    if (String.isNotBlank(val) && !val.equalsIgnoreCase('Not Found') && !val.equalsIgnoreCase('null')) {
+                        addressParts.add(val);
                     }
                 }
-                destination = String.join(addressParts, ', ');
             }
-
-            // 3. Dynamic sentence construction (Fixes overwriting bug)
+            destination = String.join(addressParts, ', ');
+            
+            // 3. Dynamic sentence construction
             String tType = freightIncoterms.containsIgnoreCase('F.O.R') ? 'F.O.R.' 
-                            : freightIncoterms.containsIgnoreCase('Ex-Work') ? 'Ex-Work' 
-                            : null;
-
+                        : freightIncoterms.containsIgnoreCase('Ex-Work') ? 'Ex-Work' 
+                        : null;
+            
             if (tType != null) {
+                // Appends destination if one was successfully generated (works for both shipping or billing address)
                 dynamicFreightTerm = 'The rates quoted are on ' + tType + ' basis' + 
-                    (useShipping && String.isNotBlank(destination) ? ' at destination ' + destination + '.' : '.');
+                    (String.isNotBlank(destination) ? ' at destination ' + destination + '.' : '.');
             } else {
-                // Default fallback if neither term was found in input
+                // Default fallback
                 dynamicFreightTerm = 'The rates quoted are on Ex-Work basis.';
             }
         } else {

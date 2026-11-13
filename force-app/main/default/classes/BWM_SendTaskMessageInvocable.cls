@@ -1,3 +1,9 @@
+/**
+ * @description   Invocable Apex for Flow to queue Task Callback/Lost messaging
+ *                journeys.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_SendTaskMessageInvocable {
   public class Request {
     @InvocableVariable(label='Record Id' required=true)
@@ -105,7 +111,10 @@ public without sharing class BWM_SendTaskMessageInvocable {
 
   private static String resolveOpportunityCallbackTrigger(String stage, Id recordId) {
     String resolvedStage = resolveOpportunityStage(stage, recordId);
-    if (resolvedStage == BWM_MessagingConstants.STAGE_NURTURE) {
+    if (
+      resolvedStage == BWM_MessagingConstants.STAGE_NURTURE ||
+      resolvedStage == BWM_MessagingConstants.STAGE_NEGOTIATION
+    ) {
       return BWM_MessagingConstants.TRIGGER_OPPORTUNITY_TASK_CALLBACK_NURTURE;
     }
     return null;

@@ -198,19 +198,20 @@ private class getLocationUpdateTest {
         );
         insert punch;
     
-        // Create punch state
+        // Create punch state (pointer is set by PunchController in real flows)
         User_Punch_State__c state = new User_Punch_State__c(
             User__c = testUser.Id,
             Current_Status__c = 'IN',
-            Last_Punch_Time__c = System.now()
+            Last_Punch_Time__c = System.now(),
+            Punch_In_Record__c = punch.Id
         );
         insert state;
-    
+
         RestRequest req = new RestRequest();
         req.requestURI = '/services/apexrest/updatelocation';
         req.httpMethod = 'POST';
         req.params.put('myId', testUser.Id);
-    
+
         /*
          * iOS GeoJSON format
          *
@@ -266,5 +267,73 @@ private class getLocationUpdateTest {
         System.assertEquals(Decimal.valueOf('77.2090'), updatedState.Longitude__c);
         System.assertEquals('IN', updatedState.Current_Status__c);
         System.assertEquals(punch.Id, updatedState.Punch_In_Record__c);
+    }
+
+    /**
+     * Regression: after a mode (Market Visit) is ended, User_Punch_State__c points back to the
+     * Day In punch. A later location POST must NOT re-point it to the ended Market Visit IN,
+     * otherwise Day Out is blocked with "Please end your active mode of work before Day Out."
+     */
+    @isTest
+    static void testDoPostDoesNotOverrideActivePunchPointer() {
+        Profile pProfile = [SELECT Id FROM Profile WHERE Name = 'System Administrator' LIMIT 1];
+        User testUser = new User(
+            Alias = 'ptrusr',
+            Email = 'ptruser@example.com',
+            EmailEncodingKey = 'UTF-8',
+            LastName = 'PointerTesting',
+            LanguageLocaleKey = 'en_US',
+            LocaleSidKey = 'en_US',
+            ProfileId = pProfile.Id,
+            TimeZoneSidKey = 'America/Los_Angeles',
+            UserName = 'ptruser_getLocationUpdate@example.com'
+        );
+        insert testUser;
+
+        Datetime base = System.now().addHours(-2);
+        Punch_Record__c dayIn = new Punch_Record__c(
+            User__c = testUser.Id, Action__c = 'IN', Status__c = 'IN',
+            Punch_Time__c = base, Punch_Type__c = 'Day In / Out'
+        );
+        Punch_Record__c mvIn = new Punch_Record__c(
+            User__c = testUser.Id, Action__c = 'IN', Status__c = 'IN',
+            Punch_Time__c = base.addMinutes(5), Punch_Type__c = 'Market Visit'
+        );
+        insert new List<Punch_Record__c>{ dayIn, mvIn };
+        insert new Punch_Record__c(
+            User__c = testUser.Id, Action__c = 'OUT', Status__c = 'IN',
+            Punch_Time__c = base.addMinutes(60), Punch_Type__c = 'Market Visit',
+            Punch_Out_Of__c = mvIn.Id
+        );
+
+        // State as left by PunchController after ending the Market Visit
+        insert new User_Punch_State__c(
+            User__c = testUser.Id,
+            Current_Status__c = 'IN',
+            Last_Punch_Time__c = base.addMinutes(60),
+            Punch_In_Record__c = dayIn.Id
+        );
+
+        RestRequest req = new RestRequest();
+        req.requestURI = '/services/apexrest/updatelocation';
+        req.httpMethod = 'POST';
+        req.params.put('myId', testUser.Id);
+        req.requestBody = Blob.valueOf('{"latitude": 22.55, "longitude": 88.36, "battery": 50}');
+        RestContext.request = req;
+        RestContext.response = new RestResponse();
+
+        Test.startTest();
+        getLocationUpdate.doPost();
+        Test.stopTest();
+
+        User_Punch_State__c updatedState = [
+            SELECT Current_Status__c, Punch_In_Record__c, Latitude__c, Battery_Percentage__c
+            FROM User_Punch_State__c WHERE User__c = :testUser.Id LIMIT 1
+        ];
+        System.assertEquals(dayIn.Id, updatedState.Punch_In_Record__c,
+            'Location sync must not re-point the active punch to an ended mode');
+        System.assertEquals('IN', updatedState.Current_Status__c);
+        System.assertEquals(Decimal.valueOf('22.55'), updatedState.Latitude__c);
+        System.assertEquals(50, updatedState.Battery_Percentage__c);
     }
 }

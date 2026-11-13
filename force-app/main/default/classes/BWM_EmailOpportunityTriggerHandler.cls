@@ -1,6 +1,16 @@
+/**
+ * @description   Opportunity after-insert/update handler that enqueues auto email
+ *                sends.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_EmailOpportunityTriggerHandler {
   private static Set<Id> processedInsertIds = new Set<Id>();
 
+  /**
+   * @description After-insert Opportunity handler that enqueues nurture, dealer enquiry, and refer-to-dealer emails when enabled.
+   * @param newOpportunities Newly inserted Opportunity records from the trigger context.
+   */
   public static void handleAfterInsert(List<Opportunity> newOpportunities) {
     if (newOpportunities == null || newOpportunities.isEmpty()) {
       return;
@@ -59,6 +69,8 @@ public without sharing class BWM_EmailOpportunityTriggerHandler {
           )
         );
       }
+
+      addClosedWonRequests(requests, opportunityRecord, null);
     }
 
     if (!requests.isEmpty()) {
@@ -66,6 +78,11 @@ public without sharing class BWM_EmailOpportunityTriggerHandler {
     }
   }
 
+  /**
+   * @description After-update Opportunity handler that enqueues emails for lost-reason and refer-to-dealer changes when enabled.
+   * @param newOpportunities Updated Opportunity records from the trigger context.
+   * @param oldMap Prior Opportunity versions keyed by Id.
+   */
   public static void handleAfterUpdate(
     List<Opportunity> newOpportunities,
     Map<Id, Opportunity> oldMap
@@ -93,6 +110,7 @@ public without sharing class BWM_EmailOpportunityTriggerHandler {
         oldRecord
       );
       addReferToDealerRequests(requests, opportunityRecord, oldRecord);
+      addClosedWonRequests(requests, opportunityRecord, oldRecord);
     }
 
     if (!requests.isEmpty()) {
@@ -100,15 +118,34 @@ public without sharing class BWM_EmailOpportunityTriggerHandler {
     }
   }
 
+  /**
+   * @description Adds an email request when Lost_Reason__c changes to a routable
+   *              trigger, or when stage moves Nurture → Closed Lost with
+   *              Not responding already set (that email resolves only after Closed Lost).
+   * @param requests Mutable list of email requests to append to.
+   * @param opportunityRecord Updated Opportunity record.
+   * @param oldRecord Prior Opportunity version before the update.
+   */
   private static void addLostReasonChangeRequests(
     List<BWM_EmailRequest> requests,
     Opportunity opportunityRecord,
     Opportunity oldRecord
   ) {
-    if (opportunityRecord.Lost_Reason__c == oldRecord.Lost_Reason__c) {
+    if (String.isBlank(opportunityRecord.Lost_Reason__c)) {
       return;
     }
-    if (String.isBlank(opportunityRecord.Lost_Reason__c)) {
+
+    Boolean lostReasonChanged =
+      opportunityRecord.Lost_Reason__c != oldRecord.Lost_Reason__c;
+    // Match journey UX: reason may be set on Nurture first, then stage moved to
+    // Closed Lost. Re-resolve only that Not-responding Nurture path.
+    Boolean nurtureNotRespondingMovedToClosedLost =
+      !lostReasonChanged &&
+      opportunityRecord.StageName == BWM_EmailConstants.STAGE_CLOSED_LOST &&
+      oldRecord.StageName == BWM_EmailConstants.STAGE_NURTURE &&
+      isNotRespondingLostReason(opportunityRecord.Lost_Reason__c);
+
+    if (!lostReasonChanged && !nurtureNotRespondingMovedToClosedLost) {
       return;
     }
 
@@ -122,6 +159,19 @@ public without sharing class BWM_EmailOpportunityTriggerHandler {
     }
   }
 
+  private static Boolean isNotRespondingLostReason(String lostReason) {
+    Set<String> allowed = BWM_EmailConstants.OPP_LOST_REASONS_BY_GROUP.get(
+      BWM_EmailConstants.OPP_LOST_GROUP_NOT_RESPONDING
+    );
+    return allowed != null && allowed.contains(lostReason);
+  }
+
+  /**
+   * @description Adds a refer-to-dealer email request when Customer_Journey__c changes to Refer Dealer.
+   * @param requests Mutable list of email requests to append to.
+   * @param opportunityRecord Updated Opportunity record.
+   * @param oldRecord Prior Opportunity version before the update.
+   */
   private static void addReferToDealerRequests(
     List<BWM_EmailRequest> requests,
     Opportunity opportunityRecord,
@@ -147,6 +197,60 @@ public without sharing class BWM_EmailOpportunityTriggerHandler {
     );
   }
 
+  /**
+   * @description Adds a Closed Won thank-you email when stage newly becomes Closed Won
+   *              and Customer Journey is Refer to Dealer or Direct Business.
+   * @param requests Mutable list of email requests to append to.
+   * @param opportunityRecord Updated Opportunity record.
+   * @param oldRecord Prior Opportunity version before the update, or null on insert.
+   */
+  private static void addClosedWonRequests(
+    List<BWM_EmailRequest> requests,
+    Opportunity opportunityRecord,
+    Opportunity oldRecord
+  ) {
+    if (oldRecord != null) {
+      if (
+        opportunityRecord.StageName != BWM_EmailConstants.STAGE_CLOSED_WON ||
+        oldRecord.StageName == BWM_EmailConstants.STAGE_CLOSED_WON
+      ) {
+        return;
+      }
+    } else if (opportunityRecord.StageName != BWM_EmailConstants.STAGE_CLOSED_WON) {
+      return;
+    }
+
+    if (
+      opportunityRecord.Customer_Journey__c ==
+      BWM_EmailConstants.CUSTOMER_JOURNEY_REFER_DEALER
+    ) {
+      requests.add(
+        new BWM_EmailRequest(
+          opportunityRecord.Id,
+          BWM_EmailConstants.TRIGGER_OPP_CLOSED_WON_REFER_DEALER
+        )
+      );
+      return;
+    }
+
+    if (
+      opportunityRecord.Customer_Journey__c ==
+      BWM_EmailConstants.CUSTOMER_JOURNEY_DIRECT
+    ) {
+      requests.add(
+        new BWM_EmailRequest(
+          opportunityRecord.Id,
+          BWM_EmailConstants.TRIGGER_OPP_CLOSED_WON_DIRECT_BUSINESS
+        )
+      );
+    }
+  }
+
+  /**
+   * @description Returns true when the Opportunity is an Enquiry/Gen Tower dealer enquiry with phone or inbound-email source.
+   * @param opportunityRecord Opportunity to evaluate.
+   * @return True if dealer-enquiry email should fire; otherwise false.
+   */
   @TestVisible
   private static Boolean isDealerEnquiryOpportunity(Opportunity opportunityRecord) {
     if (opportunityRecord == null) {

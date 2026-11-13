@@ -34,6 +34,35 @@ public class PunchController {
         @AuraEnabled public String status;
         @AuraEnabled public String type; // 'WFH' or 'WFO'
         @AuraEnabled public Id approverId;
+        @AuraEnabled public String approverName;
+        @AuraEnabled public String remarks;
+        @AuraEnabled public String requestNote;
+    }
+
+    private static WFHRequestDetail toWfhRequestDetail(Punch_Record__c pr) {
+        WFHRequestDetail detail = new WFHRequestDetail();
+        detail.requestId = pr.Id;
+        detail.approverId = pr.WFH_Approver__c;
+        detail.approverName = pr.WFH_Approver__r != null ? pr.WFH_Approver__r.Name : null;
+        detail.requestDate = pr.WFH_Request_Date__c;
+        detail.startTime = formatRequestTime(pr.WFH_Request_Start_Time__c);
+        detail.endTime = formatRequestTime(pr.WFH_Request_End_Time__c);
+        detail.status = pr.WFH_Approval_Status__c;
+        detail.type = pr.Is_WFH_Request__c ? 'WFH' : 'WFO';
+        detail.remarks = pr.Approver_Remarks__c;
+        detail.requestNote = pr.WFH_Activity__c;
+        return detail;
+    }
+
+    private static String formatRequestTime(Time t) {
+        if (t == null) {
+            return '';
+        }
+        String formatted = String.valueOf(t);
+        if (formatted.length() > 5) {
+            formatted = formatted.substring(0, 5);
+        }
+        return formatted;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -104,11 +133,16 @@ public class PunchController {
         p.Latitude__c   = latitude;
         p.Longitude__c  = longitude;
         p.Battery__c    = battery;
+        PunchRecordHodHandler.applyHod(p);
         insert p;
 
         if (odometerImageBase64 != null) {
             ContentVersion cv = new ContentVersion();
-            String base64Data = odometerImageBase64.contains(',') ? odometerImageBase64.split(',')[1] : odometerImageBase64;
+            //String base64Data = odometerImageBase64.contains(',') ? odometerImageBase64.split(',')[1] : odometerImageBase64;
+            Integer commaIndex = odometerImageBase64.indexOf(',');
+            String base64Data = commaIndex >= 0
+                ? odometerImageBase64.substring(commaIndex + 1)
+                : odometerImageBase64;
             cv.VersionData            = EncodingUtil.base64Decode(base64Data);
             cv.Title                  = fileName;
             cv.PathOnClient           = fileName;
@@ -209,7 +243,7 @@ public class PunchController {
         }
 
         // --- WFH Approval Check ---
-        Date todayVal = Date.today();
+        /*Date todayVal = Date.today();
 
         // Check for approved WFH today
         List<Punch_Record__c> approvedToday = [
@@ -234,34 +268,55 @@ public class PunchController {
             dto.isWFHApprovedForToday = false;
             dto.isWFOApproved = false;
             dto.wfhRequestStatusTomorrow = 'Rejected';
+        }*/
+
+
+        // --- WFH / WFO Approval Check ---
+        Date todayVal = Date.today();
+
+        List<Punch_Record__c> approvedToday = [
+            SELECT Id,
+                Is_WFH_Request__c,
+                Is_WFO_Request__c,
+                WFH_Request_Date__c,
+                WFH_Request_Start_Time__c,
+                WFH_Request_End_Time__c,
+                WFH_Approval_Status__c
+            FROM Punch_Record__c
+            WHERE User__c = :runningUserId
+            AND (Is_WFH_Request__c = true OR Is_WFO_Request__c = true)
+            AND WFH_Request_Date__c = :todayVal
+            AND WFH_Approval_Status__c = 'Approved'
+            ORDER BY WFH_Request_Start_Time__c ASC
+        ];
+
+        dto.isWFHApprovedForToday = false;
+        dto.isWFOApproved = false;
+
+        for (Punch_Record__c req : approvedToday) {
+            if (req.Is_WFH_Request__c) {
+                dto.isWFHApprovedForToday = true;
+            }
+
+            if (req.Is_WFO_Request__c) {
+                dto.isWFOApproved = true;
+            }
         }
+
 
         // Fetch all WFH / WFO request applications
         List<WFHRequestDetail> wfhReqs = new List<WFHRequestDetail>();
         for (Punch_Record__c pr : [
-            SELECT Id, WFH_Request_Date__c, WFH_Request_Start_Time__c, WFH_Request_End_Time__c, 
-                   WFH_Approval_Status__c, Is_WFH_Request__c, Is_WFO_Request__c, WFH_Approver__c
+            SELECT Id, WFH_Request_Date__c, WFH_Request_Start_Time__c, WFH_Request_End_Time__c,
+                   WFH_Approval_Status__c, Is_WFH_Request__c, Is_WFO_Request__c,
+                   WFH_Approver__c, WFH_Approver__r.Name, Approver_Remarks__c, WFH_Activity__c
             FROM Punch_Record__c
             WHERE User__c = :runningUserId
             AND (Is_WFH_Request__c = true OR Is_WFO_Request__c = true)
             ORDER BY WFH_Request_Date__c DESC, CreatedDate DESC
             LIMIT 50
         ]) {
-            WFHRequestDetail detail = new WFHRequestDetail();
-            detail.requestId = pr.Id;
-            detail.approverId = pr.WFH_Approver__c;
-            detail.requestDate = pr.WFH_Request_Date__c;
-            detail.startTime = pr.WFH_Request_Start_Time__c != null ? String.valueOf(pr.WFH_Request_Start_Time__c) : '';
-            if (String.isNotBlank(detail.startTime) && detail.startTime.length() > 5) {
-                detail.startTime = detail.startTime.substring(0, 5);
-            }
-            detail.endTime = pr.WFH_Request_End_Time__c != null ? String.valueOf(pr.WFH_Request_End_Time__c) : '';
-            if (String.isNotBlank(detail.endTime) && detail.endTime.length() > 5) {
-                detail.endTime = detail.endTime.substring(0, 5);
-            }
-            detail.status = pr.WFH_Approval_Status__c;
-            detail.type = pr.Is_WFH_Request__c ? 'WFH' : 'WFO';
-            wfhReqs.add(detail);
+            wfhReqs.add(toWfhRequestDetail(pr));
         }
         dto.wfhRequests = wfhReqs;
 
@@ -323,29 +378,16 @@ public class PunchController {
         }
         List<WFHRequestDetail> wfhReqs = new List<WFHRequestDetail>();
         for (Punch_Record__c pr : [
-            SELECT Id, WFH_Request_Date__c, WFH_Request_Start_Time__c, WFH_Request_End_Time__c, 
-                   WFH_Approval_Status__c, Is_WFH_Request__c, Is_WFO_Request__c, WFH_Approver__c
+            SELECT Id, WFH_Request_Date__c, WFH_Request_Start_Time__c, WFH_Request_End_Time__c,
+                   WFH_Approval_Status__c, Is_WFH_Request__c, Is_WFO_Request__c,
+                   WFH_Approver__c, WFH_Approver__r.Name, Approver_Remarks__c, WFH_Activity__c
             FROM Punch_Record__c
             WHERE User__c = :userId
             AND (Is_WFH_Request__c = true OR Is_WFO_Request__c = true)
             ORDER BY WFH_Request_Date__c DESC, CreatedDate DESC
             LIMIT 50
         ]) {
-            WFHRequestDetail detail = new WFHRequestDetail();
-            detail.requestId = pr.Id;
-            detail.approverId = pr.WFH_Approver__c;
-            detail.requestDate = pr.WFH_Request_Date__c;
-            detail.startTime = pr.WFH_Request_Start_Time__c != null ? String.valueOf(pr.WFH_Request_Start_Time__c) : '';
-            if (String.isNotBlank(detail.startTime) && detail.startTime.length() > 5) {
-                detail.startTime = detail.startTime.substring(0, 5);
-            }
-            detail.endTime = pr.WFH_Request_End_Time__c != null ? String.valueOf(pr.WFH_Request_End_Time__c) : '';
-            if (String.isNotBlank(detail.endTime) && detail.endTime.length() > 5) {
-                detail.endTime = detail.endTime.substring(0, 5);
-            }
-            detail.status = pr.WFH_Approval_Status__c;
-            detail.type = pr.Is_WFH_Request__c ? 'WFH' : 'WFO';
-            wfhReqs.add(detail);
+            wfhReqs.add(toWfhRequestDetail(pr));
         }
         return wfhReqs;
     }
@@ -404,6 +446,7 @@ public class PunchController {
             dayIn.Battery__c = battery;
             dayIn.Device_OS__c = deviceOS;
             dayIn.Device_Model__c = deviceModel;
+            PunchRecordHodHandler.applyHod(dayIn);
             insert dayIn;
             
             p = dayIn;
@@ -461,6 +504,7 @@ public class PunchController {
                 dayOut.Punch_Out_Of__c = lastDayIns[0].Id;
             }
 
+            PunchRecordHodHandler.applyHod(dayOut);
             insert dayOut;
             p = dayOut;
         }
@@ -468,8 +512,12 @@ public class PunchController {
         // Attach selfie image to dayIn/dayOut record if provided
         if (String.isNotBlank(selfieImageBase64)) {
             ContentVersion cv = new ContentVersion();
-            String base64Data = selfieImageBase64.contains(',')
+            /*String base64Data = selfieImageBase64.contains(',')
                 ? selfieImageBase64.split(',')[1]
+                : selfieImageBase64;*/
+            Integer commaIndex = selfieImageBase64.indexOf(',');
+            String base64Data = commaIndex >= 0
+                ? selfieImageBase64.substring(commaIndex + 1)
                 : selfieImageBase64;
             cv.VersionData            = EncodingUtil.base64Decode(base64Data);
             cv.Title                  = 'selfie_capture.jpg';
@@ -503,8 +551,79 @@ public class PunchController {
      * Submits a WFH request for a specific date and time range.
      */
     @AuraEnabled
-    public static void submitWFHRequest(Date reqDate, String startTimeStr, String endTimeStr, String catagory, String requestNote) {
+    public static void submitWFHRequest(Date reqDate, String startTimeStr, String endTimeStr, String catagory, String requestNote, String deviceOS, String deviceModel) {
         Id runningUserId = UserInfo.getUserId();
+
+
+        // Prevent overlapping requests only when an existing request is APPROVED.
+        // Pending and Rejected requests do not block a new request.
+
+        Boolean isWFH = catagory == 'WFH';
+        Boolean isWFO = catagory == 'WFO';
+
+        Time newStart = String.isNotBlank(startTimeStr)
+            ? parseTime(startTimeStr)
+            : null;
+
+        Time newEnd = String.isNotBlank(endTimeStr)
+            ? parseTime(endTimeStr)
+            : null;
+
+        if (newStart != null && newEnd != null) {
+
+            List<Punch_Record__c> conflictingRequests;
+
+            if (catagory == 'WFH') {
+                conflictingRequests = [
+                    SELECT Id,
+                        WFH_Request_Start_Time__c,
+                        WFH_Request_End_Time__c
+                    FROM Punch_Record__c
+                    WHERE User__c = :runningUserId
+                    AND WFH_Request_Date__c = :reqDate
+                    AND WFH_Approval_Status__c IN ('Approved', 'Pending')
+                    AND Is_WFH_Request__c = true
+                ];
+            } else {
+                conflictingRequests = [
+                    SELECT Id,
+                        WFH_Request_Start_Time__c,
+                        WFH_Request_End_Time__c
+                    FROM Punch_Record__c
+                    WHERE User__c = :runningUserId
+                    AND WFH_Request_Date__c = :reqDate
+                    AND WFH_Approval_Status__c IN ('Approved', 'Pending')
+                    AND Is_WFO_Request__c = true
+                ];
+            }
+
+            for (Punch_Record__c existingReq : conflictingRequests) {
+
+                Time existingStart = existingReq.WFH_Request_Start_Time__c;
+                Time existingEnd = existingReq.WFH_Request_End_Time__c;
+
+                if (existingStart == null || existingEnd == null) {
+                    continue;
+                }
+
+                // Overlap condition:
+                // New Start < Existing End
+                // AND
+                // New End > Existing Start
+                if (newStart < existingEnd && newEnd > existingStart) {
+
+                    String requestType = isWFH ? 'WFH' : 'WFO';
+
+                    throw new AuraHandledException(
+                        'You already have a ' + requestType +
+                        ' request overlapping this time (' +
+                        formatTime(existingStart) + ' - ' +
+                        formatTime(existingEnd) + ').'
+                    );
+                }
+            }
+        }
+
         
         Punch_Record__c p = new Punch_Record__c();
         p.User__c = runningUserId;
@@ -523,6 +642,8 @@ public class PunchController {
         }
         p.WFH_Request_Date__c = reqDate;
         p.WFH_Approval_Status__c = 'Pending';
+        p.Device_OS__c = deviceOS;
+        p.Device_Model__c = deviceModel;
         
         // Set Approver from Custom Metadata
         List<Manager_Assignment__mdt> mapping = [
@@ -542,6 +663,7 @@ public class PunchController {
             p.WFH_Request_End_Time__c = parseTime(endTimeStr);
         }
 
+        PunchRecordHodHandler.applyHod(p);
         insert p;
     }
 
@@ -565,6 +687,18 @@ public class PunchController {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static String formatTime(Time t) {
+        if (t == null) {
+            return '';
+        }
+
+        String formatted = String.valueOf(t);
+
+        return formatted.length() >= 5
+            ? formatted.substring(0, 5)
+            : formatted;
     }
 
     /**
@@ -617,7 +751,11 @@ public class PunchController {
         try {
             // Save as ContentVersion
             ContentVersion cv = new ContentVersion();
-            String base64Data = base64Photo.contains(',') ? base64Photo.split(',')[1] : base64Photo;
+            // String base64Data = base64Photo.contains(',') ? base64Photo.split(',')[1] : base64Photo;
+            Integer commaIndex = base64Photo.indexOf(',');
+            String base64Data = commaIndex >= 0
+                ? base64Photo.substring(commaIndex + 1)
+                : base64Photo;
             cv.VersionData = EncodingUtil.base64Decode(base64Data);
             cv.Title = 'Selfie_' + System.now().format('yyyyMMdd_HHmmss') + '.jpg';
             cv.PathOnClient = cv.Title;
@@ -658,7 +796,7 @@ public class PunchController {
             SELECT COUNT() 
             FROM Track_Location__c 
             WHERE Punch_Record__c = :latestIn[0].Id 
-            AND Source__c = 'Logger'
+            AND Source__c IN ('Logger', 'AppleApp')
             AND CreatedDate >= :tenMinsAgo
         ];
         
@@ -677,7 +815,7 @@ public class PunchController {
     ) {
         return updatePunchTypeAndOdometer(
             punchType, transportType, vehicleType, odometerReading, extractedOdometer,
-            odometerImageBase64, fileName, null, null, null, null, null
+            odometerImageBase64, fileName, null, null, null, null, null, null, null
         );
     }
 
@@ -694,7 +832,9 @@ public class PunchController {
         Decimal noOfEmails,
         Decimal noOfOffersSent,
         Decimal noOfMeetings,
-        String openNotes
+        String openNotes,
+        String deviceOS,
+        String deviceModel
     ) {
         Id runningUserId = UserInfo.getUserId();
 
@@ -714,7 +854,7 @@ public class PunchController {
 
         List<Punch_Record__c> lastPunches = [
             SELECT Id, Punch_Type__c, Transportation_Type__c, Vehicle_Type__c, Odometer_Reading__c, Extracted_Odometer_Reading__c,
-                   Latitude__c, Longitude__c, Battery__c
+                   Latitude__c, Longitude__c, Battery__c, Device_OS__c, Device_Model__c
             FROM Punch_Record__c
             WHERE Id = :activePunchId
             LIMIT 1
@@ -771,6 +911,22 @@ public class PunchController {
             }
         }
 
+        if (activePunch.Punch_Type__c == 'Market Visit' &&
+            activePunch.Transportation_Type__c == 'Private Vehicle') {
+
+            if (String.isBlank(odometerImageBase64)) {
+                throw new AuraHandledException(
+                    'Odometer image is required to end a Private Vehicle Market Visit.'
+                );
+            }
+
+            if (extractedOdometer == null) {
+                throw new AuraHandledException(
+                    'Please capture a valid odometer image and wait for the reading to be extracted.'
+                );
+            }
+        }
+
         // 2. Create the OUT record to close the previous mode
         if (activePunch.Punch_Type__c != 'Day In / Out') {
             Punch_Record__c oldOut = new Punch_Record__c();
@@ -783,6 +939,8 @@ public class PunchController {
             oldOut.Latitude__c = activePunch.Latitude__c;
             oldOut.Longitude__c = activePunch.Longitude__c;
             oldOut.Battery__c = activePunch.Battery__c;
+            oldOut.Device_OS__c = activePunch.Device_OS__c;
+            oldOut.Device_Model__c = activePunch.Device_Model__c;
             
             // If ending a Market Visit, the incoming odometer reading belongs to oldOut (the OUT record)
             if (activePunch.Punch_Type__c == 'Market Visit' && activePunch.Transportation_Type__c == 'Private Vehicle') {
@@ -806,12 +964,17 @@ public class PunchController {
                 oldOut.Open_Notes__c = openNotes;
             }
             
+            PunchRecordHodHandler.applyHod(oldOut);
             insert oldOut;
 
             // Attach odometer image to oldOut if ending Market Visit
             if (String.isNotBlank(odometerImageBase64) && activePunch.Punch_Type__c == 'Market Visit' && activePunch.Transportation_Type__c == 'Private Vehicle') {
                 ContentVersion cv = new ContentVersion();
-                String base64Data = odometerImageBase64.contains(',') ? odometerImageBase64.split(',')[1] : odometerImageBase64;
+                //String base64Data = odometerImageBase64.contains(',') ? odometerImageBase64.split(',')[1] : odometerImageBase64;
+                Integer commaIndex = odometerImageBase64.indexOf(',');
+                String base64Data = commaIndex >= 0
+                    ? odometerImageBase64.substring(commaIndex + 1)
+                    : odometerImageBase64;
                 cv.VersionData            = EncodingUtil.base64Decode(base64Data);
                 cv.Title                  = String.isNotBlank(fileName) ? fileName : 'odometer_end.jpg';
                 cv.PathOnClient           = String.isNotBlank(fileName) ? fileName : 'odometer_end.jpg';
@@ -842,14 +1005,25 @@ public class PunchController {
             newIn.Latitude__c = activePunch.Latitude__c;
             newIn.Longitude__c = activePunch.Longitude__c;
             newIn.Battery__c = activePunch.Battery__c;
+            newIn.Device_OS__c = deviceOS;
+            newIn.Device_Model__c = deviceModel;
+            PunchRecordHodHandler.applyHod(newIn);
             insert newIn;
+
+            if (punchType == 'WFH' || punchType == 'WFO') {
+                sendWfhWfoStartNotification(runningUserId, punchType);
+            }
 
             activeInId = newIn.Id;
 
             // Attach odometer image to newIn if starting Market Visit
             if (String.isNotBlank(odometerImageBase64) && punchType == 'Market Visit' && transportType == 'Private Vehicle') {
                 ContentVersion cv = new ContentVersion();
-                String base64Data = odometerImageBase64.contains(',') ? odometerImageBase64.split(',')[1] : odometerImageBase64;
+                //String base64Data = odometerImageBase64.contains(',') ? odometerImageBase64.split(',')[1] : odometerImageBase64;
+                Integer commaIndex = odometerImageBase64.indexOf(',');
+                String base64Data = commaIndex >= 0
+                    ? odometerImageBase64.substring(commaIndex + 1)
+                    : odometerImageBase64;
                 cv.VersionData            = EncodingUtil.base64Decode(base64Data);
                 cv.Title                  = String.isNotBlank(fileName) ? fileName : 'odometer_start.jpg';
                 cv.PathOnClient           = String.isNotBlank(fileName) ? fileName : 'odometer_start.jpg';
@@ -880,5 +1054,106 @@ public class PunchController {
         }
 
         return getCurrentStateForUser();
+    }
+
+    public static void sendWfhWfoStartNotification(Id userId, String punchType) {
+
+        User currentUser = [
+            SELECT Id, Name, Department
+            FROM User
+            WHERE Id = :userId
+            LIMIT 1
+        ];
+
+        Set<String> recipientIds = new Set<String>();
+
+        // Utkarsh HOD: same Department as the user
+        for (User u : [
+            SELECT Id
+            FROM User
+            WHERE Department = :currentUser.Department
+            AND Profile.Name = 'Utkarsh HOD'
+            AND IsActive = true
+        ]) {
+            recipientIds.add(u.Id);
+        }
+
+        // CRM Head: user's Department belongs to one of the CRM Head's Departments__c
+        if (String.isNotBlank(currentUser.Department)) {
+            String userDept = currentUser.Department.trim().toUpperCase();
+            for (User u : [
+                SELECT Id, Departments__c
+                FROM User
+                WHERE Profile.Name = 'CRM Head'
+                AND IsActive = true
+                AND Departments__c != null
+            ]) {
+                for (String deptName : getCrmHeadDepartmentNames(u.Departments__c)) {
+                    if (deptName.toUpperCase() == userDept) {
+                        recipientIds.add(u.Id);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (recipientIds.isEmpty()) {
+            return;
+        }
+
+        CustomNotificationType notificationType = [
+            SELECT Id
+            FROM CustomNotificationType
+            WHERE DeveloperName = 'WFH_WFO_Notification'
+            LIMIT 1
+        ];
+
+        Messaging.CustomNotification notification =
+            new Messaging.CustomNotification();
+
+        notification.setTitle(punchType + ' Started');
+        notification.setBody(
+            currentUser.Name + ' has started the day by marking ' + punchType + ' attendance.'
+        );
+        notification.setNotificationTypeId(notificationType.Id);
+        notification.setTargetId(userId);
+
+        notification.send(recipientIds);
+    }
+
+    // Department name (User.Department, uppercased) -> User.Departments__c picklist value
+    private static final Map<String, String> DEPARTMENT_NORMALIZATION_MAP = new Map<String, String>{
+        'HIGH MAST & POLYGONAL'             => 'High_Mast_Department',
+        'CRASH BARRIER'                     => 'Crash_Barrier_Department',
+        'HDPE'                              => 'HDPE_Pipe_Department',
+        'STEEL TUBULAR POLES'               => 'Steel_Tubular_Pole_Department',
+        'POLYMER'                           => 'PVC',
+        'TRANSMISSION & TELECOM TOWER'      => 'Transmission_Tower_Department',
+        'PRE ENGINEERING BUILDING'          => 'PEB',
+        'SOLAR STRUCTURE'                   => 'Solar_Structure_Department',
+        'RAILWAY ELECTRIFICATION STRUCTURE' => 'Core_Department',
+        'STEEL PIPES'                       => 'Steel_Pipes_Department'
+    };
+
+    /**
+     * Department values covered by a CRM Head: each of the CRM Head's Departments__c values
+     * plus that department's name (e.g. 'Crash_Barrier_Department' and 'CRASH BARRIER').
+     */
+    private static Set<String> getCrmHeadDepartmentNames(String departmentsValue) {
+        Set<String> deptNames = new Set<String>();
+        if (String.isBlank(departmentsValue)) {
+            return deptNames;
+        }
+        for (String rawDept : departmentsValue.split(';')) {
+            if (String.isNotBlank(rawDept)) {
+                deptNames.add(rawDept.trim());
+            }
+        }
+        for (String deptName : DEPARTMENT_NORMALIZATION_MAP.keySet()) {
+            if (deptNames.contains(DEPARTMENT_NORMALIZATION_MAP.get(deptName))) {
+                deptNames.add(deptName);
+            }
+        }
+        return deptNames;
     }
 }

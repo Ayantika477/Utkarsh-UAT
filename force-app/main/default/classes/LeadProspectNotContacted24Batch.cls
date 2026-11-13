@@ -54,7 +54,7 @@ public without sharing class LeadProspectNotContacted24Batch implements Database
     }
 
     if (!leadsToUpdate.isEmpty()) {
-      update leadsToUpdate;
+      Database.update(leadsToUpdate, false);
     }
   }
 
@@ -62,6 +62,6 @@ public without sharing class LeadProspectNotContacted24Batch implements Database
   }
 
   public void execute(SchedulableContext context) {
-    Database.executeBatch(new LeadProspectNotContacted24Batch(), 50);
+    Database.executeBatch(new LeadProspectNotContacted24Batch(), 10);
   }
 }

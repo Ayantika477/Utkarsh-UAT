@@ -10,12 +10,29 @@
     <meta charset="UTF-8"/>
     <style type="text/css">
 
-        /* ── PAGE SETUP with running header/footer ── */
+        /* ── PAGE SETUP ──────────────────────────────────────────────────
+           Three page rules, the same shape HMScopeSingle / HMScopeCombined use.
+
+           The global rule MUST carry 0 margin and no running header, otherwise
+           the 297mm cover image is laid into 297 - 35 - 28 = 234mm of usable
+           height and spills onto a second page with the header printed over it.
+           The document pages opt back in to margins + header/footer through the
+           named page below. Deepanjan (19th Aug 2026) */
         @page {
+            size: A4;
+            margin: 0mm;
+        }
+
+        @page standard-content {
             size: A4;
             margin: 35mm 0mm 28mm 0mm;
             @top-left    { content: element(header); }
             @bottom-left { content: element(footer); }
+        }
+
+        @page final-page {
+            size: A4;
+            margin: 0mm;
         }
 
         html, body {
@@ -28,6 +45,7 @@
         }
 
         div.document-body-inner {
+            page: standard-content;   /* margins + running header/footer */
             padding: 2mm 20mm 2mm 20mm;
         }
 
@@ -65,6 +83,26 @@
             height: 22mm; width: auto;
             display: inline-block;
             background-color: #fff; padding: 1px;
+        }
+        /* Cover pages - full bleed */
+        div.page-cover {
+            page-break-after: always;
+            width: 210mm;
+            height: 297mm;
+            margin: 0mm;
+        }
+        div.page-cover-last {
+            page-break-before: always;
+            width: 210mm;
+            height: 297mm;
+            margin: 0mm;
+        }
+        
+        .cover-img {
+            width: 210mm;
+            height: 297mm;
+            display: block;
+            object-fit: cover;
         }
 
         /* ── RUNNING FOOTER ── */
@@ -128,6 +166,17 @@
             text-align: center; margin-top: 10px; line-height: 1.5;
         }
 
+        /* ── BLANK PAGE FIX — Deepanjan (24th September 2026) ──
+           When the offer letter ends right at the bottom of a page, the empty
+           space after its last line (p margin + inline-block baseline gap +
+           2mm body padding) spilled onto a new page, and the Annexure's
+           page-break then started yet another page - a blank page with only
+           the header. Nothing visible is removed: these are gaps at the very
+           end of a block. */
+        div.document-body-inner { padding-bottom: 0mm; }
+        .signoff { vertical-align: top; }
+        .signoff-last { margin-bottom: 0; }
+
     </style>
 </head>
 <body>
@@ -161,8 +210,13 @@
              the bottom reserve are unchanged. Deepanjan (24th July 2026) -->
         <div class="footer-inner"></div>
     </div>
+    
+    <!-- PAGE 1: Front Cover -->
+    <div class="page-cover">
+        <apex:image url="{!$Resource.CoreFrontPage}" styleClass="cover-img"/>
+    </div>
 
-    <!-- ══════════ PAGE 1 — OFFER LETTER ══════════ -->
+    <!-- ══════════ PAGE 2 — OFFER LETTER ══════════ -->
     <div class="document-body-inner">
 
         <!-- REF & DATE -->
@@ -487,7 +541,7 @@
             <p>Hopefully you will find our rates, terms &amp; condition competitive and
             thereby proceed to award the contract in our favour.</p>
             <br/>
-            <p>
+            <p class="signoff-last">
                 Thanking you,<br/>
                 Yours faithfully,<br/>
                 <span class="bold">For Utkarsh India Limited</span><br/>
@@ -645,6 +699,11 @@
             </table>
         </apex:outputPanel>
 
+    </div>
+
+    <!-- ══════════ LAST PAGE — full bleed cover ══════════ -->
+    <div class="page-cover-last">
+        <apex:image url="{!$Resource.HM_Last_Page}" styleClass="cover-img"/>
     </div>
 
 </body>

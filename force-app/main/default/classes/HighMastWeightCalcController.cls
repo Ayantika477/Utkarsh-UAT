@@ -2,6 +2,10 @@ public class HighMastWeightCalcController {
     
                                              public Quote   quoteRecord     { get; set; }
     public String  soWRef          { get; set; }
+    // Mast type shown in the sheet title. Held here instead of in the page's IF()
+    // chain so a renamed Signage Mast prints the same name the offer PDF prints.
+    // Deepanjan (18th Aug 2026)
+    public String  mastTypeTitle   { get; set; }
     public String  soWDate         { get; set; }
     public String  todayDate       { get; set; }
  
@@ -63,7 +67,7 @@ public class HighMastWeightCalcController {
     
  
     // Grid maxRows straight from the blueprint.
-    private static final Integer FM_AC_MAX_ROWS  = 7;
+    private static final Integer FM_AC_MAX_ROWS  = 8;
     private static final Integer FM_ADD_MAX_ROWS = 5;
  
  
@@ -82,6 +86,7 @@ public class HighMastWeightCalcController {
         isTransmissionPole = false;
         mhpRowList         = new List<MidHingePoleData>();
         isMidHingePole     = false;
+        mastTypeTitle      = 'Lighting Mast';   // Deepanjan (18th Aug 2026)
         isCustomizedMast   = false;
         isStadiumMast      = false;
         isFlagMast         = false;
@@ -174,6 +179,14 @@ public class HighMastWeightCalcController {
                                 || cmType.equalsIgnoreCase('Custom Lighting Mast');
         isCustomizedMast = (isStadiumMast || isFlagMast)
                            && (cmType.equalsIgnoreCase('Customized Mast') || isSeg5);
+
+        // Sheet title, same order the page's IF() chain used. Deepanjan (18th Aug 2026)
+        mastTypeTitle = isStadiumMast  ? 'Stadium Mast'
+                      : isFlagMast     ? 'Flag Mast'
+                      : isLCLM         ? 'LCLM'
+                      : isSignageMast  ? signageMastTitle()
+                      : isLatchingMast ? 'Latching Mast'
+                                       : 'Lighting Mast';
         // SEGMENT ABOVE 5 - FLAG MAST (Deepanjan, 19th July 2026): its estimator is the
         // LM engine (lm_* keys, manual segment weights) plus the flag annexure grids
         // (unprefixed fm_ac_* / fm_ad_*), NOT the single-segment fm_* shape. It must
@@ -962,10 +975,12 @@ public class HighMastWeightCalcController {
         rd.segmentData    = new List<SegmentCol>();
         rd.segmentPricing = new List<LabelValue>();
         rd.accessories    = new List<AccessoryLineItem>();
+        rd.rowPrefix = rPfx;
  
         rd.mastHeight  = fmtNum(rPfx + 'lm_height_of_mast');
         rd.noOfSegment = sGet(rPfx + 'lm_no_of_segment', '2');
-        rd.noOfSides   = sGet(rPfx + 'lm_no_of_sides',   '20');
+        // Display defaults stripped: null stays null on the weight PDF - Deepanjan (20th Aug 2026)
+        rd.noOfSides   = sGet(rPfx + 'lm_no_of_sides',   '');
  
         Integer segCount = 2;
         try { segCount = Integer.valueOf(String.isBlank(rd.noOfSegment) ? '2' : rd.noOfSegment); }
@@ -976,18 +991,18 @@ public class HighMastWeightCalcController {
  
         buildSegmentData(rd, rPfx, segCount);
  
-        rd.basePlateType    = sGet(rPfx + 'lm_base_plate_type', 'Circular');
+        rd.basePlateType    = sGet(rPfx + 'lm_base_plate_type', '');
         rd.bpOD             = fmtNum(rPfx + 'lm_od_of_base_plate');
         rd.bpThickness      = fmtNum(rPfx + 'lm_thickness_of_base_plate');
         rd.pcd              = fmtNum(rPfx + 'lm_pcd');
         rd.anchorPlateThick = fmtNum(rPfx + 'lm_anchor_plate_thickness');
-        rd.fdnBoltDia       = sGet(rPfx + 'lm_fdn_bolt_dia', '24');
+        rd.fdnBoltDia       = sGet(rPfx + 'lm_fdn_bolt_dia', '');
         rd.fdnBoltLength    = fmtNum(rPfx + 'lm_fdn_bolt_length');
         rd.fdnNoOfBolt      = fmtNum(rPfx + 'lm_fdn_no_of_bolt');
         rd.noOfNut          = fmtNum(rPfx + 'lm_fdn_no_of_nut');
         rd.stiffnerThickness= fmtNum(rPfx + 'lm_fdn_stiffner_thickness');
-        rd.lRingType        = sGet(rPfx + 'lm_type_of_l_ring', 'F = Fixed Type Ring');
-        rd.ringDia          = sGet(rPfx + 'lm_ring_diameter',  '800');
+        rd.lRingType        = sGet(rPfx + 'lm_type_of_l_ring', '');
+        rd.ringDia          = sGet(rPfx + 'lm_ring_diameter',  '');
         // SEGMENT ABOVE 5 - FLAG MAST: no L-Ring section in its recipe - blank both
         // cells, exactly as the single-segment Flag Mast row builder does, instead of
         // letting the defaults above print a fictional Fixed Ring / 800.
@@ -1074,14 +1089,14 @@ public class HighMastWeightCalcController {
         rd.cfgNoOfLum       = sGet(kitPfx + 'lm_no_of_luminaries',   '');
         rd.cfgCgBox         = sGet(kitPfx + 'lm_cg_box_per_lum',     '');
         rd.cfgWeldedArm     = fmtNum(kitPfx + 'lm_type_of_welded_arm');
-        rd.cfgSuspnSysm     = (sGet(kitPfx + 'lm_suspension_system', '3= 3 suspension type'));
-        rd.cfgCableType     = (sGet(kitPfx + 'lm_cable_type',  'T= 2.5SQmm 5core'));
-        rd.cfgNoOfCable     = beforeEq(sGet(kitPfx + 'lm_no_of_cable', '1=Single cable'));
-        rd.cfgTierLRing     = beforeEq(sGet(kitPfx + 'lm_l_ring_tier', '1-Single tire'));
-        rd.cfgRingVW        = (sGet(kitPfx + 'lm_type_of_ring_vw', 'W= Fixed Type'));
-        rd.cfgTypeOfWinch   = (sGet(kitPfx + 'lm_type_of_winch',      'B=500kg'));
-        rd.cfgTypePowerTool = (sGet(kitPfx + 'lm_type_of_power_tool', 'Q=Motor'));
-        rd.cfgTypeWireRope  = beforeEq(sGet(kitPfx + 'lm_type_of_wire_rope',  '6=6mm dia'));
+        rd.cfgSuspnSysm     = (sGet(kitPfx + 'lm_suspension_system', ''));
+        rd.cfgCableType     = (sGet(kitPfx + 'lm_cable_type',  ''));
+        rd.cfgNoOfCable     = beforeEq(sGet(kitPfx + 'lm_no_of_cable', ''));
+        rd.cfgTierLRing     = beforeEq(sGet(kitPfx + 'lm_l_ring_tier', ''));
+        rd.cfgRingVW        = (sGet(kitPfx + 'lm_type_of_ring_vw', ''));
+        rd.cfgTypeOfWinch   = (sGet(kitPfx + 'lm_type_of_winch',      ''));
+        rd.cfgTypePowerTool = (sGet(kitPfx + 'lm_type_of_power_tool', ''));
+        rd.cfgTypeWireRope  = beforeEq(sGet(kitPfx + 'lm_type_of_wire_rope',  ''));
         rd.cfgTypeOfAol     = sGet(kitPfx + 'lm_type_of_aol',           'X');
         rd.cfgNoOfAvnLight  = sGet(kitPfx + 'lm_no_of_aviation_light',  'X');
         rd.cfgFeederPillar  = sGet(kitPfx + 'lm_feeder_piller_control', 'X');
@@ -1096,7 +1111,9 @@ public class HighMastWeightCalcController {
         Decimal grandTotal = 0;
         for (AccessoryLineItem ali : rd.accessories) grandTotal += ali.totalCostRaw;
         Decimal cost = Decimal.valueOf(rd.costPerSet);
-        rd.totalCostPrice =fmtDec(cost+((cost*18)/100)) ;
+        // get quantity of mast selected
+        Decimal kitQty = decVal(kitPfx + 'lm_qty_of_hm', 0);
+        rd.totalCostPrice =fmtDec((cost * kitQty)) ;
         return rd;
     }
  
@@ -1403,7 +1420,7 @@ public class HighMastWeightCalcController {
     // BUILD ACCESSORIES
     // ═══════════════════════════════════════════════════════════════
     private void buildAccessories(RowData rd, String k, String kitPfx, Decimal kitSeg) {
-        String  winchDesc = resolveWinchDescription(beforeEq(sGet(kitPfx+'lm_type_of_winch','B=500kg')), (Integer) kitSeg);
+        String  winchDesc = resolveWinchDescription(beforeEq(sGet(kitPfx+'lm_type_of_winch','')), (Integer) kitSeg);
         Decimal rdQty30   = decVal(k+'rope_drum_30_qty_consumed',0);
         Decimal rdQty40   = decVal(k+'rope_drum_40_qty_consumed',0);
         Decimal rdQty20   = decVal(k+'rope_drum_20_qty_consumed',0);
@@ -1433,15 +1450,15 @@ public class HighMastWeightCalcController {
         } else {
             ali=accRaw('1.2','Rope Drum 20 Mtr','Rope Drum 20 Mtr','Nos.',fmtQty(rdQty20),fmtDec(rdCost20),fmtQty(rdQty20),true,rdCost20==0); ali.remarks=resolveRemark('1.2',rdQty20,winchType,suspnSysm,noOfSides,typeOfAol,segCount); rd.accessories.add(ali);
         }
-        String ptDesc=afterEq(sGet(kitPfx+'lm_type_of_power_tool','G=Motor'));
+        String ptDesc=afterEq(sGet(kitPfx+'lm_type_of_power_tool',''));
         ali=accFromKeys('2','Power Tool',ptDesc,'Nos.',k+'power_tool_qty_consumed',k+'power_tool',false); ali.remarks=resolveRemark('2',decVal(k+'power_tool_qty_consumed',0),winchType,suspnSysm,noOfSides,typeOfAol,segCount); rd.accessories.add(ali);
         ali=accFromKeys('2.1','Sprocket','Sprocket,1/2",15teeth,Simp.','Nos.',k+'sprocket_15t_qty_consumed',k+'sprocket_15t',true); ali.remarks=resolveRemark('2.1',decVal(k+'sprocket_15t_qty_consumed',0),winchType,suspnSysm,noOfSides,typeOfAol,segCount); rd.accessories.add(ali);
         ali=accFromKeys('2.2','Sprocket','Sprocket,1/2",20teeth,Simp.','Nos.',k+'sprocket_20t_qty_consumed',k+'sprocket_20t',true); ali.remarks=resolveRemark('2.2',decVal(k+'sprocket_20t_qty_consumed',0),winchType,suspnSysm,noOfSides,typeOfAol,segCount); rd.accessories.add(ali);
         ali=accFromKeys('2.3','Simplex Chain, 1/2"','Simplex Chain, 1/2"','Nos.',k+'simplex_chain_qty_consumed',k+'simplex_chain',true); ali.remarks=resolveRemark('2.3',decVal(k+'simplex_chain_qty_consumed',0),winchType,suspnSysm,noOfSides,typeOfAol,segCount); rd.accessories.add(ali);
         ali=accFromKeys('2.4','Torque Limiter','','Nos.',k+'torque_limiter_qty_consumed',k+'torque_limiter',true); ali.remarks=resolveRemark('2.4',decVal(k+'torque_limiter_qty_consumed',0),winchType,suspnSysm,noOfSides,typeOfAol,segCount); rd.accessories.add(ali);
-        String cblDesc=afterEq(sGet(kitPfx+'lm_cable_type','T=2.5 Sq mm, 5 Core PCP & EPR'));
+        String cblDesc=afterEq(sGet(kitPfx+'lm_cable_type',''));
         ali=accFromKeys('3','Trailing Cable*',cblDesc,'Meter',k+'trailing_cable_qty_consumed',k+'trailing_cable',false); ali.remarks=resolveRemark('3',decVal(k+'trailing_cable_qty_consumed',0),winchType,suspnSysm,noOfSides,typeOfAol,segCount); rd.accessories.add(ali);
-        String ropeDesc=afterEq(sGet(kitPfx+'lm_type_of_wire_rope','6=SS 6 mm, 7/19 Construction'));
+        String ropeDesc=afterEq(sGet(kitPfx+'lm_type_of_wire_rope',''));
         ali=accFromKeys('4','SS. Wire Rope',ropeDesc,'Meter',k+'ss_wire_rope_qty_consumed',k+'ss_wire_rope',false); ali.remarks=resolveRemark('4',decVal(k+'ss_wire_rope_qty_consumed',0),winchType,suspnSysm,noOfSides,typeOfAol,segCount); rd.accessories.add(ali);
         ali=accFromKeys('5','Doc Clamp 6mm with Nut','SS.6mm Dia','Nos.',k+'doc_clamp_6mm_qty_consumed',k+'doc_clamp_6mm',false); ali.remarks=resolveRemark('5',decVal(k+'doc_clamp_6mm_qty_consumed',0),winchType,suspnSysm,noOfSides,typeOfAol,segCount); rd.accessories.add(ali);
         ali=accFromKeys('6','Aluminium ferrul 6mm','SS 6mm Dia','Nos.',k+'aluminium_ferrul_qty_consumed',k+'aluminium_ferrul',false); ali.remarks=resolveRemark('6',decVal(k+'aluminium_ferrul_qty_consumed',0),winchType,suspnSysm,noOfSides,typeOfAol,segCount); rd.accessories.add(ali);
@@ -1557,6 +1574,7 @@ public class HighMastWeightCalcController {
         rd.segmentData    = new List<SegmentCol>();
         rd.segmentPricing = new List<LabelValue>();
         rd.accessories    = new List<AccessoryLineItem>();
+        rd.rowPrefix = rPfx;
  
         rd.mastHeight  = fmtNum(rPfx + 'fm_height_of_mast');
         rd.noOfSegment = String.valueOf(segCount);
@@ -1617,38 +1635,51 @@ public class HighMastWeightCalcController {
     // ═══════════════════════════════════════════════════════════════
     private static final List<String> FM_AC_LABELS = new List<String>{
         'Wire Rope', 'Wire rope', 'Winch Gear', 'Motor',
-        'Snap hook', 'SS Accessories & Flag Clamps', 'Counter weight' };
+        'Snap hook', 'SS Accessories & Flag Clamps', 'Counter weight', 'Control Panel' };
  
     private static final List<String> FM_AD_LABELS = new List<String>{
         '32A STD FEEDER PILLAR', 'GI STAND',
         'CONTROL PANEL FOR OPERATE ONLY MOTOR OPERATE',
-        'SMALL LIGHT FEEDER PILLAR WITH STAND', 'Decorative Dom' };
+        'SMALL LIGHT FEEDER PILLAR WITH STAND', 'Decorative Dome' };
  
     private void buildFlagMastExtras() {
-        fmAccessoryList  = buildFmItemRows('fm_ac_', FM_AC_MAX_ROWS,  FM_AC_LABELS, true);
-        fmAdditionalList = buildFmItemRows('fm_ad_', FM_ADD_MAX_ROWS, FM_AD_LABELS, false);
+        fmAccessoryList  = new List<FmItemRow>();
+        fmAdditionalList = new List<FmItemRow>();
+        
+        for (RowData rd : rowDataList){
+            String p = String.isBlank(rd.rowPrefix) ? '' : rd.rowPrefix;
+            
+            rd.fmAccessoryList  = buildFmItemRows(p + 'fm_ac_', FM_AC_MAX_ROWS,  FM_AC_LABELS, true);
+        	rd.fmAdditionalList = buildFmItemRows(p + 'fm_ad_', FM_ADD_MAX_ROWS, FM_AD_LABELS, false);
+            rd.fmAcTotal        = resolveFmTotal(p + 'fm_ac_grand_total',  rd.fmAccessoryList);
+            rd.fmAddTotal       = resolveFmTotal(p + 'fm_ad_grand_total', rd.fmAdditionalList);
+            
+            System.debug('****1641 '+ rd.fmAccessoryList + ' ' + rd.fmAdditionalList + ' p -> ' + p);
+            
+            rd.hasFmAccessory   = !rd.fmAccessoryList.isEmpty();
+            rd.hasFmAdditional  = !rd.fmAdditionalList.isEmpty();
+            
+            fmAccessoryList.addAll(rd.fmAccessoryList);
+            fmAdditionalList.addAll(rd.fmAdditionalList);
+        }
         
         hasFmAccessory  = !fmAccessoryList.isEmpty();
         hasFmAdditional = !fmAdditionalList.isEmpty();
-            
-        fmAcTotal  = resolveFmTotal('fm_ac_grand_total', fmAccessoryList);
-        fmAddTotal = resolveFmTotal('fm_ad_grand_total', fmAdditionalList);
+        
+        fmAcTotal       = resolveFmTotal('fm_ac_grand_total', fmAccessoryList);
+        fmAddTotal      = resolveFmTotal('fm_ad_grand_total', fmAdditionalList);
     }
  
     private List<FmItemRow> buildFmItemRows(String mid, Integer maxRows,
                                             List<String> labels, Boolean withOption) {
         List<FmItemRow> rows = new List<FmItemRow>();
-                                                
-        List<String> rowPrefixes = new List<String>{
-            'r1_','r2_','r3_','r4_','r5_','r6_','r7_','r8_','r9_','r10_'
-        };
-            
-        for(String rowpfx : rowPrefixes){
-                for (Integer i = 1; i <= maxRows; i++) {
-                String p = rowpfx + mid + i + '_';
+           Integer slNo = 0;                                                
+           for (Integer i = 1; i <= maxRows; i++) {
+                String p = mid + i + '_';
      
                 Decimal qty = decVal(p + 'qty', 0);
                 if (qty <= 0) continue;
+               	slNo++;
      
                 Decimal rate = decVal(p + 'rate', 0);
                 // amount is a readOnly formula (qty * rate * 1.18); recompute on the
@@ -1664,8 +1695,7 @@ public class HighMastWeightCalcController {
                 FmItemRow r  = new FmItemRow();
                 // sl_no is a readOnly label field in the blueprint and saves blank,
                 // so the fixed catalogue position is used.
-                String slRaw = sGet(p + 'sl', '');
-                r.slNo       = String.isNotBlank(slRaw) ? slRaw : String.valueOf(i);
+                r.slNo       = String.valueOf(slNo);
                 r.itemName   = label;
                 r.quantity   = fmtQty(qty);
                 r.rate       = fmtDec(rate);
@@ -1673,28 +1703,17 @@ public class HighMastWeightCalcController {
                 r.amountRaw  = amount;
                 rows.add(r);
             }
-        }
- 
-                                                
+                                                 
         return rows;
     }
  
     private String resolveFmTotal(String totalKey, List<FmItemRow> rows) {
-        List<String> rowPrefixes = new List<String>{
-            'r1_','r2_','r3_','r4_','r5_','r6_','r7_','r8_','r9_','r10_'
-        };
-        Decimal sumSaved = 0;
-        Boolean check = false;
-        for (String rowPfx : rowPrefixes) {
-            String key = rowPfx + totalKey;
-            if (jd.containsKey(key)) { sumSaved += decVal(key, 0); check = true; }
+        
+        if (jd.containsKey(totalKey)) {   // legacy bare-key quotes
+            Decimal saved = decVal(totalKey, 0);
+            if (saved != 0) return fmtDec(saved);
         }
-        if (!check && jd.containsKey(totalKey)) {   // legacy bare-key quotes
-            sumSaved = decVal(totalKey, 0);
-            check = true;
-        }
-        if (check) return fmtDec(sumSaved);
-    
+        
         Decimal sum = 0;
         for (FmItemRow r : rows) sum += r.amountRaw;
         return fmtDec(sum);
@@ -1822,14 +1841,14 @@ private void applyKitCostingToCustomizedRow(RowData rd) {
     rd.cfgNoOfLum       = sGet(kitPfx + 'lm_no_of_luminaries',   '');
     rd.cfgCgBox         = sGet(kitPfx + 'lm_cg_box_per_lum',     '');
     rd.cfgWeldedArm     = fmtNum(kitPfx + 'lm_type_of_welded_arm');
-    rd.cfgSuspnSysm     = afterEq(sGet(kitPfx + 'lm_suspension_system', '3= 3 suspension type'));
-    rd.cfgCableType     = (sGet(kitPfx + 'lm_cable_type',  'T'));
-    rd.cfgNoOfCable     = (sGet(kitPfx + 'lm_no_of_cable', '1=Single cable'));
-    rd.cfgTierLRing     = (sGet(kitPfx + 'lm_l_ring_tier', '1-Single tire'));
-    rd.cfgRingVW        = (sGet(kitPfx + 'lm_type_of_ring_vw', 'W= Fixed Type'));
-    rd.cfgTypeOfWinch   = beforeEq(sGet(kitPfx + 'lm_type_of_winch',      'B=500kg'));
-    rd.cfgTypePowerTool = beforeEq(sGet(kitPfx + 'lm_type_of_power_tool', 'Q=Motor'));
-    rd.cfgTypeWireRope  = afterEq(sGet(kitPfx + 'lm_type_of_wire_rope',  '6=6mm dia'));
+    rd.cfgSuspnSysm     = afterEq(sGet(kitPfx + 'lm_suspension_system', ''));
+    rd.cfgCableType     = (sGet(kitPfx + 'lm_cable_type',  ''));
+    rd.cfgNoOfCable     = (sGet(kitPfx + 'lm_no_of_cable', ''));
+    rd.cfgTierLRing     = (sGet(kitPfx + 'lm_l_ring_tier', ''));
+    rd.cfgRingVW        = (sGet(kitPfx + 'lm_type_of_ring_vw', ''));
+    rd.cfgTypeOfWinch   = beforeEq(sGet(kitPfx + 'lm_type_of_winch',      ''));
+    rd.cfgTypePowerTool = beforeEq(sGet(kitPfx + 'lm_type_of_power_tool', ''));
+    rd.cfgTypeWireRope  = afterEq(sGet(kitPfx + 'lm_type_of_wire_rope',  ''));
     rd.cfgTypeOfAol     = sGet(kitPfx + 'lm_type_of_aol',           'X');
     rd.cfgNoOfAvnLight  = sGet(kitPfx + 'lm_no_of_aviation_light',  'X');
     rd.cfgFeederPillar  = sGet(kitPfx + 'lm_feeder_piller_control', 'X');
@@ -1859,11 +1878,16 @@ private void applyKitCostingToCustomizedRow(RowData rd) {
     }
  
     private List<String> cmStadiumValues(String p, Integer n, String attr) {
+        // Stopped at mid4, so the weight sheet left Mid Seg 5 and Bottom Seg blank on a
+        // 7-segment Stadium - cmHeaders(n) always emits n columns but this returned only 5
+        // values. top + middles 2..n-1 + bottom => mid{k} whenever n >= k + 1.
+        // Same fix as cmStadiumList in both offer controllers. Deepanjan (21st Aug 2026)
         List<String> keys = new List<String>();
         keys.add(p + 'top_segment_' + attr);
-        if (n >= 3) keys.add(p + 'middle_segment_' + attr);
-        if (n >= 4) keys.add(p + 'mid3_' + attr);
-        if (n >= 5) keys.add(p + 'mid4_' + attr);
+        if (n >= 3) keys.add(p + 'middle_segment_' + attr);          // middle_segment_ IS mid2
+        for (Integer k = 3; k <= 14; k++) {
+            if (n >= k + 1) keys.add(p + 'mid' + k + '_' + attr);
+        }
         keys.add(p + 'bottom_' + attr);
         return cmValues(keys);
     }
@@ -1997,6 +2021,25 @@ private String resolveWinchDescription(String winchTypeLetter, Integer kitSeg) {
     }
     return '';
 }
+    // ═══════════════════════════════════════════════════════════════════════
+    // SIGNAGE MAST - CUSTOM NAME  (Deepanjan, 18th Aug 2026)
+    //
+    // Mirrors signageMastName() in HighMastSOWController / HMScopeCombinedController
+    // so the weight sheet and the two offer PDFs never print different names. Reads
+    // the same sm_rename / sm_rename_value pair the estimator saves (YES/NO picklist plus
+    // the text that opens on YES), read through sGet like every other quote-level key.
+    //
+    // No weight, formula or row is affected - isSignageMast stays true and every
+    // calculation runs exactly as today. Not ticked, blank, or a legacy quote with
+    // no key returns 'Signage Mast', so existing sheets are byte-identical.
+    // ═══════════════════════════════════════════════════════════════════════
+    private String signageMastTitle() {
+        if (!isSignageMast) return 'Signage Mast';
+        if (!'YES'.equalsIgnoreCase(sGet('sm_rename', 'NO'))) return 'Signage Mast';
+        String nm = sGet('sm_rename_value', '');
+        return String.isBlank(nm) ? 'Signage Mast' : nm.trim();
+    }
+
     private String sGet(String key, String defaultVal) {
         if (!jd.containsKey(key) || jd.get(key) == null) return defaultVal;
         String v = String.valueOf(jd.get(key)).trim();
@@ -2236,6 +2279,24 @@ private String lpAttr(String cs, String attr) {
         public String costingGroupTitle { get; set; }
         public String costPerSet        { get; set; }
         public String totalCostPrice    { get; set; }
+        
+        // Adding variable to create addition/accessory details for each mast.
+        public String rowPrefix { get; set; }
+
+        public List<FmItemRow> fmAccessoryList  { get; set; }
+        public List<FmItemRow> fmAdditionalList { get; set; }
+        public String          fmAcTotal        { get; set; }
+        public String          fmAddTotal       { get; set; }
+        public Boolean hasFmAccessory  { get; set; }
+        public Boolean hasFmAdditional { get; set; }
+
+        public RowData() {
+            rowPrefix        = '';
+            fmAccessoryList  = new List<FmItemRow>();
+            fmAdditionalList = new List<FmItemRow>();
+            fmAcTotal        = '0';
+            fmAddTotal       = '0';
+        }
     }
  
     public class SegmentCol {

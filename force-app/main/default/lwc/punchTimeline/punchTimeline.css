@@ -79,7 +79,7 @@
 /* Timeline */
 .pt-timeline {
     position: relative;
-    padding-left: 14px;
+    padding-left: 4px;
 }
 
 /* Timeline Item */
@@ -99,7 +99,7 @@
     left: 0;
     top: 0;
     bottom: -1.25rem; /* extends to next item */
-    width: 14px;
+    width: 42px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -142,9 +142,23 @@
     display: none;
 }
 
+.dot-distance-val {
+    display: inline-block;
+    color: #475569;
+    background-color: #f8fafc;
+    font-size: 0.55rem;
+    font-weight: 700;
+    padding: 1px 3px;
+    border-radius: 3px;
+    border: 1px solid #e2e8f0;
+    margin-top: 4px;
+    white-space: nowrap;
+    text-align: center;
+}
+
 /* Content Panel */
 .pt-content {
-    margin-left: 24px;
+    margin-left: 48px;
     width: 100%;
     background: rgba(0, 0, 0, 0.04);
     backdrop-filter: blur(8px);
@@ -779,6 +793,57 @@
     transform: translateY(0);
 }
 
+/* Cancelled Visits Section */
+.pt-cancelled-section {
+    margin-top: 1rem;
+    padding-top: 0.85rem;
+    border-top: 1px dashed rgba(0, 0, 0, 0.12);
+}
+
+.pt-cancelled-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+}
+
+.pt-cancelled-section-title {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 600;
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+.pt-cancelled-header-icon {
+    --sds-c-icon-color-foreground-default: #ef4444;
+}
+
+.pt-cancelled-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    line-height: 1.2;
+}
+
+.pt-cancelled-item {
+    background: rgba(248, 250, 252, 0.85);
+    border: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.pt-cancel-reason-desc {
+    color: #dc2626 !important;
+    font-size: 0.78rem;
+    margin-top: 0.2rem;
+}
+
 /* Camera closed placeholder */
 .up-viewfinder-placeholder {
     display: flex;
@@ -942,6 +1007,43 @@
     padding: 1px 6px;
     border-radius: 4px;
     font-weight: 600;
+}
+
+.pt-visit-quick-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 6px 0 8px;
+}
+
+.pt-quick-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 3px 8px;
+    min-width: 0;
+}
+
+.pt-quick-duration {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+}
+
+.pt-quick-lbl {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+}
+
+.pt-quick-val {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #0f172a;
 }
 
 .pt-detail-row {
@@ -1313,4 +1415,69 @@
     100% {
         transform: translateX(100%);
     }
+}
+
+.pt-file-attached {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    border-radius: 8px;
+}
+
+.pt-file-attached-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #065f46;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pt-file-remove {
+    border: none;
+    background: transparent;
+    color: #047857;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+}
+
+.pt-file-remove:hover {
+    color: #064e3b;
+}
+
+/* ============================================================
+   Schedule / Cancel Modal - Mobile Date Picker Fix
+   ============================================================ */
+
+/* Let the outer backdrop handle vertical scrolling */
+.pt-schedule-action-modal {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+/* Do not clip the Salesforce date picker popup */
+.pt-schedule-action-modal .pt-modal {
+    overflow: visible;
+    max-height: none;
+}
+
+/* Prevent nested scrolling inside the schedule modal */
+.pt-schedule-action-modal .pt-modal-body {
+    overflow: visible;
+    max-height: none;
+}
+
+/* Keep the date field above surrounding modal content */
+.pt-schedule-action-modal .pt-field-group {
+    position: relative;
 }

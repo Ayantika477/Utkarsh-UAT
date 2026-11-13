@@ -5,6 +5,8 @@
     <targets>
         <target>lightning__RecordAction</target>
         <target>lightning__RecordPage</target>
+        <target>lightning__FlowScreen</target>
+
     </targets>
     <targetConfigs>
         <targetConfig targets="lightning__RecordAction">
@@ -19,5 +21,9 @@
                 <supportedFormFactor type="Small" />
             </supportedFormFactors>
         </targetConfig>
+        <targetConfig targets="lightning__FlowScreen">
+        <!-- declare @api properties here, e.g.: -->
+        <property name="recordId" type="String" label="Record Id" />
+    </targetConfig>
     </targetConfigs>
 </LightningComponentBundle>

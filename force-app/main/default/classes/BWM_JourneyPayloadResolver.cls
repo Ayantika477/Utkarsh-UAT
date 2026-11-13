@@ -289,7 +289,9 @@ public without sharing class BWM_JourneyPayloadResolver {
     tokenMap.put('department_crm_email', BWM_MessagingConstants.FIELD_CRM_USER_EMAIL);
     tokenMap.put('Department_crm_name', BWM_MessagingConstants.FIELD_CRM_USER_NAME);
     tokenMap.put('Department_crm_phone', BWM_MessagingConstants.FIELD_CRM_USER_PHONE);
+    tokenMap.put('Department_crm_number', BWM_MessagingConstants.FIELD_CRM_USER_PHONE);
     tokenMap.put('Department_crm_email', BWM_MessagingConstants.FIELD_CRM_USER_EMAIL);
+    tokenMap.put('department_crm_number', BWM_MessagingConstants.FIELD_CRM_USER_PHONE);
     tokenMap.put('product_brief', BWM_MessagingConstants.FIELD_WHATSAPP_PRODUCT_BRIEF);
     tokenMap.put('Product_Brief', BWM_MessagingConstants.FIELD_WHATSAPP_PRODUCT_BRIEF);
     tokenMap.put('opportunity.owner.name', 'Owner.Name');
@@ -298,10 +300,15 @@ public without sharing class BWM_JourneyPayloadResolver {
     tokenMap.put('opportunity.owner', 'Owner.Name');
     tokenMap.put('opportunity_owner_name', 'Owner.Name');
     tokenMap.put('opportunity_owner_phone', 'Owner.Phone');
+    tokenMap.put('opportunity_owner_number', 'Owner.Phone');
     tokenMap.put('opportunity_owner_email', 'Owner.Email');
     tokenMap.put('Opportunity_Owner_name', 'Owner.Name');
     tokenMap.put('Opportunity_Owner_phone', 'Owner.Phone');
+    tokenMap.put('Opportunity_Owner_number', 'Owner.Phone');
     tokenMap.put('Opportunity_Owner_email', 'Owner.Email');
+    tokenMap.put('Opportunity_owner_name', 'Owner.Name');
+    tokenMap.put('Opportunity_owner_number', 'Owner.Phone');
+    tokenMap.put('Opportunity_owner_email', 'Owner.Email');
     tokenMap.put('department.name', 'Department_Name__c');
     tokenMap.put('Department.name', 'Department_Name__c');
     tokenMap.put('department.crm.call', BWM_MessagingConstants.FIELD_CRM_USER_PHONE);

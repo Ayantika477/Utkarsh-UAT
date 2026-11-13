@@ -24,7 +24,7 @@
         </div>
 
         <!-- Data Table -->
-        <template if:true={hasExpenses}>
+        <!-- <template if:true={hasExpenses}>
             <div class="slds-p-horizontal_medium">
                 <lightning-datatable
                     key-field="Id"
@@ -37,6 +37,77 @@
                     hide-checkbox-column
                     show-row-number-column>
                 </lightning-datatable>
+            </div>
+        </template> -->
+        <template if:true={hasExpenses}>
+            <div class="custom-table-wrapper">
+                <div class="table-scroll-inner">
+                    <!-- Header row (hidden on mobile via CSS) -->
+                    <div class="table-header" role="row">
+                        <div class="th" data-field="Name" onclick={handleSort}>Expense #</div>
+                        <div class="th" data-field="employeeName" onclick={handleSort}>Employee</div>
+                        <div class="th" data-field="Employee_Level__c" onclick={handleSort}>Level</div>
+                        <div class="th" data-field="Total_Amount__c" onclick={handleSort}>Amount</div>
+                        <div class="th" data-field="Status__c" onclick={handleSort}>Status</div>
+                        <div class="th" data-field="Submitted_Date__c" onclick={handleSort}>Submitted</div>
+                        <div class="th" data-field="Travel_Start_Date__c" onclick={handleSort}>Travel Start</div>
+                        <div class="th" data-field="Travel_End_Date__c" onclick={handleSort}>Travel End</div>
+                        <div class="th" data-field="daysPending" onclick={handleSort}>Days Pending</div>
+                        <div class="th" data-field="Purpose__c" onclick={handleSort}>Purpose</div>
+                        <div class="th actions-col">Actions</div>
+                    </div>
+
+                    <!-- Rows -->
+                    <template for:each={expenses} for:item="exp">
+                        <div key={exp.Id} class="table-row" role="row">
+                            <div class="td" data-label="Expense #">
+                                <a href={exp.expenseUrl} target="_blank">{exp.Name}</a>
+                            </div>
+                            <div class="td" data-label="Employee">{exp.employeeName}</div>
+                            <div class="td" data-label="Level">{exp.Employee_Level__c}</div>
+                            <div class="td" data-label="Amount">
+                                <lightning-formatted-number
+                                    value={exp.Total_Amount__c}
+                                    format-style="currency"
+                                    currency-code="INR"
+                                    minimum-fraction-digits="2">
+                                </lightning-formatted-number>
+                            </div>
+                            <div class="td" data-label="Status">
+                                {exp.Status__c}
+                            </div>
+                            <div class="td" data-label="Submitted">
+                                <lightning-formatted-date-time value={exp.Submitted_Date__c}></lightning-formatted-date-time>
+                            </div>
+                            <div class="td" data-label="Travel Start">
+                                <lightning-formatted-date-time
+                                    value={exp.Travel_Start_Date__c}>
+                                </lightning-formatted-date-time>
+                            </div>
+
+                            <div class="td" data-label="Travel End">
+                                <lightning-formatted-date-time
+                                    value={exp.Travel_End_Date__c}>
+                                </lightning-formatted-date-time>
+                            </div>
+                            <div class="td" data-label="Days Pending">
+                                <span class={exp.pendingBadgeClass}>{exp.daysPending}</span>
+                            </div>
+                            <div class="td" data-label="Purpose">{exp.Purpose__c}</div>
+                            <div class="td actions-col" data-label="Actions">
+                                <lightning-button-icon icon-name="utility:preview" alternative-text="View"
+                                    data-id={exp.Id} data-action="view" onclick={handleAction}>
+                                </lightning-button-icon>
+                                <lightning-button-icon icon-name="utility:check" alternative-text="Approve"
+                                    variant="brand" data-id={exp.Id} data-action="approve" onclick={handleAction}>
+                                </lightning-button-icon>
+                                <lightning-button-icon icon-name="utility:close" alternative-text="Reject"
+                                    variant="destructive-text" data-id={exp.Id} data-action="reject" onclick={handleAction}>
+                                </lightning-button-icon>
+                            </div>
+                        </div>
+                    </template>
+                </div>
             </div>
         </template>
 

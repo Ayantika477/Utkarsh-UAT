@@ -1,0 +1,223 @@
+<template>
+    <lightning-card title="Lead Conversion" icon-name="standard:lead">
+        <div class="slds-p-horizontal_medium slds-p-bottom_medium">
+            <template lwc:if={loading}>
+                <lightning-spinner alternative-text="Loading"></lightning-spinner>
+            </template>
+
+            <template lwc:if={init}>
+                <lightning-progress-indicator current-step={progressStep} type="base" variant="base" class="slds-m-bottom_small">
+                    <lightning-progress-step label="Lead Info" value="1"></lightning-progress-step>
+                    <lightning-progress-step label="Contact" value="2"></lightning-progress-step>
+                    <lightning-progress-step label="Owner" value="3"></lightning-progress-step>
+                    <template lwc:if={needsUploadStep}>
+                        <lightning-progress-step label="Document" value="4"></lightning-progress-step>
+                    </template>
+                    <lightning-progress-step label="Done" value="5"></lightning-progress-step>
+                </lightning-progress-indicator>
+
+                <!-- ================= STEP 1: Lead Info ================= -->
+                <template lwc:if={isStep1}>
+                    <p class="slds-m-bottom_x-small">
+                        Opportunity Name : <strong>{init.company}</strong><br/>
+                        Converted Status : <strong>Qualified</strong><br/>
+                        Record Owner : <strong>{init.ownerName}</strong>
+                    </p>
+
+                    <lightning-radio-group name="accountMode" label="Account"
+                        options={accountModeOptions} value={accountMode} type="radio"
+                        onchange={handleAccountMode}></lightning-radio-group>
+
+                    <template lwc:if={useExistingAccount}>
+                        <div class="slds-form-element slds-m-top_x-small">
+                            <label class="slds-form-element__label"><abbr class="slds-required" title="required">*</abbr>Account</label>
+                            <div class="slds-form-element__control">
+                                <div class="slds-combobox_container">
+                                    <div class={accountComboClass} aria-expanded={accountDropdownOpen} aria-haspopup="listbox" role="combobox">
+                                        <div class="slds-combobox__form-element slds-input-has-icon slds-input-has-icon_right" role="none">
+                                            <input type="text" class="slds-input slds-combobox__input" autocomplete="off"
+                                                placeholder="Select or type to search accounts..."
+                                                value={accountSearchText}
+                                                oninput={handleAccountSearchInput}
+                                                onfocus={handleAccountSearchFocus}
+                                                onblur={handleAccountSearchBlur} />
+                                            <span class="slds-icon_container slds-input__icon slds-input__icon_right">
+                                                <lightning-icon icon-name="utility:down" size="xx-small"></lightning-icon>
+                                            </span>
+                                        </div>
+                                        <div class="slds-dropdown slds-dropdown_fluid slds-dropdown_length-7" role="listbox">
+                                            <ul class="slds-listbox slds-listbox_vertical" role="presentation">
+                                                <template for:each={accountComboOptions} for:item="opt">
+                                                    <li key={opt.value} role="presentation" class="slds-listbox__item">
+                                                        <div class="slds-media slds-listbox__option slds-listbox__option_plain slds-p-around_x-small"
+                                                            role="option" data-value={opt.value} data-label={opt.label}
+                                                            onmousedown={handleAccountOptionPick}>
+                                                            <span class="slds-media__body slds-truncate" title={opt.label}>{opt.label}</span>
+                                                        </div>
+                                                    </li>
+                                                </template>
+                                                <template lwc:if={noAccountComboOptions}>
+                                                    <li role="presentation" class="slds-listbox__item">
+                                                        <div class="slds-media slds-listbox__option slds-listbox__option_plain slds-p-around_x-small">
+                                                            <span class="slds-media__body">No accounts found</span>
+                                                        </div>
+                                                    </li>
+                                                </template>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <lightning-combobox label="Address Book" options={addressBookComboOptions}
+                            value={selectedAddressBookId} onchange={handleAddressBook}></lightning-combobox>
+                    </template>
+
+                    <template lwc:if={isNewAccount}>
+                        <lightning-input type="checkbox" label="Site" checked={isSite}
+                            onchange={handleSite} class="slds-m-top_x-small"></lightning-input>
+                        <template lwc:if={isSite}>
+                            <lightning-record-picker label="Parent Account" object-api-name="Account"
+                                filter={parentAccountFilter} required onchange={handleParentAccount}></lightning-record-picker>
+                        </template>
+                    </template>
+
+                    <lightning-input label="Note" value={note} required onchange={handleNote}></lightning-input>
+                    <lightning-input type="date" label="Tentative Closure Date"
+                        value={tentativeClosureDate} onchange={handleClosureDate}></lightning-input>
+
+                    <div class="slds-text-heading_small slds-m-top_small">Mandatory Information</div>
+                    <div class="slds-grid slds-wrap slds-gutters">
+                        <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-2">
+                            <template lwc:if={showAddressFields}>
+                                <lightning-combobox label="Country" options={countryOptions} value={country}
+                                    required onchange={handleCountry}></lightning-combobox>
+                                <template lwc:if={showIndiaFields}>
+                                    <lightning-combobox label="State" options={stateOptions} value={state}
+                                        required onchange={handleState}></lightning-combobox>
+                                </template>
+                                <lightning-input label="Street" value={street} required onchange={handleStreet}></lightning-input>
+                            </template>
+                            <lightning-input label="Company Name" value={companyName}
+                                required onchange={handleCompanyName}></lightning-input>
+                            <lightning-combobox label="Customer Category" options={customerCategoryOptions}
+                                value={customerCategory} required onchange={handleCustomerCategory}></lightning-combobox>
+                            <lightning-combobox label="Department Name" options={departmentOptions}
+                                value={department} required field-level-help="Department can not be 'Enquiry' while conversion"
+                                onchange={handleDepartment}></lightning-combobox>
+                            <lightning-input type="checkbox" label="Add Product Category" checked={addProductCategory}
+                                onchange={handleAddProductCategory} class="slds-m-top_small"></lightning-input>
+                        </div>
+                        <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-2">
+                            <template lwc:if={showAddressFields}>
+                                <lightning-input label="City" value={city} required onchange={handleCity}></lightning-input>
+                                <template lwc:if={showIndiaFields}>
+                                    <lightning-combobox label="Zone" options={zoneOptions} value={zone}
+                                        required onchange={handleZone}></lightning-combobox>
+                                </template>
+                                <lightning-input label="PIN" value={pin} required onchange={handlePin}></lightning-input>
+                            </template>
+                            <lightning-input type="email" label="Email" value={email} required
+                                onchange={handleEmail}></lightning-input>
+                        </div>
+                    </div>
+
+                    <template lwc:if={hasExistingProductCategories}>
+                        <div class="slds-text-heading_small slds-m-top_small">Selected Product Category</div>
+                        <lightning-datatable key-field="id" data={init.existingProductCategories}
+                            columns={existingPcColumns} hide-checkbox-column></lightning-datatable>
+                    </template>
+
+                    <template lwc:if={addProductCategory}>
+                        <div class="slds-text-heading_small slds-m-top_small">Product Categories</div>
+                        <template for:each={productRows} for:item="row">
+                            <div key={row.key} class="slds-grid slds-gutters slds-grid_vertical-align-end">
+                                <div class="slds-col slds-size_4-of-12">
+                                    <lightning-combobox label="Product Category" options={productCategoryOptions}
+                                        value={row.productCategory} data-key={row.key} data-field="productCategory"
+                                        required onchange={handleRowField}></lightning-combobox>
+                                </div>
+                                <div class="slds-col slds-size_3-of-12">
+                                    <lightning-combobox label="UOM" options={uomOptions} value={row.uom}
+                                        data-key={row.key} data-field="uom" required onchange={handleRowField}></lightning-combobox>
+                                </div>
+                                <div class="slds-col slds-size_3-of-12">
+                                    <lightning-input type="number" label="Quantity" value={row.quantity}
+                                        data-key={row.key} data-field="quantity" required onchange={handleRowField}></lightning-input>
+                                </div>
+                                <div class="slds-col slds-size_2-of-12">
+                                    <lightning-button label="Remove" data-key={row.key}
+                                        onclick={removeProductRow}></lightning-button>
+                                </div>
+                            </div>
+                        </template>
+                        <lightning-button label="Add Row" onclick={addProductRow}
+                            class="slds-m-top_x-small"></lightning-button>
+                    </template>
+
+                    <div class="slds-m-top_medium slds-text-align_right">
+                        <lightning-button variant="brand" label="Next" onclick={goToStep2}></lightning-button>
+                    </div>
+                </template>
+
+                <!-- ================= STEP 2: Contact ================= -->
+                <template lwc:if={isStep2}>
+                    <lightning-input type="checkbox" label="Create Contact" checked={createContactChecked}
+                        onchange={handleCreateContact}></lightning-input>
+                    <template lwc:if={createContactChecked}>
+                        <p class="success-text">Your contact will be created with lead details</p>
+                    </template>
+                    <template lwc:else>
+                        <lightning-combobox label="Select Contact" options={contactComboOptions}
+                            value={selectedContactId} required onchange={handleContactSelect}></lightning-combobox>
+                    </template>
+                    <div class="slds-m-top_medium slds-text-align_right">
+                        <lightning-button label="Previous" onclick={backToStep1}></lightning-button>
+                        <lightning-button variant="brand" label="Next" onclick={contactNext}
+                            class="slds-m-left_x-small"></lightning-button>
+                    </div>
+                </template>
+
+                <!-- ================= STEP 3: Owner ================= -->
+                <template lwc:if={isStep3}>
+                    <lightning-combobox label="Select Department Owner" options={ownerComboOptions}
+                        value={selectedOwnerId} required onchange={handleOwnerSelect}></lightning-combobox>
+                    <div class="slds-m-top_medium slds-text-align_right">
+                        <lightning-button label="Previous" onclick={backToStep2orStep1}></lightning-button>
+                        <lightning-button variant="brand" label="Convert" onclick={ownerNext}
+                            disabled={submitting} class="slds-m-left_x-small"></lightning-button>
+                    </div>
+                </template>
+
+                <!-- ================= STEP 4: Required document ================= -->
+                <template lwc:if={isStep4}>
+                    <p class="warn-text">
+                        There's no file associated with this lead. Attachment is required for {init.leadSource}.<br/>
+                        Keep your file size less than 25MB.
+                    </p>
+                    <lightning-file-upload label="Upload Document" record-id={init.leadId}
+                        accept={uploadFormats} onuploadfinished={handleUploadFinished}></lightning-file-upload>
+                    <div class="slds-m-top_medium slds-text-align_right">
+                        <lightning-button variant="brand" label="Convert" onclick={uploadNext}
+                            disabled={submitting}></lightning-button>
+                    </div>
+                </template>
+
+                <!-- ================= STEP 5: Success ================= -->
+                <template lwc:if={isStep5}>
+                    <div class="slds-text-align_center slds-p-vertical_medium">
+                        <p class="success-text slds-text-heading_medium">Lead has been successfully converted.</p>
+                        <p class="slds-m-top_small">Click to check the</p>
+                        <lightning-button variant="base" label="Account" onclick={openAccount}></lightning-button><br/>
+                        <lightning-button variant="base" label="Contact" onclick={openContact}></lightning-button><br/>
+                        <lightning-button variant="base" label="Opportunity" onclick={openOpportunity}></lightning-button>
+                    </div>
+                </template>
+
+                <template lwc:if={submitting}>
+                    <lightning-spinner alternative-text="Converting"></lightning-spinner>
+                </template>
+            </template>
+        </div>
+    </lightning-card>
+</template>

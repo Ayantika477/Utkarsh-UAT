@@ -1,5 +1,5 @@
 @isTest
-private class ProbableBidderBatchTest {
+private without sharing class ProbableBidderBatchTest {
 
     private class ProbableBidderMock implements HttpCalloutMock {
         public HttpResponse respond(HttpRequest req) {
@@ -28,7 +28,7 @@ private class ProbableBidderBatchTest {
             Common_Key__c = 'Steel Pipes-10082026-111111-Tender-1',
             Product_Name__c = 'Steel Pipes'
         );
-        insert t;
+        insert as system t;
 
         Map<Id, String> tenderProductMap = new Map<Id, String>{ t.Id => 'Steel Pipes' };
         Test.setMock(HttpCalloutMock.class, new ProbableBidderMock());
@@ -59,7 +59,7 @@ private class ProbableBidderBatchTest {
             Common_Key__c = 'Steel Pipes-10082026-111111-Tender-1',
             Product_Name__c = 'Steel Pipes'
         );
-        insert t;
+        insert as system t;
 
         Bidders__c existingBidder = new Bidders__c(
             Name = 'Acme Corp',
@@ -70,7 +70,7 @@ private class ProbableBidderBatchTest {
             External_Tender_Id__c = '5001',
             Bidder_Unique_Key__c = '5001-Acme Corp'
         );
-        insert existingBidder;
+        insert as system existingBidder;
 
         Map<Id, String> tenderProductMap = new Map<Id, String>{ t.Id => 'Steel Pipes' };
         Test.setMock(HttpCalloutMock.class, new ProbableBidderMock());
@@ -91,7 +91,7 @@ private class ProbableBidderBatchTest {
             Common_Key__c = 'Steel Pipes-10082026-222222-Tender-1',
             Product_Name__c = 'Steel Pipes'
         );
-        insert t;
+        insert as system t;
 
         Map<Id, String> tenderProductMap = new Map<Id, String>{ t.Id => 'Steel Pipes' };
         Test.setMock(HttpCalloutMock.class, new FailedBidderMock());

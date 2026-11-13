@@ -16,7 +16,7 @@ private class BWM_CampaignJourneyParamServiceTest {
       '{"CRM_User_Name_Formula__c":"Sudip Datta","Owner":{"attributes":{"type":"User"},"Name":"Sudip Datta"}}',
       Opportunity.class
     );
-    Contact contactRecord = new Contact(LastName = 'No CRM');
+    Contact contactRecord = new Contact(LastName = 'No CRM ' + String.valueOf(Math.abs(Crypto.getRandomInteger())));
 
     System.assertEquals(
       true,
@@ -116,18 +116,9 @@ private class BWM_CampaignJourneyParamServiceTest {
     );
 
     System.assertEquals('Sudip Datta', updated[0]);
-    System.assertEquals(
-      BWM_MessagingConstants.CORPORATE_SUPPORT_NAME_1_DEFAULT,
-      updated[3]
-    );
-    System.assertEquals(
-      BWM_MessagingConstants.CAMPAIGN_OWNER_CRM_MATCH_PHONE,
-      updated[4]
-    );
-    System.assertEquals(
-      BWM_MessagingConstants.FALLBACK_CONTACT_EMAIL,
-      updated[5]
-    );
+    System.assertEquals('', updated[3]);
+    System.assertEquals('', updated[4]);
+    System.assertEquals('', updated[5]);
   }
 
   /**
@@ -152,18 +143,9 @@ private class BWM_CampaignJourneyParamServiceTest {
     );
 
     System.assertEquals(6, updated.size());
-    System.assertEquals(
-      BWM_MessagingConstants.CORPORATE_SUPPORT_NAME_1_DEFAULT,
-      updated[3]
-    );
-    System.assertEquals(
-      BWM_MessagingConstants.CAMPAIGN_OWNER_CRM_MATCH_PHONE,
-      updated[4]
-    );
-    System.assertEquals(
-      BWM_MessagingConstants.FALLBACK_CONTACT_EMAIL,
-      updated[5]
-    );
+    System.assertEquals('', updated[3]);
+    System.assertEquals('', updated[4]);
+    System.assertEquals('', updated[5]);
   }
 
   /**
@@ -171,7 +153,7 @@ private class BWM_CampaignJourneyParamServiceTest {
    */
   @IsTest
   static void applyCampaignContactParamFixes_ReplacesLiteralIndexes() {
-    Lead leadRecord = new Lead(LastName = 'Test', Company = 'Test');
+    Lead leadRecord = new Lead(LastName = 'Test ' + String.valueOf(Math.abs(Crypto.getRandomInteger())), Company = 'Test ' + String.valueOf(Math.abs(Crypto.getRandomInteger())));
     List<String> params = new List<String>{
       'Sudip Datta',
       '9830453567',
@@ -186,18 +168,9 @@ private class BWM_CampaignJourneyParamServiceTest {
       params
     );
 
-    System.assertEquals(
-      BWM_MessagingConstants.CORPORATE_SUPPORT_NAME_1_DEFAULT,
-      updated[3]
-    );
-    System.assertEquals(
-      BWM_MessagingConstants.CAMPAIGN_OWNER_CRM_MATCH_PHONE,
-      updated[4]
-    );
-    System.assertEquals(
-      BWM_MessagingConstants.FALLBACK_CONTACT_EMAIL,
-      updated[5]
-    );
+    System.assertEquals('', updated[3]);
+    System.assertEquals('', updated[4]);
+    System.assertEquals('', updated[5]);
   }
 
   /**
@@ -207,9 +180,231 @@ private class BWM_CampaignJourneyParamServiceTest {
   static void fillBlankSecondaryContactParams_LeavesShortListsUnchanged() {
     List<String> params = new List<String>{ 'A', 'B', 'C' };
     List<String> updated = BWM_CampaignJourneyParamService.fillBlankSecondaryContactParams(
-      params
+      null,
+      params,
+      null
     );
     System.assertEquals(3, updated.size());
     System.assertEquals('A', updated[0]);
+  }
+
+  @IsTest
+  static void isDualCorporateSupportPhoneTemplateDetectsEnquiryGenLayout() {
+    BWM_Template_Mapping__mdt mapping = new BWM_Template_Mapping__mdt(
+      Param1_Field__c = BWM_MessagingConstants.FIELD_CORPORATE_SUPPORT_PHONE_1,
+      Param2_Field__c = BWM_MessagingConstants.FIELD_CORPORATE_SUPPORT_PHONE_2
+    );
+    System.assertEquals(
+      true,
+      BWM_CampaignJourneyParamService.isDualCorporateSupportPhoneTemplate(mapping)
+    );
+  }
+
+  @IsTest
+  static void applyMessagingContactParamFixesReplacesRudraWhenOwnerMatchesCrm() {
+    Lead leadRecord = (Lead) JSON.deserialize(
+      '{"CRM_User_Name_Formula__c":"Sudip Datta","Owner":{"attributes":{"type":"User"},"Name":"Sudip Datta","Phone":"9830453567","Email":"owner@test.com"}}',
+      Lead.class
+    );
+    BWM_Template_Mapping__mdt mapping = new BWM_Template_Mapping__mdt(
+      Param4_Field__c = BWM_MessagingConstants.FIELD_CORPORATE_SUPPORT_NAME_1,
+      Param5_Field__c = BWM_MessagingConstants.FIELD_CORPORATE_SUPPORT_PHONE_1,
+      Param6_Field__c = BWM_MessagingConstants.FIELD_CORPORATE_SUPPORT_EMAIL_1
+    );
+    List<String> params = new List<String>{
+      'Sudip Datta',
+      '9830453567',
+      'owner@test.com',
+      BWM_MessagingConstants.CORPORATE_SUPPORT_NAME_1_DEFAULT,
+      '9830481380',
+      BWM_MessagingConstants.FALLBACK_CONTACT_EMAIL
+    };
+
+    List<String> updated = BWM_CampaignJourneyParamService.applyMessagingContactParamFixes(
+      leadRecord,
+      params,
+      mapping
+    );
+
+    System.assertEquals('Sudip Datta', updated[3]);
+    System.assertEquals(
+      BWM_MessagingConstants.CAMPAIGN_OWNER_CRM_MATCH_PHONE,
+      updated[4]
+    );
+    System.assertEquals(
+      BWM_MessagingConstants.CAMPAIGN_OWNER_CRM_MATCH_EMAIL,
+      updated[5]
+    );
+    System.assert(!updated.contains(BWM_MessagingConstants.CORPORATE_SUPPORT_NAME_1_DEFAULT));
+  }
+
+  @IsTest
+  static void applyMessagingContactParamFixesKeepsRudraPhonesOnEnquiryGenTemplate() {
+    Lead leadRecord = (Lead) JSON.deserialize(
+      '{"CRM_User_Name_Formula__c":"Sudip Datta","Owner":{"attributes":{"type":"User"},"Name":"Sudip Datta"}}',
+      Lead.class
+    );
+    BWM_Template_Mapping__mdt mapping = new BWM_Template_Mapping__mdt(
+      Param1_Field__c = BWM_MessagingConstants.FIELD_CORPORATE_SUPPORT_PHONE_1,
+      Param2_Field__c = BWM_MessagingConstants.FIELD_CORPORATE_SUPPORT_PHONE_2
+    );
+    List<String> params = new List<String>{ '9830481380', '9830367173' };
+
+    List<String> updated = BWM_CampaignJourneyParamService.applyMessagingContactParamFixes(
+      leadRecord,
+      params,
+      mapping
+    );
+
+    System.assertEquals('9830481380', updated[0]);
+    System.assertEquals('9830367173', updated[1]);
+  }
+
+  @IsTest
+  static void isProspectEnqDeptOwnerContactTemplateDetectsProspectEnqDeptJourney() {
+    BWM_Template_Mapping__mdt mapping = new BWM_Template_Mapping__mdt(
+      Journey_Name__c = 'prospect_enq_dept',
+      Param5_Field__c = 'Owner.Name'
+    );
+    System.assertEquals(
+      true,
+      BWM_CampaignJourneyParamService.isProspectEnqDeptOwnerContactTemplate(mapping)
+    );
+  }
+
+  @IsTest
+  static void applyMessagingContactParamFixesKeepsOwnerContactOnProspectEnqDept() {
+    Lead leadRecord = (Lead) JSON.deserialize(
+      '{"Status":"Prospect","Department_Name__c":"High Mast & Polygonal","CRM_User_Name_Formula__c":"Sudip Datta","Owner":{"attributes":{"type":"User"},"Name":"Sudip Datta","Phone":"9830453567","Email":"sudip@test.com"}}',
+      Lead.class
+    );
+    BWM_Template_Mapping__mdt mapping = new BWM_Template_Mapping__mdt(
+      Journey_Name__c = 'prospect_enq_dept',
+      Param4_Field__c = 'Department_Name__c',
+      Param5_Field__c = 'Owner.Name',
+      Param6_Field__c = 'Owner.Phone',
+      Param7_Field__c = 'Owner.Email'
+    );
+    List<String> params = new List<String>{
+      'High Mast & Polygonal',
+      'High Mast & Polygonal',
+      'Product brief text',
+      'High Mast & Polygonal',
+      'Sudip Datta',
+      '9830453567',
+      'sudip@test.com'
+    };
+
+    List<String> updated = BWM_CampaignJourneyParamService.applyMessagingContactParamFixes(
+      leadRecord,
+      params,
+      mapping
+    );
+
+    System.assertEquals('High Mast & Polygonal', updated[3]);
+    System.assertEquals('Sudip Datta', updated[4]);
+    System.assertEquals('9830453567', updated[5]);
+    System.assertEquals('sudip@test.com', updated[6]);
+    System.assert(
+      !updated.contains(BWM_MessagingConstants.CAMPAIGN_OWNER_CRM_MATCH_PHONE)
+    );
+    System.assert(
+      !updated.contains(BWM_MessagingConstants.CAMPAIGN_OWNER_CRM_MATCH_EMAIL)
+    );
+  }
+
+  @IsTest
+  static void applyMessagingContactParamFixesKeepsOwnerContactOnPolymerEnqProspect() {
+    Lead leadRecord = (Lead) JSON.deserialize(
+      '{"Status":"Prospect","Department_Name__c":"Polymer","CRM_User_Name_Formula__c":"Provakar Roy","Owner":{"attributes":{"type":"User"},"Name":"Provakar Roy","Phone":"9830400001","Email":"p.roy@test.com"}}',
+      Lead.class
+    );
+    BWM_Template_Mapping__mdt mapping = new BWM_Template_Mapping__mdt(
+      Journey_Name__c = 'polymer_enq_prospect',
+      Param4_Field__c = 'Department_Name__c',
+      Param5_Field__c = 'Owner.Name',
+      Param6_Field__c = 'Owner.Phone',
+      Param7_Field__c = 'Owner.Email'
+    );
+    List<String> params = new List<String>{
+      'Polymer',
+      'Polymer',
+      'Product brief text',
+      'Polymer',
+      'Provakar Roy',
+      '9830400001',
+      'p.roy@test.com'
+    };
+
+    List<String> updated = BWM_CampaignJourneyParamService.applyMessagingContactParamFixes(
+      leadRecord,
+      params,
+      mapping
+    );
+
+    System.assertEquals('Polymer', updated[3]);
+    System.assertEquals('Provakar Roy', updated[4]);
+    System.assertEquals('9830400001', updated[5]);
+    System.assertEquals('p.roy@test.com', updated[6]);
+  }
+
+  @IsTest
+  static void applyCampaignContactParamFixesDoesNotFillProspectEnqDeptSecondarySlots() {
+    Lead leadRecord = (Lead) JSON.deserialize(
+      '{"CRM_User_Name_Formula__c":"Sudip Datta","Owner":{"attributes":{"type":"User"},"Name":"Sudip Datta"}}',
+      Lead.class
+    );
+    BWM_Template_Mapping__mdt mapping = new BWM_Template_Mapping__mdt(
+      Journey_Name__c = 'prospect_enq_dept'
+    );
+    List<String> params = new List<String>{
+      'Crash Barrier',
+      'Crash Barrier',
+      'Brief',
+      'Crash Barrier',
+      'Sudip Datta',
+      '9830453567',
+      'sudip@test.com'
+    };
+
+    List<String> updated = BWM_CampaignJourneyParamService.applyCampaignContactParamFixes(
+      leadRecord,
+      params,
+      mapping
+    );
+
+    System.assertEquals('Sudip Datta', updated[4]);
+    System.assertEquals('9830453567', updated[5]);
+    System.assertEquals('sudip@test.com', updated[6]);
+  }
+
+  @IsTest
+  static void applyMessagingContactParamFixesDoesNotPadThreeParamJourneys() {
+    Opportunity opportunityRecord = (Opportunity) JSON.deserialize(
+      '{"StageName":"Nurture","Owner":{"attributes":{"type":"User"},"Name":"Sudip Datta"}}',
+      Opportunity.class
+    );
+    BWM_Template_Mapping__mdt mapping = new BWM_Template_Mapping__mdt(
+      Journey_Name__c = 'nurture_assign_team',
+      Param1_Field__c = 'Owner.Name',
+      Param2_Field__c = 'Owner.Phone',
+      Param3_Field__c = 'Owner.Email'
+    );
+    List<String> params = new List<String>{
+      'Sudip Datta',
+      '9830453567',
+      'sudip@test.com'
+    };
+
+    List<String> updated = BWM_CampaignJourneyParamService.applyMessagingContactParamFixes(
+      opportunityRecord,
+      params,
+      mapping
+    );
+
+    System.assertEquals(3, updated.size());
+    System.assertEquals('Sudip Datta', updated[0]);
+    System.assertEquals('9830453567', updated[1]);
+    System.assertEquals('sudip@test.com', updated[2]);
   }
 }

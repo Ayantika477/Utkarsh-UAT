@@ -1,7 +1,8 @@
+/**
+ * @description Deprecated duplicate Lead before-trigger.
+ *              Prospecting activity logic runs from LeadTrigger only
+ *              (single-trigger best practice).
+ */
 trigger LeadProspectingActivityTrigger on Lead (before insert, before update) {
-
-    if(Trigger.isBefore){
-
-        LeadProspectingActivityHandler.updateProspectingActivityDate(Trigger.new,Trigger.oldMap);
-    }
+  // Intentionally empty — LeadTrigger → LeadProspectingActivityHandler.
 }

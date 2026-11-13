@@ -1,27 +1,45 @@
+/**
+ * @description   Lead campaign Salesforce email template render/send helpers.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public with sharing class LeadManagementEmailService {
+    private static Map<Id, EmailTemplate> templateById = new Map<Id, EmailTemplate>();
+
     public class RenderedEmail {
         public String subject;
         public String plainTextBody;
         public String htmlBody;
     }
 
+    /**
+     * @description Renders a Salesforce email template for a Lead, including product-brief injection when mapped.
+     * @param templateId EmailTemplate Id to render.
+     * @param leadRecord Lead used for merge fields.
+     * @return RenderedEmail with subject/bodies, or null when rendering fails.
+     */
     public static RenderedEmail renderTemplate(Id templateId, Lead leadRecord) {
         if (templateId == null || leadRecord == null) {
             return null;
         }
 
-        List<EmailTemplate> templates = [
-            SELECT Id, Name
-            FROM EmailTemplate
-            WHERE Id = :templateId
-            LIMIT 1
-        ];
-        if (templates.isEmpty()) {
-            return null;
+        EmailTemplate templateRecord = templateById.get(templateId);
+        if (templateRecord == null) {
+            List<EmailTemplate> templates = [
+                SELECT Id, Name
+                FROM EmailTemplate
+                WHERE Id = :templateId
+                LIMIT 1
+            ];
+            if (templates.isEmpty()) {
+                return null;
+            }
+            templateRecord = templates[0];
+            templateById.put(templateId, templateRecord);
         }
 
         BWM_Email_Template_Mapping__mdt mapping = resolveEmailMapping(
-            templates[0].Name,
+            templateRecord.Name,
             templateId
         );
         BWM_EmailTemplateRenderer.RenderedEmail rendered = BWM_EmailTemplateRenderer.render(
@@ -41,6 +59,12 @@ public with sharing class LeadManagementEmailService {
         return hasContent(result) ? result : null;
     }
 
+    /**
+     * @description Builds brochure file attachments for the Lead email based on template mapping.
+     * @param templateName Email template name used to resolve mapping.
+     * @param leadRecord Lead used for brochure department resolution.
+     * @return List of EmailFileAttachment values; empty when none apply.
+     */
     public static List<Messaging.EmailFileAttachment> buildBrochureAttachments(
         String templateName,
         Lead leadRecord
@@ -63,6 +87,12 @@ public with sharing class LeadManagementEmailService {
         );
     }
 
+    /**
+     * @description Resolves email template mapping by template name, falling back to template Id lookup.
+     * @param templateName Email template name.
+     * @param templateId EmailTemplate Id fallback.
+     * @return Matching BWM_Email_Template_Mapping__mdt, or null.
+     */
     private static BWM_Email_Template_Mapping__mdt resolveEmailMapping(
         String templateName,
         Id templateId
@@ -80,6 +110,11 @@ public with sharing class LeadManagementEmailService {
         return mapping;
     }
 
+    /**
+     * @description Finds email template mapping by normalized template name.
+     * @param templateName Email template name to match.
+     * @return Matching mapping metadata, or null.
+     */
     private static BWM_Email_Template_Mapping__mdt findEmailMappingByTemplateName(
         String templateName
     ) {
@@ -113,12 +148,22 @@ public with sharing class LeadManagementEmailService {
         return null;
     }
 
+    /**
+     * @description Normalizes a template name for mapping lookup comparisons.
+     * @param templateName Raw template name.
+     * @return Normalized template name string.
+     */
     private static String normalizeTemplateName(String templateName) {
         return templateName == null
             ? ''
             : templateName.trim().toLowerCase().replace(' ', '_');
     }
 
+    /**
+     * @description Injects product-brief content into a rendered Lead email when configured.
+     * @param rendered Rendered email content to mutate.
+     * @param leadRecord Lead providing product context.
+     */
     private static void injectProductBrief(
         BWM_EmailTemplateRenderer.RenderedEmail rendered,
         Lead leadRecord
@@ -147,6 +192,11 @@ public with sharing class LeadManagementEmailService {
         }
     }
 
+    /**
+     * @description Returns true when the rendered email has a subject or body content.
+     * @param rendered Rendered email DTO to inspect.
+     * @return True when subject or body content is present.
+     */
     private static Boolean hasContent(RenderedEmail rendered) {
         return rendered != null &&
             (String.isNotBlank(rendered.subject) ||

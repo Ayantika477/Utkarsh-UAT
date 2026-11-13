@@ -4,7 +4,7 @@ public class TenderOwnerAssignment_Test {
     @isTest
     static void testOwnerAssignmentFlow() {
 
-        Test.setMock(HttpCalloutMock.class, new TenderListingBatchMock());
+        //Test.setMock(HttpCalloutMock.class, new TenderListingBatchMock());
 
         Test.startTest();
         if (Test.isRunningTest()) {

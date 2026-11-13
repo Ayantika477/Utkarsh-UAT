@@ -6,7 +6,7 @@ import getPendingApprovals from '@salesforce/apex/ExpenseController.getPendingAp
 import approveExpense from '@salesforce/apex/ExpenseController.approveExpense';
 import rejectExpense from '@salesforce/apex/ExpenseController.rejectExpense';
 
-const COLUMNS = [
+/*const COLUMNS = [
     {
         label: 'Expense Number',
         fieldName: 'expenseUrl',
@@ -80,7 +80,7 @@ const COLUMNS = [
             ]
         }
     }
-];
+];*/
 
 export default class ExpenseApprovalQueue extends NavigationMixin(LightningElement) {
     @track expenses = [];
@@ -91,7 +91,7 @@ export default class ExpenseApprovalQueue extends NavigationMixin(LightningEleme
     @track selectedExpenseId;
     @track rejectionComments = '';
     
-    columns = COLUMNS;
+    //columns = COLUMNS;
     wiredExpensesResult;
 
     @wire(getPendingApprovals)
@@ -111,7 +111,10 @@ export default class ExpenseApprovalQueue extends NavigationMixin(LightningEleme
                     employeeName: expense.Employee__r ? expense.Employee__r.Name : '',
                     travelDates: travelStart && travelEnd ? `${travelStart} - ${travelEnd}` : '',
                     daysPending: daysPending,
-                    pendingClass: daysPending > 7 ? 'slds-text-color_error' : daysPending > 5 ? 'slds-text-color_warning' : ''
+                    //pendingClass: daysPending > 7 ? 'slds-text-color_error' : daysPending > 5 ? 'slds-text-color_warning' : ''
+                    pendingBadgeClass: daysPending > 7 ? 'pending-badge pending-high'
+                        : daysPending > 5 ? 'pending-badge pending-medium'
+                        : 'pending-badge pending-low'
                 };
             });
             this.error = undefined;
@@ -122,10 +125,16 @@ export default class ExpenseApprovalQueue extends NavigationMixin(LightningEleme
         }
     }
 
-    handleSort(event) {
+    /*handleSort(event) {
         this.sortBy = event.detail.fieldName;
         this.sortDirection = event.detail.sortDirection;
         this.sortData(this.sortBy, this.sortDirection);
+    }*/
+    handleSort(event) {
+        const fieldName = event.currentTarget.dataset.field;
+        this.sortDirection = this.sortBy === fieldName && this.sortDirection === 'asc' ? 'desc' : 'asc';
+        this.sortBy = fieldName;
+        this.sortData(fieldName, this.sortDirection);
     }
 
     sortData(fieldName, direction) {
@@ -142,7 +151,7 @@ export default class ExpenseApprovalQueue extends NavigationMixin(LightningEleme
         this.expenses = parseData;
     }
 
-    handleRowAction(event) {
+    /*handleRowAction(event) {
         const actionName = event.detail.action.name;
         const row = event.detail.row;
         
@@ -155,6 +164,23 @@ export default class ExpenseApprovalQueue extends NavigationMixin(LightningEleme
                 break;
             case 'reject':
                 this.openRejectModal(row.Id);
+                break;
+            default:
+        }
+    }*/
+    handleAction(event) {
+        const action = event.currentTarget.dataset.action;
+        const id = event.currentTarget.dataset.id;
+
+        switch (action) {
+            case 'view':
+                this.navigateToRecord(id);
+                break;
+            case 'approve':
+                this.handleApprove(id);
+                break;
+            case 'reject':
+                this.openRejectModal(id);
                 break;
             default:
         }

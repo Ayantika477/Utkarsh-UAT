@@ -18,7 +18,12 @@ trigger LeadTrigger on Lead (before insert, before update, after insert, after u
             BWM_LeadMessagingTriggerHandler.handleAfterInsert(Trigger.new);
             
             // IndiaMART Lead Keyword Matching & Department Assignment - 11/08/2026 - Ayantika
+            try {
+            // IndiaMART Lead Keyword Matching & Department Assignment - 11/08/2026 - Ayantika
             IndiaMartKeywordHandler.handleAfterSave(Trigger.new, null);
+        } catch (Exception ex) {
+            System.debug(LoggingLevel.ERROR, 'IndiaMartKeywordHandler failed: ' + ex.getMessage());
+        }
         }
         
         if (Trigger.isAfter && Trigger.isUpdate){
@@ -27,7 +32,11 @@ trigger LeadTrigger on Lead (before insert, before update, after insert, after u
             LeadNotesTriggerHandler.afterUpdate(Trigger.new, Trigger.oldMap);
             
             // IndiaMART Lead Keyword Matching & Department Assignment - 11/08/2026 - Ayantika
+             try {
             IndiaMartKeywordHandler.handleAfterSave(Trigger.new, Trigger.oldMap);
+        } catch (Exception ex) {
+            System.debug(LoggingLevel.ERROR, 'IndiaMartKeywordHandler failed: ' + ex.getMessage());
+        }
             
         }
 

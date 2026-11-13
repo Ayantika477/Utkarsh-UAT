@@ -20,11 +20,11 @@ public with sharing class BWM_CampaignJourneyParamService {
 
     if (record instanceof Lead) {
       Lead leadRecord = (Lead) record;
-      crmUserName = leadRecord.CRM_User_Name_Formula__c;
+      crmUserName = safeText(leadRecord, 'CRM_User_Name_Formula__c');
       ownerName = leadRecord.Owner == null ? null : leadRecord.Owner.Name;
     } else if (record instanceof Opportunity) {
       Opportunity opportunityRecord = (Opportunity) record;
-      crmUserName = opportunityRecord.CRM_User_Name_Formula__c;
+      crmUserName = safeText(opportunityRecord, 'CRM_User_Name_Formula__c');
       ownerName = opportunityRecord.Owner == null
         ? null
         : opportunityRecord.Owner.Name;
@@ -37,13 +37,6 @@ public with sharing class BWM_CampaignJourneyParamService {
       crmUserName.trim().equalsIgnoreCase(ownerName.trim());
   }
 
-  /**
-   * @description Campaign WhatsApp param fix: pad to dual-contact length when needed,
-   *              apply CRM-owner override, then fill blank/literal {{4}}/{{5}}/{{6}} slots.
-   * @param record Campaign record being messaged.
-   * @param params Resolved template params (1-based slots in list order).
-   * @return Updated params list; null input returned as-is.
-   */
   /**
    * @description True for enquiry-style templates that show Rudra and Bhagyashree
    *              names in the WhatsApp layout with {{1}}/{{2}} phone slots only.
@@ -61,20 +54,57 @@ public with sharing class BWM_CampaignJourneyParamService {
   }
 
   /**
+   * @description True for Prospect + product-department enquiry journeys where
+   *              {{4}} is brochure/department, {{5}}–{{7}} are always Lead Owner
+   *              contact — never replaced with central support when Owner = CRM user.
+   */
+  public static Boolean isProspectEnqDeptOwnerContactTemplate(
+    BWM_Template_Mapping__mdt mapping
+  ) {
+    if (mapping == null) {
+      return false;
+    }
+    return mapping.Journey_Name__c == 'prospect_enq_dept' ||
+      mapping.Journey_Name__c == 'polymer_enq_prospect';
+  }
+
+  /**
+   * @description True for dealer sales-assign journeys where {{4}}–{{6}} are
+   *              customer Email / City / State — never secondary CRM contact slots.
+   */
+  public static Boolean isDealerSalesAssignTemplate(
+    BWM_Template_Mapping__mdt mapping
+  ) {
+    if (mapping == null) {
+      return false;
+    }
+    return mapping.Journey_Name__c == 'dealer_sales_assign' ||
+      mapping.Trigger_Point__c ==
+      BWM_MessagingConstants.TRIGGER_OPPORTUNITY_REFER_TO_DEALER;
+  }
+
+  /**
    * @description When Owner matches CRM user, replace secondary corporate-support
    *              params with owner name + central phone/email. Skipped for dual-phone
-   *              enquiry templates that intentionally use Rudra/Bhagyashree numbers.
+   *              enquiry templates that intentionally use Rudra/Bhagyashree numbers,
+   *              prospect_enq_dept where owner contact slots are primary, and
+   *              dealer_sales_assign where {{4}}–{{6}} are customer details.
    */
   public static List<String> applyMessagingContactParamFixes(
     SObject record,
     List<String> params,
     BWM_Template_Mapping__mdt mapping
   ) {
-    if (isDualCorporateSupportPhoneTemplate(mapping)) {
+    if (
+      isDualCorporateSupportPhoneTemplate(mapping) ||
+      isProspectEnqDeptOwnerContactTemplate(mapping) ||
+      isDealerSalesAssignTemplate(mapping)
+    ) {
       return params;
     }
-    List<String> updated = padSecondaryContactSlots(params);
-    return applySecondaryContactOverride(record, updated);
+    // Auto journeys must not invent extra WhatsApp slots. Templates with only
+    // {{1}}–{{3}} or {{1}}–{{4}} stay at their mapped size.
+    return applySecondaryContactOverride(record, params);
   }
 
   public static List<String> applyCampaignContactParamFixes(
@@ -89,7 +119,15 @@ public with sharing class BWM_CampaignJourneyParamService {
     List<String> params,
     BWM_Template_Mapping__mdt mapping
   ) {
-    List<String> updated = applyMessagingContactParamFixes(record, params, mapping);
+    if (
+      isDualCorporateSupportPhoneTemplate(mapping) ||
+      isProspectEnqDeptOwnerContactTemplate(mapping) ||
+      isDealerSalesAssignTemplate(mapping)
+    ) {
+      return params;
+    }
+    List<String> updated = padSecondaryContactSlots(params);
+    updated = applySecondaryContactOverride(record, updated);
     return fillBlankSecondaryContactParams(record, updated, mapping);
   }
 
@@ -151,7 +189,13 @@ public with sharing class BWM_CampaignJourneyParamService {
     List<String> params,
     BWM_Template_Mapping__mdt mapping
   ) {
-    if (isDualCorporateSupportPhoneTemplate(mapping) || params == null || params.size() < 6) {
+    if (
+      isDualCorporateSupportPhoneTemplate(mapping) ||
+      isProspectEnqDeptOwnerContactTemplate(mapping) ||
+      isDealerSalesAssignTemplate(mapping) ||
+      params == null ||
+      params.size() < 6
+    ) {
       return params;
     }
 
@@ -252,6 +296,7 @@ public with sharing class BWM_CampaignJourneyParamService {
   ) {
     if (
       isDualCorporateSupportPhoneTemplate(mapping) ||
+      isProspectEnqDeptOwnerContactTemplate(mapping) ||
       !ownerMatchesCrmUserName(record) ||
       bodyData == null ||
       bodyData.isEmpty()
@@ -295,7 +340,12 @@ public with sharing class BWM_CampaignJourneyParamService {
     Map<String, Object> bodyData,
     BWM_Template_Mapping__mdt mapping
   ) {
-    if (isDualCorporateSupportPhoneTemplate(mapping) || bodyData == null || bodyData.isEmpty()) {
+    if (
+      isDualCorporateSupportPhoneTemplate(mapping) ||
+      isProspectEnqDeptOwnerContactTemplate(mapping) ||
+      bodyData == null ||
+      bodyData.isEmpty()
+    ) {
       return bodyData;
     }
 
@@ -333,5 +383,17 @@ public with sharing class BWM_CampaignJourneyParamService {
     return normalized == 'department_crm_name' ||
       normalized == '{{4}}' ||
       normalized.contains('crm_name');
+  }
+
+  private static String safeText(SObject record, String fieldName) {
+    if (record == null || String.isBlank(fieldName)) {
+      return null;
+    }
+    try {
+      Object value = record.get(fieldName);
+      return value == null ? null : String.valueOf(value);
+    } catch (Exception ex) {
+      return null;
+    }
   }
 }

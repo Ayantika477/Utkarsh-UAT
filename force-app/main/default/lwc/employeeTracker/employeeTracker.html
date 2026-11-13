@@ -1,5 +1,5 @@
 <template>
-    <template if:true={isAdmin}>
+    <template if:true={hasTrackerAccess}>
         <lightning-tabset variant="scoped">
             <!-- TAB 1: Map View (Original Tracker) -->
             <lightning-tab label="Map View">
@@ -54,10 +54,12 @@
                                                 <div class="et-name">{emp.employeeName}</div>
                                                 <div class="et-phone">{emp.phone}</div>
                                             </div>
-                                            <div class="et-battery">
-                                                <lightning-icon icon-name="utility:battery" size="x-small"></lightning-icon>
-                                                <span>{emp.batteryPercentage}%</span>
-                                            </div>
+                                            <template if:true={emp.hasBattery}>
+                                                <div class="et-battery">
+                                                    <lightning-icon icon-name="utility:battery" size="x-small"></lightning-icon>
+                                                    <span>{emp.batteryPercentage}%</span>
+                                                </div>
+                                            </template>
                                         </div>
 
                                         <!-- Pending WFH/WFO Requests -->
@@ -72,21 +74,28 @@
                                                                 Date: {req.formattedDate}
                                                             </div>
                                                             <div class="et-req-time">{req.formattedStartTime} - {req.formattedEndTime}</div>
-                                                            <div class="et-req-remarks-wrapper" style="margin-top: 0.3rem;">
-                                                                <lightning-input 
-                                                                    type="text" 
-                                                                    placeholder="Remarks (Optional)" 
-                                                                    data-id={req.requestId}
-                                                                    onchange={handleRemarksChange}
-                                                                    variant="label-hidden"
-                                                                    class="et-remarks-input">
-                                                                </lightning-input>
+                                                            <template if:true={canApproveWfhRequests}>
+                                                                <div class="et-req-remarks-wrapper" style="margin-top: 0.3rem;">
+                                                                    <lightning-input 
+                                                                        type="text" 
+                                                                        placeholder="HOD remarks..." 
+                                                                        data-id={req.requestId}
+                                                                        onchange={handleRemarksChange}
+                                                                        variant="label-hidden"
+                                                                        class="et-remarks-input">
+                                                                    </lightning-input>
+                                                                </div>
+                                                            </template>
+                                                        </div>
+                                                        <template if:true={canApproveWfhRequests}>
+                                                            <div class="et-req-actions">
+                                                                <lightning-button-icon icon-name="utility:check" variant="border-filled" data-id={req.requestId} onclick={handleApproveWFH} title="Approve"></lightning-button-icon>
+                                                                <lightning-button-icon icon-name="utility:close" variant="border-filled" data-id={req.requestId} onclick={handleRejectWFH} title="Reject"></lightning-button-icon>
                                                             </div>
-                                                        </div>
-                                                        <div class="et-req-actions">
-                                                            <lightning-button-icon icon-name="utility:check" variant="border-filled" data-id={req.requestId} onclick={handleApproveWFH} title="Approve"></lightning-button-icon>
-                                                            <lightning-button-icon icon-name="utility:close" variant="border-filled" data-id={req.requestId} onclick={handleRejectWFH} title="Reject"></lightning-button-icon>
-                                                        </div>
+                                                        </template>
+                                                        <template if:false={canApproveWfhRequests}>
+                                                            <span class="et-req-status">Pending</span>
+                                                        </template>
                                                     </div>
                                                 </template>
                                             </div>
@@ -109,7 +118,7 @@
                                             </div>
                                             <div class="et-stat">
                                                 <span class="et-stat-lbl">Hours</span>
-                                                <span class="et-stat-val">{emp.summary.totalHours}</span>
+                                                <span class="et-stat-val">{emp.formattedHours}</span>
                                             </div>
                                             <div class="et-stat">
                                                 <span class="et-stat-lbl">Visits</span>
@@ -123,7 +132,7 @@
 
                                         <div class="et-card-meta">
                                             <span class={emp.gpsBadgeClass}>GPS: {emp.summary.gpsStatus}</span>
-                                            <span class="et-battery-meta">Batt: {emp.summary.batteryLevel}</span>
+                                            <!-- <span class="et-battery-meta">Batt: {emp.summary.batteryLevel}</span> -->
                                         </div>
 
                                         <div class="et-expand-row">
@@ -137,8 +146,13 @@
                                                 <div class="timeline">
                                                     <template for:each={emp.timeline} for:item="t">
                                                         <div key={t.id} class="timeline-item">
-                                                            <div class="timeline-icon">
-                                                                <lightning-icon icon-name={t.iconName} size="x-small" variant={t.iconVariant}></lightning-icon>
+                                                            <div class="timeline-marker">
+                                                                <div class="timeline-icon">
+                                                                    <lightning-icon icon-name={t.iconName} size="x-small" variant={t.iconVariant}></lightning-icon>
+                                                                </div>
+                                                                <template if:true={t.nodeDistance}>
+                                                                    <span class="dot-distance-val">{t.nodeDistance}</span>
+                                                                </template>
                                                             </div>
                                                             <div class="timeline-content">
                                                                 <div class="timeline-header">
@@ -150,6 +164,29 @@
                                                                     <div class="timeline-client">
                                                                         <lightning-icon icon-name="utility:company" size="xx-small"></lightning-icon>
                                                                         {t.client}
+                                                                    </div>
+                                                                </template>
+
+                                                                <template if:true={t.isTask}>
+                                                                    <div class="timeline-quick-meta">
+                                                                        <template if:true={t.checkInTime}>
+                                                                            <div class="timeline-chip">
+                                                                                <span class="timeline-chip-lbl">In</span>
+                                                                                <span class="timeline-chip-val">{t.checkInTime}</span>
+                                                                            </div>
+                                                                        </template>
+                                                                        <template if:true={t.checkOutTime}>
+                                                                            <div class="timeline-chip">
+                                                                                <span class="timeline-chip-lbl">Out</span>
+                                                                                <span class="timeline-chip-val">{t.checkOutTime}</span>
+                                                                            </div>
+                                                                        </template>
+                                                                        <template if:true={t.visitDuration}>
+                                                                            <div class="timeline-chip timeline-chip-duration">
+                                                                                <span class="timeline-chip-lbl">Duration</span>
+                                                                                <span class="timeline-chip-val">{t.visitDuration}</span>
+                                                                            </div>
+                                                                        </template>
                                                                     </div>
                                                                 </template>
 
@@ -278,11 +315,11 @@
         </lightning-tabset>
     </template>
 
-    <template if:false={isAdmin}>
+    <template if:true={showAccessDenied}>
         <div class="access-denied">
             <lightning-icon icon-name="utility:lock" size="large" variant="error"></lightning-icon>
             <h1>Access Denied</h1>
-            <p>You do not have administrative privileges to view this page.</p>
+            <p>You do not have permission to view Force Tracker.</p>
         </div>
     </template>
 

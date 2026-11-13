@@ -162,8 +162,9 @@ public without sharing class TenderResolverController {
                 // --- NEW LOGIC: Disassociate any existing Address Books from this Tender ---
                 List<Tender_Addressbook_Junc__c> existingJunctions = [
                     SELECT Id 
-                    FROM Tender_Addressbook_Junc__c 
+                    FROM Tender_Addressbook_Junc__c
                     WHERE Tender__c = :payload.tenderId
+                    WITH SYSTEM_MODE
                 ];
                 
                 if (!existingJunctions.isEmpty()) {

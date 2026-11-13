@@ -1,3 +1,9 @@
+/**
+ * @description   Main Opportunity trigger that routes to messaging and email handlers
+ *                among other Opportunity logic.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 trigger OpportunityTrigger on Opportunity (
     before update,
     after insert,
@@ -13,11 +19,7 @@ trigger OpportunityTrigger on Opportunity (
                     opp.isFirstUpdate__c = true;
                 }
             }
-            //parentopportunitycheck
-            ParentProjectOpportunityTriggerHandler.validateParentProjectOpportunity(
-                Trigger.new,
-                Trigger.oldMap
-            );
+            ParentProjectOpportunityTriggerHandler.validateParentProjectOpportunity(Trigger.new,Trigger.oldMap);
         }
 
         // AFTER INSERT
@@ -53,6 +55,37 @@ trigger OpportunityTrigger on Opportunity (
         System.debug(
             LoggingLevel.ERROR,
             'OpportunityTrigger failed: ' + ex.getMessage() +
+            '\nStack Trace: ' + ex.getStackTraceString()
+        );
+    }
+
+    try {
+        if (Trigger.isAfter && Trigger.isInsert) {
+            OpportunityAssignmentEmailHandler.handleAfterInsert(Trigger.new);
+        }
+        if (Trigger.isAfter && Trigger.isUpdate) {
+            OpportunityAssignmentEmailHandler.handleAfterUpdate(Trigger.new, Trigger.oldMap);
+            
+        }
+    } catch (Exception ex) {
+        System.debug(
+            LoggingLevel.ERROR,
+            'OpportunityAssignmentEmailTrigger failed: ' + ex.getMessage() +
+            '\nStack Trace: ' + ex.getStackTraceString()
+        );
+    }
+
+    try {
+        if (Trigger.isAfter && Trigger.isUpdate) {
+            OpportunityWonPushNotificationHandler.handleAfterUpdate(
+                Trigger.new,
+                Trigger.oldMap
+            );
+        }
+    } catch (Exception ex) {
+        System.debug(
+            LoggingLevel.ERROR,
+            'OpportunityWonPushNotificationTrigger failed: ' + ex.getMessage() +
             '\nStack Trace: ' + ex.getStackTraceString()
         );
     }

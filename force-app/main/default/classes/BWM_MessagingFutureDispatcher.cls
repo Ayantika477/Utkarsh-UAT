@@ -1,3 +1,9 @@
+/**
+ * @description   Future method fallback dispatcher used when Queueable slots are
+ *                exhausted for messaging callouts.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_MessagingFutureDispatcher {
   @future(callout=true)
   public static void process(String payloadJson) {
@@ -9,7 +15,9 @@ public without sharing class BWM_MessagingFutureDispatcher {
       payloadJson,
       List<BWM_MessagingRequest>.class
     );
-    BWM_MessagingQueueable.processRequests(requests);
+    BWM_MessagingQueueable.enqueueDeferred(
+      BWM_MessagingQueueable.processRequests(requests)
+    );
   }
 
   public static void dispatch(List<BWM_MessagingRequest> requests) {

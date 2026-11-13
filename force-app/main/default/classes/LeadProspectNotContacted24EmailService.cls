@@ -1,19 +1,29 @@
 /**
  * @description   Renders and sends Prospect-stage 24-hour not-contacted escalation emails
  *                to the Lead Owner and Department CRM Head using the Lightning template.
+ *                CHANGE: emails are now sent as INTERNAL emails (target = User Id)
+ *                instead of external (To = email strings).
  * @author        Anshita Chanda
  * @date          2026-08-10
  */
 public without sharing class LeadProspectNotContacted24EmailService {
   public static final String TEMPLATE_NAME = 'Lead Not Contacted 24h Owner';
 
+  // NEW: when true, an address that does not match an active User is still sent
+  // as an external email. Set to false for STRICTLY internal-only sending.
+  private static final Boolean ALLOW_EXTERNAL_FALLBACK = false;
+
   @TestVisible
   private static Id testTemplateIdOverride;
 
+  // NEW: cache of lower-case email -> active User Id (null value = no match).
+  private static Map<String, Id> userIdByEmail = new Map<String, Id>();
+
   /**
    * @description Sends the escalation email to the Lead Owner and CRM Head when recipients exist.
+   *              CHANGE: one INTERNAL message per User. Returns true only when every
+   *              message was sent successfully (so the sent flag is never set on a partial send).
    * @param leadRecord Lead record with owner and department fields populated.
-   * @return True when at least one email was sent successfully.
    */
   public static Boolean sendEscalationEmail(Lead leadRecord) {
     if (leadRecord == null) {
@@ -38,16 +48,38 @@ public without sharing class LeadProspectNotContacted24EmailService {
       return false;
     }
 
-    Messaging.SingleEmailMessage message = buildMessage(
-      leadRecord,
-      rendered,
-      new List<String>(recipients)
-    );
-    Messaging.SendEmailResult[] results = Messaging.sendEmail(
-      new List<Messaging.SingleEmailMessage>{ message }
-    );
+    List<Messaging.SingleEmailMessage> messages = buildMessages(rendered, recipients);
+    if (messages.isEmpty()) {
+      return false;
+    }
 
-    return !results.isEmpty() && results[0].isSuccess();
+    try {
+      Messaging.SendEmailResult[] results = Messaging.sendEmail(messages, false);
+      if (results.isEmpty()) {
+        return false;
+      }
+      for (Messaging.SendEmailResult result : results) {
+        if (!result.isSuccess()) {
+          return false;
+        }
+      }
+      return true;
+    } catch (Exception ex) {
+      // Org daily Single Email quota exhausted — skip without failing the batch chunk.
+      if (isEmailLimitExceeded(ex)) {
+        return false;
+      }
+      throw ex;
+    }
+  }
+
+  private static Boolean isEmailLimitExceeded(Exception ex) {
+    if (ex == null || String.isBlank(ex.getMessage())) {
+      return false;
+    }
+    String message = ex.getMessage().toUpperCase();
+    return message.contains('SINGLE_EMAIL_LIMIT_EXCEEDED') ||
+      message.contains('EMAIL LIMIT EXCEEDED');
   }
 
   /**
@@ -97,9 +129,17 @@ public without sharing class LeadProspectNotContacted24EmailService {
     return departmentMap.containsKey(department) ? departmentMap.get(department) : department;
   }
 
+  private static Id cachedTemplateId;
+  private static Id cachedOrgWideEmailAddressId;
+  private static Boolean orgWideEmailResolved = false;
+
   private static Id resolveTemplateId() {
     if (Test.isRunningTest() && testTemplateIdOverride != null) {
       return testTemplateIdOverride;
+    }
+
+    if (cachedTemplateId != null) {
+      return cachedTemplateId;
     }
 
     List<EmailTemplate> templates = [
@@ -108,7 +148,8 @@ public without sharing class LeadProspectNotContacted24EmailService {
       WHERE Name = :TEMPLATE_NAME
       LIMIT 1
     ];
-    return templates.isEmpty() ? null : templates[0].Id;
+    cachedTemplateId = templates.isEmpty() ? null : templates[0].Id;
+    return cachedTemplateId;
   }
 
   private static Set<String> resolveRecipients(Lead leadRecord) {
@@ -146,17 +187,100 @@ public without sharing class LeadProspectNotContacted24EmailService {
     return users.isEmpty() ? null : users[0].Email;
   }
 
-  private static Messaging.SingleEmailMessage buildMessage(
-    Lead leadRecord,
+  /**
+   * NEW: builds one INTERNAL message per active User matching the recipient emails.
+   * Emails with no active User go out as one external message only when
+   * ALLOW_EXTERNAL_FALLBACK is true.
+   */
+  private static List<Messaging.SingleEmailMessage> buildMessages(
     LeadManagementEmailService.RenderedEmail rendered,
-    List<String> toAddresses
+    Set<String> recipients
+  ) {
+    Map<String, Id> idByEmail = resolveUserIdsByEmail(recipients);
+
+    Set<Id> userIds = new Set<Id>();
+    List<String> unmatchedEmails = new List<String>();
+    for (String email : recipients) {
+      if (String.isBlank(email)) {
+        continue;
+      }
+      Id userId = idByEmail.get(email.trim().toLowerCase());
+      if (userId != null) {
+        userIds.add(userId);
+      } else {
+        unmatchedEmails.add(email.trim());
+      }
+    }
+
+    List<Messaging.SingleEmailMessage> messages = new List<Messaging.SingleEmailMessage>();
+
+    for (Id userId : userIds) {
+      messages.add(buildMessage(userId, rendered, null));
+    }
+
+        if (!unmatchedEmails.isEmpty()) {
+      System.debug(
+        LoggingLevel.WARN,
+        'SKIPPED (no active User) lead emails=' + unmatchedEmails
+      );
+    }
+
+    return messages;
+  }
+
+  /**
+   * NEW: maps lower-case email -> active User Id (cached; one query per new emails).
+   */
+  private static Map<String, Id> resolveUserIdsByEmail(Set<String> emails) {
+    Set<String> toQuery = new Set<String>();
+    for (String email : emails) {
+      if (String.isBlank(email)) {
+        continue;
+      }
+      String key = email.trim().toLowerCase();
+      if (!userIdByEmail.containsKey(key)) {
+        toQuery.add(key);
+      }
+    }
+
+    if (!toQuery.isEmpty()) {
+      for (String key : toQuery) {
+        userIdByEmail.put(key, null); // remember "no match" so we never re-query
+      }
+      for (User userRecord : [
+        SELECT Id, Email
+        FROM User
+        WHERE IsActive = TRUE AND Email IN :toQuery
+      ]) {
+        String key = userRecord.Email.trim().toLowerCase();
+        if (userIdByEmail.get(key) == null) {
+          userIdByEmail.put(key, userRecord.Id);
+        }
+      }
+    }
+
+    return userIdByEmail;
+  }
+
+  /**
+   * CHANGE: when userId is set the message is INTERNAL (target = User, treated as
+   * recipient). Otherwise it is the external fallback using email addresses.
+   */
+  private static Messaging.SingleEmailMessage buildMessage(
+    Id userId,
+    LeadManagementEmailService.RenderedEmail rendered,
+    List<String> externalToAddresses
   ) {
     Messaging.SingleEmailMessage message = new Messaging.SingleEmailMessage();
-    message.setToAddresses(toAddresses);
     message.setSubject(rendered.subject);
     message.setSaveAsActivity(false);
-    message.setTargetObjectId(leadRecord.Id);
-    message.setTreatTargetObjectAsRecipient(false);
+
+    if (userId != null) {
+      message.setTargetObjectId(userId);
+      message.setTreatTargetObjectAsRecipient(true);
+    } else {
+      message.setToAddresses(externalToAddresses);
+    }
 
     if (String.isNotBlank(rendered.htmlBody)) {
       message.setHtmlBody(rendered.htmlBody);
@@ -175,14 +299,21 @@ public without sharing class LeadProspectNotContacted24EmailService {
       return;
     }
 
-    List<OrgWideEmailAddress> orgWideAddresses = [
-      SELECT Id
-      FROM OrgWideEmailAddress
-      WHERE Address = :settings.Central_Sender_Email__c.trim()
-      LIMIT 1
-    ];
-    if (!orgWideAddresses.isEmpty()) {
-      message.setOrgWideEmailAddressId(orgWideAddresses[0].Id);
+    if (!orgWideEmailResolved) {
+      List<OrgWideEmailAddress> orgWideAddresses = [
+        SELECT Id
+        FROM OrgWideEmailAddress
+        WHERE Address = :settings.Central_Sender_Email__c.trim()
+        LIMIT 1
+      ];
+      cachedOrgWideEmailAddressId = orgWideAddresses.isEmpty()
+        ? null
+        : orgWideAddresses[0].Id;
+      orgWideEmailResolved = true;
+    }
+
+    if (cachedOrgWideEmailAddressId != null) {
+      message.setOrgWideEmailAddressId(cachedOrgWideEmailAddressId);
     }
   }
 }

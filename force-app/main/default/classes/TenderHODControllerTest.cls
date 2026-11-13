@@ -15,14 +15,14 @@ private class TenderHODControllerTest {
             Phone = '1234567890',
             Website = 'https://example.com'
         );
-        insert authority;
+        Database.insert(authority,AccessLevel.SYSTEM_MODE);
 
         // --- Contact on the Authority ---
         Contact con = new Contact(
             LastName = 'Test Contact',
             AccountId = authority.Id
         );
-        insert con;
+        Database.insert(con,AccessLevel.SYSTEM_MODE);
 
         // --- Address Book ---
         Address_Book__c addressBook = new Address_Book__c(
@@ -32,12 +32,12 @@ private class TenderHODControllerTest {
             Street__c = '123 Test Street',
             PIN__c = '123456'
         );
-        insert addressBook;
+        Database.insert(addressBook,AccessLevel.SYSTEM_MODE);
 
         // --- Users for project/tender owner selection ---
         // NOTE: Departments__c is assumed to be a multi-select picklist.
         // Adjust profile names / permission fields to match your org.
-        Profile stdProfile = [SELECT Id FROM Profile WHERE Name = 'Standard User' LIMIT 1];
+        Profile stdProfile = [SELECT Id FROM Profile WHERE Name = 'Standard User'  WITH SYSTEM_MODE LIMIT 1];
 
         User projectUser = new User(
             FirstName = 'Project',
@@ -54,7 +54,7 @@ private class TenderHODControllerTest {
             Project_Access_User__c = true,
             Departments__c = 'High_Mast_Department'
         );
-        insert projectUser;
+        database.insert (projectUser, AccessLevel.SYSTEM_MODE);
 
         User tenderUser = new User(
             FirstName = 'Tender',
@@ -71,7 +71,7 @@ private class TenderHODControllerTest {
             Tender_Access_User__c = true,
             Departments__c = 'High_Mast_Department'
         );
-        insert tenderUser;
+        Database.insert (tenderUser, AccessLevel.SYSTEM_MODE);
 
         // --- Tender record ---
         // NOTE: 'Department_Name__c' value must be a key present in the deptMap
@@ -85,24 +85,24 @@ private class TenderHODControllerTest {
             Biddead_Line__c = Date.today().addDays(15),
             OwnerId = UserInfo.getUserId()
         );
-        insert tender;
+        Database.insert(tender,AccessLevel.SYSTEM_MODE);
 
         // --- Link Address Book to Tender ---
         Tender_Addressbook_Junc__c junc = new Tender_Addressbook_Junc__c(
             Tender__c = tender.Id,
             Address_Book__c = addressBook.Id
         );
-        insert junc;
+        Database.insert(junc,AccessLevel.SYSTEM_MODE);
 
         // --- Bidders linked to Tender (for createProject path) ---
         Bidders__c bidder = new Bidders__c(
             Tender__c = tender.Id
         );
-        insert bidder;
+        Database.insert(bidder,AccessLevel.SYSTEM_MODE);
     }
 
     private static Tender__c getTestTender() {
-        return [SELECT Id, Name, Department_Name__c FROM Tender__c LIMIT 1];
+        return [SELECT Id, Name, Department_Name__c FROM Tender__c WITH SYSTEM_MODE LIMIT 1];
     }
 
     // ------------------------------------------------------------------
@@ -127,7 +127,7 @@ private class TenderHODControllerTest {
            
             Department_Name__c = 'High Mast & Polygonal'
         );
-        insert tenderNoAuthority;
+        Database.insert(tenderNoAuthority,AccessLevel.SYSTEM_MODE);
 
         Test.startTest();
         Account result = TenderHODController.getTenderAccount(tenderNoAuthority.Id);
@@ -157,7 +157,7 @@ private class TenderHODControllerTest {
            
             Department_Name__c = 'High Mast & Polygonal'
         );
-        insert tenderNoJunc;
+        Database.insert(tenderNoJunc,AccessLevel.SYSTEM_MODE);
 
         Test.startTest();
         List<Address_Book__c> results = TenderHODController.getAddressBookDetails(tenderNoJunc.Id);
@@ -200,7 +200,7 @@ private class TenderHODControllerTest {
            
             Department_Name__c = 'High Mast & Polygonal'
         );
-        insert unmappedTender;
+        Database.insert(unmappedTender,AccessLevel.SYSTEM_MODE);
 
         Test.startTest();
         List<TenderHODController.UserOption> options =
@@ -241,7 +241,7 @@ private class TenderHODControllerTest {
     @isTest
     static void testProcessChoice_approveParticipation() {
         Tender__c tender = getTestTender();
-        User projectOwner = [SELECT Id FROM User WHERE Alias = 'powner' LIMIT 1];
+        User projectOwner = [SELECT Id FROM User WHERE Alias = 'powner' WITH SYSTEM_MODE LIMIT 1];
 
         Test.startTest();
         TenderHODController.processChoice(
@@ -256,12 +256,13 @@ private class TenderHODControllerTest {
             SELECT Id, HOD_Choice__c, Tender_Stage__c, HOD_Comments__c
             FROM Tender__c
             WHERE Id = :tender.Id
+            WITH SYSTEM_MODE
         ];
         System.assertEquals('Accept for participation', updated.HOD_Choice__c);
         System.assertEquals('Closed Accepted', updated.Tender_Stage__c);
         System.assert(updated.HOD_Comments__c.contains('Approved for participation'));
 
-        List<Opportunity> opps = [SELECT Id, Name, OwnerId FROM Opportunity WHERE Tender__c = :tender.Id];
+        List<Opportunity> opps = [SELECT Id, Name, OwnerId FROM Opportunity WHERE Tender__c = :tender.Id WITH SYSTEM_MODE];
         System.assertEquals(1, opps.size(), 'Expected one Opportunity to be created');
         System.assertEquals(projectOwner.Id, opps[0].OwnerId);
     }
@@ -272,7 +273,7 @@ private class TenderHODControllerTest {
     @isTest
     static void testProcessChoice_createProject() {
         Tender__c tender = getTestTender();
-        User projectOwner = [SELECT Id FROM User WHERE Alias = 'powner' LIMIT 1];
+        User projectOwner = [SELECT Id FROM User WHERE Alias = 'powner' WITH SYSTEM_MODE LIMIT 1];
 
         Test.startTest();
         TenderHODController.processChoice(
@@ -287,16 +288,17 @@ private class TenderHODControllerTest {
             SELECT Id, HOD_Choice__c, Tender_Stage__c
             FROM Tender__c
             WHERE Id = :tender.Id
+            WITH SYSTEM_MODE
         ];
         System.assertEquals('Reject and Create Project', updated.HOD_Choice__c);
         System.assertEquals('Closed Rejected', updated.Tender_Stage__c);
 
-        List<Project__c> projects = [SELECT Id, OwnerId, Tender_Lost__c FROM Project__c WHERE Tender__c = :tender.Id];
+        List<Project__c> projects = [SELECT Id, OwnerId, Tender_Lost__c FROM Project__c WHERE Tender__c = :tender.Id WITH SYSTEM_MODE];
         System.assertEquals(1, projects.size(), 'Expected one Project to be created');
         System.assertEquals(true, projects[0].Tender_Lost__c);
         System.assertEquals(projectOwner.Id, projects[0].OwnerId);
 
-        List<Bidders__c> relinkedBidders = [SELECT Id, Project__c FROM Bidders__c WHERE Tender__c = :tender.Id];
+        List<Bidders__c> relinkedBidders = [SELECT Id, Project__c FROM Bidders__c WHERE Tender__c = :tender.Id WITH SYSTEM_MODE];
         for (Bidders__c b : relinkedBidders) {
             System.assertEquals(projects[0].Id, b.Project__c, 'Bidder should be relinked to the new Project');
         }
@@ -322,6 +324,7 @@ private class TenderHODControllerTest {
             SELECT Id, HOD_Choice__c, Tender_Stage__c
             FROM Tender__c
             WHERE Id = :tender.Id
+            WITH SYSTEM_MODE
         ];
         System.assertEquals('Reject and Close', updated.HOD_Choice__c);
         System.assertEquals('Closed Rejected', updated.Tender_Stage__c);
@@ -346,7 +349,7 @@ private class TenderHODControllerTest {
         Tender__c updated = [
             SELECT Id, HOD_Choice__c, Tender_Stage__c
             FROM Tender__c
-            WHERE Id = :tender.Id
+            WHERE Id = :tender.Id WITH SYSTEM_MODE
         ];
         System.assertEquals('Update Account Details', updated.HOD_Choice__c);
         System.assertEquals('Open', updated.Tender_Stage__c);
@@ -371,7 +374,7 @@ private class TenderHODControllerTest {
         Tender__c updated = [
             SELECT Id, HOD_Choice__c, Tender_Stage__c
             FROM Tender__c
-            WHERE Id = :tender.Id
+            WHERE Id = :tender.Id WITH SYSTEM_MODE
         ];
         System.assertEquals('Review and resend for participation', updated.HOD_Choice__c);
         System.assertEquals('Open', updated.Tender_Stage__c);
@@ -417,7 +420,283 @@ private class TenderHODControllerTest {
         );
         Test.stopTest();
 
-        Tender__c updated = [SELECT Id, HOD_Comments__c FROM Tender__c WHERE Id = :tender.Id];
+        Tender__c updated = [SELECT Id, HOD_Comments__c FROM Tender__c WHERE Id = :tender.Id WITH SYSTEM_MODE];
         System.assertEquals(null, updated.HOD_Comments__c, 'No comment should be appended when rejectReason is blank');
     }
+    
+// ------------------------------------------------------------------
+// Direct Participation - ACCEPTED
+// Covers notifyDirectParticipationAccepted()
+// ------------------------------------------------------------------
+@isTest
+static void testDirectParticipationAcceptedNotification() {
+
+    Tender__c tender = getTestTender();
+
+    tender.Tender_User_Choice__c = 'Accept and participate';
+
+    Database.update(
+        tender,
+        AccessLevel.SYSTEM_MODE
+    );
+
+    User projectOwner = [
+        SELECT Id
+        FROM User
+        WHERE Alias = 'powner'
+        WITH SYSTEM_MODE
+        LIMIT 1
+    ];
+
+    Test.startTest();
+
+    TenderHODController.processChoice(
+        tender.Id,
+        'APPROVE_PARTICIPATION',
+        'Direct participation approved',
+        projectOwner.Id
+    );
+
+    Test.stopTest();
+
+    Tender__c updated = [
+        SELECT Id,
+               HOD_Choice__c,
+               Tender_Stage__c,
+               Tender_User_Choice__c
+        FROM Tender__c
+        WHERE Id = :tender.Id
+        WITH SYSTEM_MODE
+    ];
+
+    System.assertEquals(
+        'Accept for participation',
+        updated.HOD_Choice__c
+    );
+
+    System.assertEquals(
+        'Closed Accepted',
+        updated.Tender_Stage__c
+    );
+
+    // Salesforce stores an empty String field as null.
+    System.assertEquals(
+        null,
+        updated.Tender_User_Choice__c
+    );
+
+    List<Opportunity> opps = [
+        SELECT Id, OwnerId, Tender__c
+        FROM Opportunity
+        WHERE Tender__c = :tender.Id
+        WITH SYSTEM_MODE
+    ];
+
+    System.assertEquals(
+        1,
+        opps.size(),
+        'Expected the Tender Opportunity to be created'
+    );
+
+    System.assertEquals(
+        projectOwner.Id,
+        opps[0].OwnerId
+    );
+}
+
+
+// ------------------------------------------------------------------
+// Direct Participation - REJECTED
+// Covers notifyDirectParticipationRejected()
+// ------------------------------------------------------------------
+@isTest
+static void testDirectParticipationRejectedNotification() {
+
+    Tender__c tender = getTestTender();
+
+    tender.Tender_User_Choice__c = 'Accept and participate';
+
+    Database.update(
+        tender,
+        AccessLevel.SYSTEM_MODE
+    );
+
+    Test.startTest();
+
+    TenderHODController.processChoice(
+        tender.Id,
+        'CLOSE_TENDER',
+        'Direct participation rejected',
+        null
+    );
+
+    Test.stopTest();
+
+    Tender__c updated = [
+        SELECT Id,
+               HOD_Choice__c,
+               Tender_Stage__c,
+               Tender_User_Choice__c
+        FROM Tender__c
+        WHERE Id = :tender.Id
+        WITH SYSTEM_MODE
+    ];
+
+    System.assertEquals(
+        'Reject and Close',
+        updated.HOD_Choice__c
+    );
+
+    System.assertEquals(
+        'Closed Rejected',
+        updated.Tender_Stage__c
+    );
+
+    System.assertEquals(
+        null,
+        updated.Tender_User_Choice__c
+    );
+}
+
+
+// ------------------------------------------------------------------
+// Direct Participation Rejection - ACCEPTED
+// Covers notifyDirectParticipationRejectionAccepted()
+// ------------------------------------------------------------------
+@isTest
+static void testDirectParticipationRejectionAcceptedNotification() {
+
+    Tender__c tender = getTestTender();
+
+    tender.Tender_User_Choice__c = 'Reject and Close';
+
+    Database.update(
+        tender,
+        AccessLevel.SYSTEM_MODE
+    );
+
+    User projectOwner = [
+        SELECT Id
+        FROM User
+        WHERE Alias = 'powner'
+        WITH SYSTEM_MODE
+        LIMIT 1
+    ];
+
+    Test.startTest();
+
+    TenderHODController.processChoice(
+        tender.Id,
+        'CREATE_PROJECT',
+        'Direct participation rejection approved',
+        projectOwner.Id
+    );
+
+    Test.stopTest();
+
+    Tender__c updated = [
+        SELECT Id,
+               HOD_Choice__c,
+               Tender_Stage__c,
+               Tender_User_Choice__c
+        FROM Tender__c
+        WHERE Id = :tender.Id
+        WITH SYSTEM_MODE
+    ];
+
+    System.assertEquals(
+        'Reject and Create Project',
+        updated.HOD_Choice__c
+    );
+
+    System.assertEquals(
+        'Closed Rejected',
+        updated.Tender_Stage__c
+    );
+
+    System.assertEquals(
+        null,
+        updated.Tender_User_Choice__c
+    );
+
+    List<Project__c> projects = [
+        SELECT Id,
+               OwnerId,
+               Tender_Lost__c
+        FROM Project__c
+        WHERE Tender__c = :tender.Id
+        WITH SYSTEM_MODE
+    ];
+
+    System.assertEquals(
+        1,
+        projects.size(),
+        'Expected a Project to be created'
+    );
+
+    System.assertEquals(
+        projectOwner.Id,
+        projects[0].OwnerId
+    );
+
+    System.assertEquals(
+        true,
+        projects[0].Tender_Lost__c
+    );
+}
+
+
+// ------------------------------------------------------------------
+// Direct Participation Rejection - REJECTED
+// Covers notifyDirectParticipationRejectionRejected()
+// ------------------------------------------------------------------
+@isTest
+static void testDirectParticipationRejectionRejectedNotification() {
+
+    Tender__c tender = getTestTender();
+
+    tender.Tender_User_Choice__c = 'Reject and Close';
+
+    Database.update(
+        tender,
+        AccessLevel.SYSTEM_MODE
+    );
+
+    Test.startTest();
+
+    TenderHODController.processChoice(
+        tender.Id,
+        'SEND_BACK_TO_PARTICIPATE',
+        'Direct participation rejection was rejected',
+        null
+    );
+
+    Test.stopTest();
+
+    Tender__c updated = [
+        SELECT Id,
+               HOD_Choice__c,
+               Tender_Stage__c,
+               Tender_User_Choice__c
+        FROM Tender__c
+        WHERE Id = :tender.Id
+        WITH SYSTEM_MODE
+    ];
+
+    System.assertEquals(
+        'Review and resend for participation',
+        updated.HOD_Choice__c
+    );
+
+    System.assertEquals(
+        'Open',
+        updated.Tender_Stage__c
+    );
+
+    System.assertEquals(
+        null,
+        updated.Tender_User_Choice__c
+    );
+}
+
 }

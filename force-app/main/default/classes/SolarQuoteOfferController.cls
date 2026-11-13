@@ -40,9 +40,9 @@ public class SolarQuoteOfferController {
                    Account.Name, Contact.Name, Contact.Phone, Contact.Email,
                    BillingStreet, BillingCity, BillingState, BillingPostalCode,
                    Opportunity.Name
-            FROM   Quote
+            FROM   Quote 
             WHERE  Id = :stdController.getId()
-            LIMIT  1
+            LIMIT  1 
         ];
 
         // Validity = 6 months from creation date, formatted dd.MM.yyyy

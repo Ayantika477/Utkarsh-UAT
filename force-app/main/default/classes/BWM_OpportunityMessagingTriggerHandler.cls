@@ -1,6 +1,16 @@
+/**
+ * @description   Opportunity after-insert/update handler that enqueues WhatsApp/RCS/SMS
+ *                journey messaging.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_OpportunityMessagingTriggerHandler {
   private static Set<Id> processedInsertIds = new Set<Id>();
 
+  /**
+   * @description After-insert Opportunity handler that enqueues nurture, dealer enquiry, and refer-to-dealer messaging when enabled.
+   * @param newOpportunities Newly inserted Opportunity records from the trigger context.
+   */
   public static void handleAfterInsert(List<Opportunity> newOpportunities) {
     if (newOpportunities == null || newOpportunities.isEmpty()) {
       return;
@@ -50,7 +60,8 @@ public without sharing class BWM_OpportunityMessagingTriggerHandler {
 
       if (
         opportunityRecord.Customer_Journey__c ==
-        BWM_MessagingConstants.CUSTOMER_JOURNEY_REFER_DEALER
+        BWM_MessagingConstants.CUSTOMER_JOURNEY_REFER_DEALER &&
+        isMasterOpportunityRecordType(opportunityRecord.RecordTypeId)
       ) {
         requests.add(
           new BWM_MessagingRequest(
@@ -59,6 +70,8 @@ public without sharing class BWM_OpportunityMessagingTriggerHandler {
           )
         );
       }
+
+      addClosedWonRequests(requests, opportunityRecord, null);
     }
 
     if (!requests.isEmpty()) {
@@ -66,6 +79,11 @@ public without sharing class BWM_OpportunityMessagingTriggerHandler {
     }
   }
 
+  /**
+   * @description After-update Opportunity handler that enqueues messaging for lost-reason and refer-to-dealer changes when enabled.
+   * @param newOpportunities Updated Opportunity records from the trigger context.
+   * @param oldMap Prior Opportunity versions keyed by Id.
+   */
   public static void handleAfterUpdate(
     List<Opportunity> newOpportunities,
     Map<Id, Opportunity> oldMap
@@ -101,7 +119,8 @@ public without sharing class BWM_OpportunityMessagingTriggerHandler {
       if (
         opportunityRecord.Customer_Journey__c != oldRecord.Customer_Journey__c &&
         opportunityRecord.Customer_Journey__c ==
-        BWM_MessagingConstants.CUSTOMER_JOURNEY_REFER_DEALER
+        BWM_MessagingConstants.CUSTOMER_JOURNEY_REFER_DEALER &&
+        isMasterOpportunityRecordType(opportunityRecord.RecordTypeId)
       ) {
         requests.add(
           new BWM_MessagingRequest(
@@ -110,6 +129,8 @@ public without sharing class BWM_OpportunityMessagingTriggerHandler {
           )
         );
       }
+
+      addClosedWonRequests(requests, opportunityRecord, oldRecord);
     }
 
     if (!requests.isEmpty()) {
@@ -117,14 +138,64 @@ public without sharing class BWM_OpportunityMessagingTriggerHandler {
     }
   }
 
+  /**
+   * @description Adds a Closed Won thank-you journey when stage newly becomes Closed Won
+   *              and Customer Journey is Refer to Dealer or Direct Business.
+   * @param requests Mutable list of messaging requests to append to.
+   * @param opportunityRecord Updated Opportunity record.
+   * @param oldRecord Prior Opportunity version before the update, or null on insert.
+   */
+  private static void addClosedWonRequests(
+    List<BWM_MessagingRequest> requests,
+    Opportunity opportunityRecord,
+    Opportunity oldRecord
+  ) {
+    if (oldRecord != null) {
+      if (
+        opportunityRecord.StageName != BWM_MessagingConstants.STAGE_CLOSED_WON ||
+        oldRecord.StageName == BWM_MessagingConstants.STAGE_CLOSED_WON
+      ) {
+        return;
+      }
+    } else if (opportunityRecord.StageName != BWM_MessagingConstants.STAGE_CLOSED_WON) {
+      return;
+    }
+
+    if (
+      opportunityRecord.Customer_Journey__c ==
+      BWM_MessagingConstants.CUSTOMER_JOURNEY_REFER_DEALER
+    ) {
+      requests.add(
+        new BWM_MessagingRequest(
+          opportunityRecord.Id,
+          BWM_MessagingConstants.TRIGGER_OPP_CLOSED_WON_REFER_DEALER
+        )
+      );
+      return;
+    }
+
+    if (
+      opportunityRecord.Customer_Journey__c ==
+      BWM_MessagingConstants.CUSTOMER_JOURNEY_DIRECT
+    ) {
+      requests.add(
+        new BWM_MessagingRequest(
+          opportunityRecord.Id,
+          BWM_MessagingConstants.TRIGGER_OPP_CLOSED_WON_DIRECT_BUSINESS
+        )
+      );
+    }
+  }
+
+  /**
+   * @description Returns true when the Opportunity qualifies as a dealer enquiry through existing department and source criteria.
+   * @param opportunityRecord Opportunity to evaluate.
+   * @return True if dealer-enquiry messaging should fire; otherwise false.
+   */
   @TestVisible
   private static Boolean isDealerEnquiryOpportunity(Opportunity opportunityRecord) {
     if (opportunityRecord == null) {
       return false;
-    }
-
-    if (isDealerRecordType(opportunityRecord.RecordTypeId)) {
-      return true;
     }
 
     if (
@@ -144,19 +215,14 @@ public without sharing class BWM_OpportunityMessagingTriggerHandler {
   }
 
   @TestVisible
-  private static Boolean isDealerRecordType(Id recordTypeId) {
+  private static Boolean isMasterOpportunityRecordType(Id recordTypeId) {
     if (recordTypeId == null) {
       return false;
     }
 
-    Map<Id, Schema.RecordTypeInfo> infos = Schema.SObjectType.Opportunity.getRecordTypeInfosById();
-    Schema.RecordTypeInfo info = infos.get(recordTypeId);
-    if (info == null) {
-      return false;
-    }
-
-    String developerName = info.getDeveloperName();
-    return String.isNotBlank(developerName) &&
-      developerName.toLowerCase().contains('dealer');
+    Schema.RecordTypeInfo recordTypeInfo =
+      Schema.SObjectType.Opportunity.getRecordTypeInfosById().get(recordTypeId);
+    return recordTypeInfo != null &&
+      recordTypeInfo.getDeveloperName() == 'Master_Opportunity';
   }
 }

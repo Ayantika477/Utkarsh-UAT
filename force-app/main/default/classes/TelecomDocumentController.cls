@@ -33,6 +33,10 @@ public class TelecomDocumentController {
     public String tcPaymentDetails { get; set; }
     public Decimal tcPriceValidity { get; set; }
     
+    // New Margin Checking
+    public boolean isActualMargin { get; set; }
+    public boolean isBOMMargin { get; set; }
+    
     // telecom tower tables
     private List<TowerGroup> towerTablesInternal;
     public List<TowerGroup> getTowerTables() {
@@ -42,6 +46,7 @@ public class TelecomDocumentController {
     public class TowerGroup {
         public String subType { get; set; }
         public List<TowerRow> rows { get; set; }
+		public boolean showTable { get; set; }   
         
         public TowerGroup() { 
             rows = new List<TowerRow>(); 
@@ -182,8 +187,10 @@ public class TelecomDocumentController {
         tcPriceValidity = gd(jsonData, 'terms_offer_price_validity');
         tcPaymentDetails = gs(jsonData.get('terms_payment_terms'), '');
         
-        System.debug('******* 185 logs ' + tcOfferValidity + ' ' + tcMonthDays+ ' '+tcDeliveryDetail+' '+ tcPriceValidity +' '+tcPaymentDetails);
-        
+        // get Margin detail
+        isActualMargin = gb(jsonData.get('ang_margin_awt_checkbox'), false);
+        isBOMMargin = gb(jsonData.get('ang_margin_checkbox'), false);
+                
         if(incotermsVal==null || incotermsVal=='') incotermsVal = 'Ex-works';
         
         
@@ -205,16 +212,24 @@ public class TelecomDocumentController {
     private List<TowerGroup> buildGsmTable(List<Object> lines, String towerType){
         List<TowerGroup> groups = new List<TowerGroup>();
         
-        Map<String, Integer> productIndexByName = buildTubProductIndex();
-        if (productIndexByName.isEmpty()) return groups;
+        Map<String, Integer> productIndexByName   = buildProductIndex('tub_product_details');
+    	Map<String, Integer> awtProductIndexByName = buildProductIndex('tub_awt_product_details');
+        if (productIndexByName.isEmpty() && awtProductIndexByName.isEmpty()) return groups;
         
             for (String gsm : gsmList) {
                 if (!isGsmEnabled(gsm)) continue;
                 
-                TowerGroup grp = new TowerGroup();
-                grp.subType = towerType + ' - ' + gsm + ' GSM';
+                TowerGroup bomGrp = new TowerGroup();
+                bomGrp.subType = towerType + ' - ' + gsm + ' GSM (Rate as per BOM)';
+                bomGrp.showTable = (isBOMMArgin==true);
+        
+                TowerGroup awtGrp = new TowerGroup();
+                awtGrp.subType = towerType + ' - ' + gsm + ' GSM (Rate as per Actual Weight)';
+                awtGrp.showTable = (isActualMArgin==true);
                 
-                Integer slNo = 1;
+                Integer bomSlNo = 1;
+        		Integer awtSlNo = 1;
+                
                 for (Object lineObj : lines) {
                     Map<String, Object> line = (Map<String, Object>) lineObj;
                     String rawName = gs(line.get('name'), '');
@@ -223,30 +238,54 @@ public class TelecomDocumentController {
                     TubularLineKey key = parseGsmLine(rawName, towerType);
                     if (key == null || key.gsm != gsm) continue;
                     
-                    Integer idx = productIndexByName.get(key.productName);
-                    if (idx == null) continue; // unknown product — skip rather than guess
-                    
-                    TowerRow r       = new TowerRow();
-                    r.slNo           = slNo++;
-                    r.hsnCode        = '73082011';
-                    r.description    = key.productName;
-                    r.towerWeight    = gd(jsonData, 'tub_tower_weight' + idx);
-                    r.quantity       = gi(line.get('quantity'));
-                    r.uom            = 'SET';
-                    r.ratePerMT      = fmtNum(gd(jsonData, 'tub_rate_per_mt' + idx + '_' + gsm));
-                    r.unitRate       = fmtNum(gd(jsonData, 'tub_basic_rate'  + idx + '_' + gsm));
-                    r.totalBasicRate = fmtNum(gd(jsonData, 'tub_total_value' + idx + '_' + gsm));
-                    
-                    if (gd(jsonData, 'tub_basic_rate' + idx + '_' + gsm) == 0) {
-                        Decimal unitPrice = gd(line, 'unitPrice');
-                        r.unitRate       = fmtNum(unitPrice);
-                        r.totalBasicRate = fmtNum(unitPrice * gi(line.get('quantity')));
+                    if(key.isActualWeight){
+                        Integer idx = awtProductIndexByName.get(key.productName);
+                		if (idx == null) continue; // unknown AWT product — skip rather than guess
+                        
+                        TowerRow r       = new TowerRow();
+                        r.slNo           = awtSlNo++;
+                        r.hsnCode        = '73082011';
+                        r.description    = key.productName;
+                        r.towerWeight    = gd(jsonData, 'tub_awt_tower_weight' + idx);
+                        r.quantity       = gi(line.get('quantity'));
+                        r.uom            = 'SET';
+                        r.ratePerMT      = fmtNum(gd(jsonData, 'tub_awt_rate_per_mt' + idx + '_' + gsm));
+                        r.unitRate       = fmtNum(gd(jsonData, 'tub_awt_basic_rate'  + idx + '_' + gsm));
+                        r.totalBasicRate = fmtNum(gd(jsonData, 'tub_awt_total_value' + idx + '_' + gsm));
+        
+                        if (gd(jsonData, 'tub_awt_basic_rate' + idx + '_' + gsm) == 0) {
+                            Decimal unitPrice = gd(line, 'unitPrice');
+                            r.unitRate       = fmtNum(unitPrice);
+                            r.totalBasicRate = fmtNum(unitPrice * gi(line.get('quantity')));
+                        }        
+                        awtGrp.rows.add(r);
                     }
-                    
-                    grp.rows.add(r);
+                    else{
+						Integer idx = productIndexByName.get(key.productName);
+                        if (idx == null) continue; // unknown product — skip rather than guess
+                        
+                        TowerRow r       = new TowerRow();
+                        r.slNo           = bomSlNo++;
+                        r.hsnCode        = '73082011';
+                        r.description    = key.productName;
+                        r.towerWeight    = gd(jsonData, 'tub_tower_weight' + idx);
+                        r.quantity       = gi(line.get('quantity'));
+                        r.uom            = 'SET';
+                        r.ratePerMT      = fmtNum(gd(jsonData, 'tub_rate_per_mt' + idx + '_' + gsm));
+                        r.unitRate       = fmtNum(gd(jsonData, 'tub_basic_rate'  + idx + '_' + gsm));
+                        r.totalBasicRate = fmtNum(gd(jsonData, 'tub_total_value' + idx + '_' + gsm));
+                        
+                        if (gd(jsonData, 'tub_basic_rate' + idx + '_' + gsm) == 0) {
+                            Decimal unitPrice = gd(line, 'unitPrice');
+                            r.unitRate       = fmtNum(unitPrice);
+                            r.totalBasicRate = fmtNum(unitPrice * gi(line.get('quantity')));
+                        }
+                        bomGrp.rows.add(r);
+                    }
                 }
                 
-                if (!grp.rows.isEmpty()) groups.add(grp);
+                if (!bomGrp.rows.isEmpty()) groups.add(bomGrp);
+                if (!awtGrp.rows.isEmpty()) groups.add(awtGrp);
         }
         
         return groups;
@@ -255,13 +294,24 @@ public class TelecomDocumentController {
     private class TubularLineKey {
         String productName;
         String gsm;
+        Boolean isActualWeight;
     }
     
     private TubularLineKey parseGsmLine(String rawName, String towerType) {
         String prefix = 'TELECOM TOWER PART DETAILS - ' + towerType + ' - ';
         if (!rawName.startsWith(prefix)) return null;
         
-        String remainder = rawName.substring(prefix.length());
+        String remainder = rawName.trim().substring(prefix.length());
+        
+        // check Actual Weight type check
+        Boolean isAWT = remainder.toUpperCase().contains('(AWT)');
+        String awtSuffix = '(AWT)';
+        if (isAWT) {
+            // strip whatever whitespace/casing variant preceded it
+            Integer parenIdx = remainder.toUpperCase().lastIndexOf('(AWT)');
+            remainder = remainder.substring(0, parenIdx).trim();
+        }
+        
         Integer lastDash = remainder.lastIndexOf(' - ');
         if (lastDash < 0) return null;
         
@@ -274,14 +324,15 @@ public class TelecomDocumentController {
         TubularLineKey key = new TubularLineKey();
         key.productName = productName;
         key.gsm = gsmDigits;
+        key.isActualWeight = isAWT;
         return key;
     }
     
-    private Map<String, Integer> buildTubProductIndex() {
+    private Map<String, Integer> buildProductIndex(String fieldPfx) {
         Map<String, Integer> tubMap = new Map<String, Integer>();
         Integer idx = 1;
-        while (jsonData.containsKey('tub_product_details' + idx)) {
-            String name = gs(jsonData.get('tub_product_details' + idx), '').trim();
+        while (jsonData.containsKey(fieldPfx + idx)) {
+            String name = gs(jsonData.get(fieldPfx + idx), '').trim();
             if (String.isNotBlank(name)) {
                 tubMap.put(name, idx);
             }

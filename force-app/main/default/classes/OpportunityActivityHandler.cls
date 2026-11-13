@@ -262,6 +262,7 @@ public with sharing class OpportunityActivityHandler {
             /*
              * Reset Escalation Flags
              */
+            updateOpp.Active_Task_Escalation_60_Sent__c = false;
             updateOpp.Active_Task_Escalation_72_Sent__c = false;
             updateOpp.Active_Task_Escalation_96_Sent__c = false;
             updateOpp.Active_Task_Escalation_120_Sent__c = false;
@@ -280,6 +281,7 @@ public with sharing class OpportunityActivityHandler {
              */
             updateOpp.Last_Open_Task_Activity__c = null;
 
+            updateOpp.Active_Task_Escalation_60_Sent__c = false;
             updateOpp.Active_Task_Escalation_72_Sent__c = false;
             updateOpp.Active_Task_Escalation_96_Sent__c = false;
             updateOpp.Active_Task_Escalation_120_Sent__c = false;

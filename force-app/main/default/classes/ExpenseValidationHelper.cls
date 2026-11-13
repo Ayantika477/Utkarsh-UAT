@@ -74,7 +74,7 @@ public with sharing class ExpenseValidationHelper {
      * @param eligibility The employee eligibility record
      * @return String error message if validation fails, null otherwise
      */
-    private static String validateExpenseLine(Expense_Line__c line, Employee_Eligibility__c eligibility) {
+    public static String validateExpenseLine(Expense_Line__c line, Employee_Eligibility__c eligibility) {
         String error = null;
         
         switch on line.Expense_Type__c {
@@ -140,7 +140,7 @@ public with sharing class ExpenseValidationHelper {
     public static void submitExpense(Id expenseId) {
         Expense__c expense = new Expense__c(
             Id = expenseId,
-            Status__c = 'Submitted',
+            Status__c = 'Pending HOD Approval',
             Submitted_Date__c = Date.today()
         );
         update expense;

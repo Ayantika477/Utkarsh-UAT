@@ -3,6 +3,7 @@ import { getRecord, getFieldValue } from 'lightning/uiRecordApi';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import QUOTE_VALUE_FIELD from '@salesforce/schema/Quote.Quote_Value__c';
 import getAvailableMappings from '@salesforce/apex/CreateQuoteController.getAvailableMappings';
+import QUOTE_REFERENCE_FIELD from '@salesforce/schema/Quote.Quote_Reference__c';
 // ── MOBILE EXPORT PATH — Deepanjan (17th July 2026) ──────────────────────────
 // FORM_FACTOR is a compile-time constant: 'Large' on desktop, 'Medium'/'Small'
 // on the Salesforce mobile app. Desktop keeps the iframe preview and
@@ -16,6 +17,13 @@ import saveQuoteDocumentToFiles from '@salesforce/apex/QuoteCostingDocumentMobil
 
 export default class QuoteDocumentGenerator extends NavigationMixin(LightningElement) {
     @api recordId;
+
+    // Set by createQuote: false until the quote is Approved / finalized. Preview stays
+    // on; only the export path is locked. Deepanjan (18th September 2026)
+    @api allowDownload = false;
+
+    get exportDisabled() { return this.isButtonDisabled || !this.allowDownload; }
+    get showDownloadLockedNote() { return !this.allowDownload; }
     
     @track isButtonDisabled = true;
     @track selectedFormat = 'pdf'; 
@@ -33,7 +41,7 @@ export default class QuoteDocumentGenerator extends NavigationMixin(LightningEle
     allMappings = []; // Stores all metadata records for the department
     docConfig = null; // The currently selected specific config
 
-   
+       quoteReference = '';
 
     get buttonLabel() {
         return `Export as ${this.selectedFormat.toUpperCase()}`;
@@ -53,9 +61,10 @@ export default class QuoteDocumentGenerator extends NavigationMixin(LightningEle
         return this.previewUrl != null;
     }
 
-    @wire(getRecord, { recordId: '$recordId', fields: [QUOTE_VALUE_FIELD] })
+        @wire(getRecord, { recordId: '$recordId', fields: [QUOTE_VALUE_FIELD], optionalFields: [QUOTE_REFERENCE_FIELD] })
     wiredQuote({ error, data }) {
         if (data) {
+                        this.quoteReference = getFieldValue(data, QUOTE_REFERENCE_FIELD) || '';
             const rawJson = getFieldValue(data, QUOTE_VALUE_FIELD);
             if (rawJson) {
                 try {
@@ -175,17 +184,37 @@ export default class QuoteDocumentGenerator extends NavigationMixin(LightningEle
         this.isButtonDisabled = !this.docConfig;
 
         // Generate the real-time preview URL for the iframe
+        // Preview goes through the common QuoteOfferPreview VF page (canvas via pdf.js
+        // in a real Worker), never the PDF page itself - so the browser holds no PDF.
+        // Deepanjan (18th September 2026)
         if (this.docConfig && this.docConfig.PDF_VF_Page__c) {
-            this.previewUrl = `${this.docConfig.PDF_VF_Page__c}?id=${this.recordId}`;
+            const pageName = this.docConfig.PDF_VF_Page__c.split('?')[0].replace(/^\/apex\//, '');
+            this.previewUrl = `/apex/QuoteOfferPreview?id=${this.recordId}&page=${encodeURIComponent(pageName)}`;
         } else {
             this.previewUrl = null;
         }
+    }
+
+        // DOWNLOAD FILE NAME = QUOTE REFERENCE - Deepanjan (22nd September 2026)
+    // Desktop Export opens the common QuoteOfferOpen page (same new tab, same document),
+    // which saves the file as the Quote Reference: UIL/CB/26-27/00008106 -> UIL_CB_26-27_00008106.pdf
+    // No Quote Reference yet -> the old URL, i.e. exactly the old behaviour.
+    namedOpenUrl(targetUrl) {
+        const ref = String(this.quoteReference || '').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+        const pageName = String(targetUrl || '').split('?')[0].replace(/^\/apex\//, '');
+        if (!ref || !/^[A-Za-z0-9_]+$/.test(pageName)) return targetUrl;
+        return `/apex/QuoteOfferOpen?id=${this.recordId}&page=${pageName}&type=${this.selectedFormat}&fn=${encodeURIComponent(ref)}`;
     }
 
     // =========================================================
     // GENERATE DOCUMENT (Downloads / Opens in New Tab)
     // =========================================================
     generateDocument() {
+        // Hard stop, independent of how the button was drawn. Deepanjan (18th September 2026)
+        if (!this.allowDownload) {
+            this.showToast('Not Yet', 'Download is available once the quote is approved.', 'warning');
+            return;
+        }
         if (!this.docConfig) {
             this.showToast('Template Not Found', 'No document template is mapped for this selection.', 'error');
             return;
@@ -219,7 +248,7 @@ export default class QuoteDocumentGenerator extends NavigationMixin(LightningEle
             if (FORM_FACTOR === 'Large') {
                 // DESKTOP: unchanged - opens the VF page in a new tab, browser
                 // handles preview/download exactly as it always has.
-                window.open(targetUrl, '_blank');
+                                window.open(this.namedOpenUrl(targetUrl), '_blank');
             } else {
                 // MOBILE (Salesforce app): window.open is blocked/blank inside the
                 // app's webview, so the document is rendered server-side, saved as

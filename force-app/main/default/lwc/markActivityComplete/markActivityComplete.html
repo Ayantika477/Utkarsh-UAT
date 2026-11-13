@@ -148,7 +148,12 @@
                 <lightning-combobox label="Reason for Visit" value={visit.reason} data-field="reason"
                     options={reasonOptions} onchange={handleVisitChange} required></lightning-combobox>
                 <lightning-input type="date" label="Schedule Date" value={visit.scheduleDate}
-                    data-field="scheduleDate" onchange={handleVisitChange} required></lightning-input>
+                    data-field="scheduleDate" min={todayDate} onchange={handleVisitChange} required></lightning-input>
+                <template lwc:if={pastVisitError}>
+                    <p class="slds-text-color_error slds-text-body_small slds-m-bottom_x-small">
+                        Schedule Date cannot be in the past.
+                    </p>
+                </template>
                 <lightning-combobox label="Assign To" value={visit.assignedTo} data-field="assignedTo"
                     options={assignableUserOptions} onchange={handleVisitChange} required></lightning-combobox>
                 <div class="slds-m-top_medium slds-text-align_right">

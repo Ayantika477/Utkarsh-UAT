@@ -1,4 +1,13 @@
+/**
+ * @description   Sends email via Salesforce Messaging.SingleEmailMessage when Infobip
+ *                is not used.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_EmailNativeSender {
+  @TestVisible
+  private static Messaging.SingleEmailMessage lastBuiltMessage;
+
   public class SendOutcome {
     public Boolean success = false;
     public String message;
@@ -20,7 +29,11 @@ public without sharing class BWM_EmailNativeSender {
 
     Messaging.SingleEmailMessage message = new Messaging.SingleEmailMessage();
     message.setUseSignature(false);
-    message.setToAddresses(resolveToAddresses(built));
+
+    Id ownerUserId = resolveOwnerUserRecipient(mapping, record);
+    if (ownerUserId == null) {
+      message.setToAddresses(resolveToAddresses(built));
+    }
 
   if (String.isNotBlank(built.subject)) {
       message.setSubject(built.subject);
@@ -32,21 +45,29 @@ public without sharing class BWM_EmailNativeSender {
       message.setPlainTextBody(built.body);
     }
 
-    Id targetObjectId = BWM_EmailTemplateRenderer.resolveWhoId(record);
     Boolean hasFileAttachments = attachments != null && !attachments.isEmpty();
 
-    // With PDF attachments, linking to Lead/Contact and save-as-activity can cause
-    // Salesforce to deliver the brochure as an .html stub instead of a real PDF.
-    message.setSaveAsActivity(!hasFileAttachments);
+    if (ownerUserId != null) {
+      // Emails addressed to a User Id do not count toward the org's daily single-email
+      // limit. Salesforce rejects a WhatId with a User target and cannot log it as an activity.
+      message.setTargetObjectId(ownerUserId);
+      message.setSaveAsActivity(false);
+    } else {
+      Id targetObjectId = BWM_EmailTemplateRenderer.resolveWhoId(record);
 
-    if (targetObjectId != null && !hasFileAttachments) {
-      message.setTargetObjectId(targetObjectId);
-      message.setTreatTargetObjectAsRecipient(false);
-    }
+      // With PDF attachments, linking to Lead/Contact and save-as-activity can cause
+      // Salesforce to deliver the brochure as an .html stub instead of a real PDF.
+      message.setSaveAsActivity(!hasFileAttachments);
 
-    Id whatId = BWM_EmailTemplateRenderer.resolveWhatId(record);
-    if (whatId != null && !hasFileAttachments) {
-      message.setWhatId(whatId);
+      if (targetObjectId != null && !hasFileAttachments) {
+        message.setTargetObjectId(targetObjectId);
+        message.setTreatTargetObjectAsRecipient(false);
+      }
+
+      Id whatId = BWM_EmailTemplateRenderer.resolveWhatId(record);
+      if (whatId != null && !hasFileAttachments) {
+        message.setWhatId(whatId);
+      }
     }
 
     applySender(settings, mapping, record, message);
@@ -56,6 +77,7 @@ public without sharing class BWM_EmailNativeSender {
     }
 
     outcome.auditPayload = buildAuditPayload(built, attachments);
+    lastBuiltMessage = message;
 
     try {
       Messaging.SendEmailResult[] results = Messaging.sendEmail(
@@ -112,9 +134,43 @@ public without sharing class BWM_EmailNativeSender {
     }
   }
 
+  @TestVisible
+  private static Id resolveOwnerUserRecipient(
+    BWM_Email_Template_Mapping__mdt mapping,
+    SObject record
+  ) {
+    if (
+      mapping == null ||
+      record == null ||
+      mapping.Recipient_Type__c != BWM_EmailConstants.RECIPIENT_OWNER
+    ) {
+      return null;
+    }
+
+    Object ownerValue;
+    try {
+      ownerValue = record.get('OwnerId');
+    } catch (SObjectException ex) {
+      return null;
+    }
+
+    if (!(ownerValue instanceof Id)) {
+      return null;
+    }
+    Id ownerId = (Id) ownerValue;
+    return ownerId.getSObjectType() == User.SObjectType ? ownerId : null;
+  }
+
+  private static Map<String, Id> orgWideEmailIdByAddress = new Map<String, Id>();
+
   private static Id resolveOrgWideEmailAddressId(String emailAddress) {
     if (String.isBlank(emailAddress)) {
       return null;
+    }
+
+    String key = emailAddress.trim().toLowerCase();
+    if (orgWideEmailIdByAddress.containsKey(key)) {
+      return orgWideEmailIdByAddress.get(key);
     }
 
     List<OrgWideEmailAddress> rows = [
@@ -123,7 +179,9 @@ public without sharing class BWM_EmailNativeSender {
       WHERE Address = :emailAddress.trim()
       LIMIT 1
     ];
-    return rows.isEmpty() ? null : rows[0].Id;
+    Id orgWideId = rows.isEmpty() ? null : rows[0].Id;
+    orgWideEmailIdByAddress.put(key, orgWideId);
+    return orgWideId;
   }
 
   private static String buildAuditPayload(

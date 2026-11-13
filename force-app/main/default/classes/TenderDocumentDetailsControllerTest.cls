@@ -8,15 +8,15 @@ private class TenderDocumentDetailsControllerTest {
         Tender__c tender = new Tender__c(
             Department_Name__c = 'High Mast & Polygonal'
         );
-        insert tender;
+        database.insert (tender, AccessLevel.SYSTEM_MODE);
 
 
         // Create Project linked to Tender
         Project__c project = new Project__c(
             Name = 'Test Project',
-            Tender__c = tender.Id
+            Tender__c = tender.Id 
         );
-        insert project;
+        database.insert (project,AccessLevel.SYSTEM_MODE);
 
 
         // Create Tender Document
@@ -27,7 +27,7 @@ private class TenderDocumentDetailsControllerTest {
             Download_URL__c = 'https://example.com/test.pdf',
             Download_URL_Text__c = 'Download Test Document'
         );
-        insert document;
+        database.insert (document, AccessLevel.SYSTEM_MODE);
     }
 
 
@@ -37,7 +37,7 @@ private class TenderDocumentDetailsControllerTest {
         Tender__c tender = [
             SELECT Id
             FROM Tender__c
-            LIMIT 1
+            WITH SYSTEM_MODE LIMIT 1 
         ];
 
         Test.startTest();
@@ -61,7 +61,7 @@ private class TenderDocumentDetailsControllerTest {
         Project__c project = [
             SELECT Id, Tender__c
             FROM Project__c
-            LIMIT 1
+            WITH SYSTEM_MODE LIMIT 1 
         ];
 
         Test.startTest();
@@ -83,7 +83,7 @@ private class TenderDocumentDetailsControllerTest {
         Tender__c tender = [
             SELECT Id
             FROM Tender__c
-            LIMIT 1
+             WITH SYSTEM_MODE LIMIT 1
         ];
 
         RecordType projectOppRecordType = [
@@ -91,7 +91,7 @@ private class TenderDocumentDetailsControllerTest {
             FROM RecordType
             WHERE SObjectType = 'Opportunity'
             AND DeveloperName = 'Project_Opportunity'
-            LIMIT 1
+            WITH SYSTEM_MODE LIMIT 1
         ];
 
         Opportunity opp = new Opportunity(
@@ -102,7 +102,7 @@ private class TenderDocumentDetailsControllerTest {
             Tender__c = tender.Id
         );
 
-        insert opp;
+        database.insert (opp, AccessLevel.SYSTEM_MODE);
 
         Test.startTest();
 
@@ -123,7 +123,7 @@ private class TenderDocumentDetailsControllerTest {
         Tender__c tender = [
             SELECT Id
             FROM Tender__c
-            LIMIT 1
+            WITH SYSTEM_MODE LIMIT 1 
         ];
 
         RecordType tenderOppRecordType = [
@@ -131,7 +131,7 @@ private class TenderDocumentDetailsControllerTest {
             FROM RecordType
             WHERE SObjectType = 'Opportunity'
             AND DeveloperName = 'Tender_Opportunity'
-            LIMIT 1
+            WITH SYSTEM_MODE LIMIT 1 
         ];
 
         Opportunity opp = new Opportunity(
@@ -142,7 +142,7 @@ private class TenderDocumentDetailsControllerTest {
             Tender__c = tender.Id
         );
 
-        insert opp;
+        database.insert (opp, AccessLevel.SYSTEM_MODE);
 
         Test.startTest();
 
@@ -166,7 +166,7 @@ private class TenderDocumentDetailsControllerTest {
             FROM RecordType
             WHERE SObjectType = 'Opportunity'
             AND IsActive = true
-            LIMIT 1
+            WITH SYSTEM_MODE LIMIT 1 
         ];
 
         Opportunity opp = new Opportunity(
@@ -176,7 +176,7 @@ private class TenderDocumentDetailsControllerTest {
             RecordTypeId = defaultOppRecordType.Id
         );
 
-        insert opp;
+        database.insert (opp, AccessLevel.SYSTEM_MODE);
 
         Test.startTest();
 
@@ -204,7 +204,7 @@ private class TenderDocumentDetailsControllerTest {
         Project__c project = new Project__c(
             Name = 'Project Without Tender'
         );
-        insert project;
+        database.insert (project, AccessLevel.SYSTEM_MODE);
 
         Test.startTest();
 

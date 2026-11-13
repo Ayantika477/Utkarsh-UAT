@@ -233,8 +233,13 @@ global class getLocationUpdate {
             if (latestInputLng != null)     state.Longitude__c = latestInputLng;
             if (latestInputBattery != null) state.Battery_Percentage__c = latestInputBattery;
             state.Last_Punch_Time__c = System.now();
-            state.Current_Status__c = 'IN';
-            state.Punch_In_Record__c = punchRecordId;
+
+            /* state.Current_Status__c = 'IN';
+            state.Punch_In_Record__c = punchRecordId; */
+            // Do NOT touch Current_Status__c / Punch_In_Record__c here. They are owned by
+            // PunchController (Day In/Out, start/end mode). Overwriting Punch_In_Record__c with
+            // the latest IN punch re-pointed users to an already-ended mode (e.g. Market Visit),
+            // which blocked Day Out with "Please end your active mode of work before Day Out."
 
             upsert state;
             if (!tlsToInsert.isEmpty()) {

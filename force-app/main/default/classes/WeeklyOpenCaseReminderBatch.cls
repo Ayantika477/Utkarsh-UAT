@@ -225,10 +225,20 @@ implements Database.Batchable<SObject>,
             Messaging.SingleEmailMessage mail =
                 new Messaging.SingleEmailMessage();
 
-            mail.setToAddresses(
-                new List<String>{
-                    hodUser.Email
-                }
+            // mail.setToAddresses(
+            //     new List<String>{
+            //         hodUser.Email
+            //     }
+            // );
+
+            // hodUser comes from an IsActive = TRUE query - send to the User Id
+            // so the email counts as internal.
+            mail.setTargetObjectId(
+                hodUser.Id
+            );
+
+            mail.setSaveAsActivity(
+                false
             );
 
             mail.setSubject(

@@ -1,3 +1,8 @@
+/**
+ * @description   Batch and Schedulable for monthly negotiation/tender email sends.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_EmailNegotiationTenderMonthlyBatch implements Database.Batchable<SObject>, Schedulable {
   private static final Integer DEDUP_DAYS = 28;
 
@@ -42,6 +47,11 @@ public without sharing class BWM_EmailNegotiationTenderMonthlyBatch implements D
   }
 
   public void finish(Database.BatchableContext context) {
+    System.debug(
+      LoggingLevel.INFO,
+      'BWM_EmailNegotiationTenderMonthlyBatch finished. JobId=' +
+        (context == null ? 'null' : String.valueOf(context.getJobId()))
+    );
   }
 
   public void execute(SchedulableContext context) {

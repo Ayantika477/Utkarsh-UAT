@@ -10,16 +10,59 @@ public class HighMastSOWController {
     public String opportunityName { get; set; }
     public String buyerName       { get; set; }
     public String buyerAddress    { get; set; }
+    public String deliveryAddress  { get; set; }
     public String todayDate       { get; set; }
+    public String transportationType { get; set; }
+    public String deliverytime { get; set; }
+    public String priceVariationdays { get; set; }
+    public String quationValidity { get; set; }
+    public String warrFromDOC { get; set; }
+    public String warrFromDOD { get; set; }
  
     public List<LineItemWrapper> lineItems { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ANNEXURE - A LINE ITEM GROUPING - Reetabrata (18th Aug 2026)
+    //
+    // One "line item" = one product the customer ordered. Its parts are
+    // numbered 1.1, 1.2, 1.3 ... and a SUB-TOTAL row closes the group, then
+    // 2.1, 2.2 ... and so on. startGroup() marks the boundaries at the exact
+    // points where a new product begins in each builder - the same
+    // boundaries HMScopeCombinedController uses for its products, so the two
+    // PDFs always agree.
+    //
+    // lineItems keeps its current shape and order and the 45 existing
+    // buildRow(String.valueOf(slCounter++), ...) call sites are untouched -
+    // buildRow simply overrides the number it is handed once a group is
+    // open. With no group open (curGroup == 0) the old number is kept, so
+    // any path not marked here behaves exactly as it does today.
+    // ═══════════════════════════════════════════════════════════════════
+    public List<LineGroupWrapper> lineGroups { get; set; }
+
+    // Mast/pole name for the SUB-TOTAL heading. Held here instead of in the page's
+    // IF() chain so the Signage Mast custom name reaches it. Leading space kept, so
+    // the printed heading is character-for-character what it is today.
+    // Deepanjan (18th Aug 2026)
+    public String mastTypeLabel { get; set; }
+
+    // Flip to true to give Transportation Charges its own SUB-TOTAL row too.
+    // Combined scope numbers it but gives it no SUB-TOTAL, so this matches.
+    private static final Boolean SUBTOTAL_ON_FREIGHT_GROUP = false;
+
+    private Integer curGroup     = 0;      // 0 = no group open yet
+    private Integer curPart      = 0;
+    private Boolean curPlain     = false;  // whole number, no SUB-TOTAL row
+    private Integer lastFlatItem = -1;
+    private Integer lastFlatSection = -1;  // last section index on a flat-list branch. Deepanjan (20th Aug 2026)
+    private Set<Integer> plainGroups = new Set<Integer>();
     public String subTotalUnitRate { get; set; }
     public String subTotalGST      { get; set; }
     public String subTotalUnit     { get; set; }
     public String subTotalAmount   { get; set; }
     public String grandTotal       { get; set; }
     public String grandTotalWords  { get; set; }
- 
+    
+    public String typeOfMast          { get; set; }
     public Boolean isLightingPole     { get; set; }
     public Boolean isTransmissionPole { get; set; }
     public Boolean isMidHingePole     { get; set; }   // NEW
@@ -29,6 +72,11 @@ public class HighMastSOWController {
     // SEGMENT ABOVE 5 - FLAG MAST: rows save r{n}_lm_* (LM engine) plus the flag
     // annexure grids, so it needs its own builder. Deepanjan (22nd July 2026)
     public Boolean isSeg5FlagMast     { get; set; }
+    // TRUE when type_of_mast = 'Segment Above 5', whatever sub-mast is chosen under
+    // it. Segment Above 5 is the only recipe with a TOTAL PRICE (/KG) field and the
+    // only one with Special Items, so anything that must apply ONLY to it is gated
+    // on this rather than on the presence of a key. Deepanjan (19th Aug 2026)
+    public Boolean isSegmentAbove5    { get; set; }
     // Lightning Cum Lighting Mast. Its saved JSON is the Lighting Mast shape (same lm_* keys),
     // so it deliberately keeps using the existing High Mast builder; only the mast name and the
     // arrestor phrase differ. Reetabrata (15th July 2026)
@@ -46,7 +94,18 @@ public class HighMastSOWController {
     // the existing High Mast builder. The ONLY difference is the Special Additions sentence
     // appended to the mast description. Faizan (24th July 2026)
     public Boolean isCustomLightningMast { get; set; }
- 
+    public String singageSpecAdd {get; set;}
+
+    public Boolean perPolfrieght   {get; set;}
+    public Decimal perPolTPCharg   {get; set;}
+
+    // User Session Metadata
+    public String loggedInUser { get; set; }
+    public String loggedInUserPhone { get; set; }
+    public String loggedInUserTitle { get; set; }
+    public String loggedInUserEmail { get; set; }
+    
+     
     public HighMastSOWController(ApexPages.StandardController stdController) {
  
         todayDate         = Date.today().format();
@@ -54,9 +113,12 @@ public class HighMastSOWController {
         soWRef            = 'UIL/HM/26-27/001';
         buyerName         = '';
         buyerAddress      = '';
+        deliveryAddress   = '';
         opportunityName   = '';
         jsonData          = new Map<String, Object>();
         lineItems         = new List<LineItemWrapper>();
+        lineGroups        = new List<LineGroupWrapper>();   // Reetabrata (18th Aug 2026)
+        mastTypeLabel     = ' LIGHTING MAST';   // Deepanjan (18th Aug 2026)
         subTotalUnitRate  = '0';
         subTotalGST       = '0';
         subTotalUnit      = '0';
@@ -70,6 +132,7 @@ public class HighMastSOWController {
         isStadiumMast     = false;
         isFlagMast        = false;
         isSeg5FlagMast    = false;   // Deepanjan (22nd July 2026)
+        isSegmentAbove5   = false;   // Deepanjan (19th Aug 2026)
         isLCLM             = false;   // Reetabrata (15th July 2026)
         isSignageMast      = false;   // Reetabrata (16th July 2026)
         isLatchingMast     = false;   // Reetabrata (16th July 2026)
@@ -98,7 +161,7 @@ public class HighMastSOWController {
                             ? quoteRecord.Quote_Reference__c : 'UIL/HM/26-27/001';
         buyerName       = quoteRecord.Account != null
                             ? quoteRecord.Account.Name : '';
-        buyerAddress    = buildAddress(quoteRecord.Account);
+        //buyerAddress    = buildAddress(quoteRecord.Account);
         opportunityName = quoteRecord.Opportunity != null
                             ? quoteRecord.Opportunity.Name : '';
  
@@ -110,13 +173,36 @@ public class HighMastSOWController {
                 System.debug('JSON Parse Error: ' + e.getMessage());
             }
         }
- 
+        Boolean useShippingAddress = jsonData.get('override_existing_address') == true;
+        buyerAddress = buildAddress(jsonData, 'def_');
+        deliveryAddress = buildAddress(jsonData, useShippingAddress ? 'ovr_' : 'def_');
+        String deliverydays = strVal(jsonData, 'tc_del_schedule', '30');
+        String deliveryUnit = strVal(jsonData, 'tc_del_schedule_in', 'Days');
+        deliverytime = deliverydays + ' ' + deliveryUnit;
+
+        priceVariationdays = strVal(jsonData, 'tc_price_variation', '30');
+        quationValidity = strVal(jsonData, 'tc_quot_validity', '5');
+        String warrantyFromDoc = strVal(jsonData, 'tc_comm_months', '12');
+        String warrantyFromDod = strVal(jsonData, 'tc_del_months', '18');
+        warrFromDOC = warrantyFromDoc + ' ('+ CurrencyInWords.convertNumberOnly(Decimal.valueOf(warrantyFromDoc)) + ')';
+        warrFromDOD = warrantyFromDod + ' ('+ CurrencyInWords.convertNumberOnly(Decimal.valueOf(warrantyFromDod)) + ')';
+        
+
         String mastStandard = strVal(jsonData, 'mast_standard', '');
         if (String.isBlank(mastStandard)) {
             mastStandard = strVal(jsonData, 'mast_standard_pole', '');  // fallback for this JSON shape
         }
         String mastStdLower = mastStandard.toLowerCase();
         isLightingPole     = mastStdLower.contains('lighting pole');
+        // Same test the Combined controller uses, so the two SUB-TOTAL headings agree.
+        // Deepanjan (24th Aug 2026)
+        // 'pole' is required on purpose: the loose (custom && lighting) test the Combined
+        // controller uses is also true for a "Custom Lighting Mast", which must keep its own
+        // heading. Deepanjan (24th Aug 2026)
+        Boolean isCustomLightingPole = mastStdLower.contains('custom lighting pole')
+                                    || (mastStdLower.contains('custom')
+                                        && mastStdLower.contains('lighting')
+                                        && mastStdLower.contains('pole'));
         isTransmissionPole = mastStdLower.contains('transmission pole');
         isMidHingePole     = mastStdLower.contains('mid hinge');   // NEW
  
@@ -156,16 +242,53 @@ public class HighMastSOWController {
                                 || cmType.equalsIgnoreCase('Custom Lighting Mast');
         isCustomizedMast = (isStadiumMast || isFlagMast)
                            && (cmType.equalsIgnoreCase('Customized Mast') || isSeg5);
+
+        // SUB-TOTAL heading, same order the page's IF() chain used. Deepanjan (18th Aug 2026)
+        // A Custom Lighting Pole used to fall through to the default and print "SUB-TOTAL OF
+        // LIGHTING MAST". Only that one case is redirected - a Standard Lighting Pole still
+        // has no branch here and keeps its current heading, exactly as today.
+        // Deepanjan (24th Aug 2026)
+        mastTypeLabel = isCustomLightingPole ? ' CUSTOM LIGHTNING POLE'
+                      : isStadiumMast  ? ' STADIUM MAST'
+                      : isFlagMast     ? ' FLAG MAST'
+                      : isLCLM         ? ' LCLM'
+                      : isSignageMast  ? ' ' + signageMastName()
+                      : isLatchingMast ? ' LATCHING MAST'
+                                       : ' LIGHTING MAST';
         // SEGMENT ABOVE 5 - FLAG MAST keeps isCustomizedMast true (same dispatch),
         // but the flag branch below must use the LM-keyed builder, not cmFlagLines().
         // Deepanjan (22nd July 2026)
         isSeg5FlagMast = isSeg5 && isFlagMast;
+        isSegmentAbove5 = isSeg5;   // Deepanjan (19th Aug 2026)
         
         System.debug('custom Lighting pole: '+ isLightingPole +' | Customized Mast : '+ isCustomizedMast + ' | Custom Lightning Mast : '+ isCustomLightningMast);
         if(isCustomLightningMast){
             isLightingPole = false;
         }
         
+        String  freight = strVal(jsonData, 'freight_incoterms', 'Ex-works');
+        transportationType = freight;
+        perPolfrieght = false;
+        perPolTPCharg = 0;
+        String  transAs = strVal(jsonData, 'transportation_as', null);
+        if(freight == 'F.O.R (Freight on Road)' && transAs =='Per pole/Mast'){
+            perPolfrieght = true;
+            perPolTPCharg = decVal(jsonData, 'transportation_charges', 0);
+        }
+
+        System.debug('custom Lighting pole: '+ isCustomLightingPole +' | Customized Mast : '+ isCustomizedMast + ' | Custom Lightning Mast : '+ isCustomLightningMast);
+
+        User currentUser = [SELECT Id, Name, Email, MobilePhone, Title FROM User WHERE Id = :UserInfo.getUserId() LIMIT 1];
+        loggedInUser = currentUser.Name;
+        loggedInUserPhone = String.isNotBlank(currentUser.MobilePhone) ? currentUser.MobilePhone : 'N/A';
+        loggedInUserTitle = String.isNotBlank(currentUser.Title) ? currentUser.Title : 'N/A';
+        loggedInUserEmail = String.isNotBlank(currentUser.Email) ? currentUser.Email : 'N/A';
+
+
+        if(isCustomLightningMast){
+            isCustomLightingPole = false;
+        }
+
         if (isCustomizedMast) {
             buildCustomizedMastLineItems();
         } else if (isLightingPole) {
@@ -197,17 +320,20 @@ public class HighMastSOWController {
         Decimal sumUR = 0, sumGST = 0, sumUnit = 0, sumTotal = 0;
         for (LineItemWrapper w : lineItems) {
             Decimal q = (w.qtyRaw == null ? 1 : w.qtyRaw);
-            sumUR    += w.unitRateRaw.setScale(0, RoundingMode.HALF_UP) * (weightUR ? q : 1);
-            sumGST   += w.gstAmountRaw.setScale(0, RoundingMode.HALF_UP)  * q;
-            sumUnit  += w.unitAmountRaw.setScale(0, RoundingMode.HALF_UP) * q;
-            sumTotal += w.totalAmountRaw.setScale(0, RoundingMode.HALF_UP);
+            sumUR    += w.unitRateRaw.setScale(2, RoundingMode.HALF_UP) * (weightUR ? q : 1);
+            sumGST   += w.gstAmountRaw.setScale(2, RoundingMode.HALF_UP)  * q;
+            sumUnit  += w.unitAmountRaw.setScale(2, RoundingMode.HALF_UP) * q;
+            sumTotal += w.totalAmountRaw.setScale(2, RoundingMode.HALF_UP);
         }
         subTotalUnitRate = formatINR(sumUR);
         subTotalGST      = formatINR(sumGST);
         subTotalUnit      = formatINR(sumUnit);
         subTotalAmount   = formatINR(sumTotal);
         grandTotal       = formatINR(sumTotal);
-        grandTotalWords  = numberToWords(sumTotal.longValue());
+        grandTotalWords  = amountInWords(sumTotal);
+
+        // Slice the finished list into line items. Reetabrata (18th Aug 2026)
+        buildLineGroups();
  
         ensureKey('freight_incoterms', 'Ex-works');
     }
@@ -223,16 +349,22 @@ public class HighMastSOWController {
         Decimal totalPoleQty = 0;
  
         List<Object> apexLines = getList(jsonData, '_Final_Apex_Lines');
+        Set<String> mhpFdnSeen = fdnItemsPresent(apexLines);
         if (!apexLines.isEmpty()) {
             for (Object lineObj : apexLines) {
                 Map<String, Object> line = (Map<String, Object>) lineObj;
                 String itemName = strVal(line, 'name', 'Mid Hinge Pole Item');
+                markFlatGroup(itemName);   // Reetabrata (18th Aug 2026)
  
                 if (isFreightLine(itemName)) {
                     Decimal freightAmt = decVal(line, 'expenses', 0).setScale(2, RoundingMode.HALF_UP);
                     Decimal fQty        = decVal(line, 'quantity', 1);
+                    
+                    String displayItemName = itemName.replace('(Lump Sum)', '').trim();
+
+                   
                     lineItems.add(buildRow(String.valueOf(slCounter++),
-                                  itemName, freightAmt, gstPct, fQty, freight));
+                                  displayItemName, freightAmt, gstPct, fQty, freight));
                     continue;
                 }
  
@@ -246,17 +378,24 @@ public class HighMastSOWController {
                         && !itemName.containsIgnoreCase('Bracket')
                         && !itemName.containsIgnoreCase('Arm')) {
                     totalPoleQty += qty;
+                    // FOUNDATION BOLT = N.R. but the estimator saved no Foundation line for
+                    // this pole, so the out-of-scope sentence would have nowhere to print.
+                    // Rate 0. Deepanjan (24th Aug 2026)
+                    slCounter = addFdnNotInScopeRowMhp(itemName, mhpFdnSeen, qty,
+                                                       gstPct, freight, slCounter);
                 }
             }
-            appendFreightRow(gstPct, freight, slCounter, totalPoleQty);
+            //appendFreightRow(gstPct, freight, slCounter, totalPoleQty);
             return;
         }
  
         List<Object> tableRows = getList(jsonData, '_Saved_Table_Rows');
+        mhpFdnSeen = fdnItemsPresent(tableRows);
         if (!tableRows.isEmpty()) {
             for (Object rowObj : tableRows) {
                 Map<String, Object> row = (Map<String, Object>) rowObj;
                 String itemName = strVal(row, 'name', 'Mid Hinge Pole Item');
+                markFlatGroup(itemName);   // Reetabrata (18th Aug 2026)
  
                 if (isFreightLine(itemName)) {
                     Decimal freightAmt = decVal(row, 'expenses', 0).setScale(2, RoundingMode.HALF_UP);
@@ -276,9 +415,14 @@ public class HighMastSOWController {
                         && !itemName.containsIgnoreCase('Bracket')
                         && !itemName.containsIgnoreCase('Arm')) {
                     totalPoleQty += qty;
+                    // FOUNDATION BOLT = N.R. but the estimator saved no Foundation line for
+                    // this pole, so the out-of-scope sentence would have nowhere to print.
+                    // Rate 0. Deepanjan (24th Aug 2026)
+                    slCounter = addFdnNotInScopeRowMhp(itemName, mhpFdnSeen, qty,
+                                                       gstPct, freight, slCounter);
                 }
             }
-            appendFreightRow(gstPct, freight, slCounter, totalPoleQty);
+            //appendFreightRow(gstPct, freight, slCounter, totalPoleQty);
             return;
         }
  
@@ -293,6 +437,7 @@ public class HighMastSOWController {
             Decimal height       = decVal(jsonData, cp + 'height_of_pole', 0);
             Decimal segUnitPrice = (decVal(jsonData, op + 'segment_unit_price', 0)).setScale(2, RoundingMode.HALF_UP);
             if (height == 0 && segUnitPrice == 0) continue;
+            startGroup();   // one Mid Hinge Pole = one line item. Reetabrata (18th Aug 2026)
  
             String  poleType   = strVal(jsonData, cp + 'pole_type', 'Polygonal');
             Decimal topDia     = decVal(jsonData, cp + 'top_diameter',            0);
@@ -321,12 +466,12 @@ public class HighMastSOWController {
                 + (botDia > 0 ? ', Bottom Dia: ' + botDia.intValue() + ' mm' : '')
                 + (segTopLen > 0 ? ', Length: ' + segTopLen + ' mm' : '')
                 + (segTopThk > 0 ? ', Thickness: ' + segTopThk + ' mm' : '')
-                + (doorHeight != '' ? '. Door Height: ' + doorHeight + ' mm' : '')
+                //+ (doorHeight != '' ? '. Door Height: ' + doorHeight + ' mm' : '')
                 + (bpType != '' ? '. Base Plate: ' + bpType
                     + (bpSize > 0 ? ' ' + bpSize.intValue() + ' mm' : '')
                     + (bpThk  > 0 ? ' x ' + bpThk.intValue() + ' mm' : '') : '')
-                + (stiffener != '' ? '. Stiffener at Base: ' + stiffener : '')
-                + (extraMicron != '' ? '. Extra Micron: ' + extraMicron : '')
+                //+ (stiffener != '' ? '. Stiffener at Base: ' + stiffener : '')
+                + (extraMicron != '' ? ', with ' + extraMicron + ' micron' : '')
                 + (puPaint != '' ? '. PU Paint: ' + puPaint : '')
                 + '.';
 
@@ -340,7 +485,23 @@ public class HighMastSOWController {
  
             Decimal fndUnitPrice = (decVal(jsonData, op + 'foundation_unit_price', 0)).setScale(2, RoundingMode.HALF_UP);
             Decimal fndWeight    = decVal(jsonData, cp + 'foundation_weight', 0);
-            if (fndUnitPrice > 0 || fndWeight > 0) {
+            // FOUNDATION BOLT = N.R. -> the bolts are NOT in our scope. Mid Hinge Pole offers
+            // N.R. on mhp_foundation_bolt_diameter exactly like the Octagonal poles, and its
+            // op_mhp_foundation_unit_price formula already returns 0 for it - so the row is
+            // added even when price and weight are both 0 (otherwise the sentence would have
+            // nowhere to print), and it costs nothing. Deepanjan (24th Aug 2026)
+            // FOUNDATION BOLT DIAMETER defaults to "N.R.", so N.R. alone is not proof the
+            // user meant anything by it. The row is only forced when at least one foundation
+            // figure was actually entered - otherwise an untouched Mid Hinge quote would gain
+            // a bare "Suitable for foundation bolt dia. Not in our Scope" line it never had.
+            // Deepanjan (24th Aug 2026)
+            Boolean fbNisMhp = strVal(jsonData, cp + 'foundation_bolt_diameter', '').equalsIgnoreCase('N.R.')
+                            && (String.isNotBlank(strVal(jsonData, cp + 'nr_fb_diameter', ''))
+                                || decVal(jsonData, cp + 'foundation_bolt_length', 0) > 0
+                                || decVal(jsonData, cp + 'bolt_quantity', 0) > 0
+                                || decVal(jsonData, cp + 'fdn_quantity', 0) > 0
+                                || decVal(jsonData, cp + 'pcd', 0) > 0);
+            if (fbNisMhp || fndUnitPrice > 0 || fndWeight > 0) {
                 String fbDiaRaw = strVal(jsonData, cp + 'foundation_bolt_diameter', '');
                 if (fbDiaRaw.equalsIgnoreCase('N.R.') || String.isBlank(fbDiaRaw)) {
                     fbDiaRaw = strVal(jsonData, cp + 'nr_fb_diameter', '');
@@ -351,14 +512,21 @@ public class HighMastSOWController {
                 Decimal pcd   = decVal(jsonData, cp + 'pcd', 0);
                 String  template = strVal(jsonData, cp + 'template', '');
  
-                String descFnd =
-                    'Supply of FOUNDATION BOLTS - M' + fbDia
-                    + ' x ' + fbLen.intValue()
+                // Nos. from BOLT QUANTITY, falling back to FOUNDATION QUANTITY - the same
+                // chain the Octagonal sentence uses, so all three products read alike.
+                Decimal fbNisQtyMhp = decVal(jsonData, cp + 'bolt_quantity',
+                                      decVal(jsonData, cp + 'fdn_quantity', 0));
+                if (fbNisQtyMhp <= 0) fbNisQtyMhp = fbQty;
+
+                String descFnd = fbNisMhp
+                    ? fdnNotInScopeDesc(fbDia, fbLen, fbNisQtyMhp, pcd)
+                    : ('Supply of FOUNDATION BOLTS - M' + fbDia + 'mm'
+                    + ' x ' + fbLen.intValue() +'mm'
                     + ' (' + fbQty.intValue() + ' Nos.)'
                     + (pcd > 0 ? ' with PCD: ' + pcd.intValue() + ' mm,' : '')
                     + ' with Template and Anchor Plate'
                     + (template != '' ? '. Template: ' + template : '')
-                    + '.';
+                    + '.');
  
                 lineItems.add(buildRow(String.valueOf(slCounter++), descFnd, fndUnitPrice, gstPct, qty, freight));
             }
@@ -368,11 +536,20 @@ public class HighMastSOWController {
             if (brkUnitPrice > 0 || brkWeight > 0) {
                 String bracketType = strVal(jsonData, cp + 'bracket_type', '');
                 String typeOfArm   = strVal(jsonData, cp + 'type_of_arm', '');
- 
+                String brPudesc        = strVal(jsonData , cp + 'pu_paint_br_desc',  ''); 
+
+ System.debug(' br desc '+ brPudesc);
+
+                // Customized -> its description text; NO. OF ARM -> the word.
+                // Deepanjan (24th Aug 2026)
+                String brkLabel = bracketLabel(bracketType, cp, cp);
+                String armTxt   = armWord(typeOfArm);
                 String descBrk =
                     'Supply of Bracket / Arm'
-                    + (bracketType != '' ? ' - ' + bracketType : '')
-                    + (typeOfArm   != '' ? ', Type: ' + typeOfArm : '')
+                    + (brkLabel != '' ? ' - ' + brkLabel : '')
+                    + (armTxt   != '' ? ', Type: ' + armTxt : '')
+                    +' '
+                    + (brPudesc!= '' ? brPudesc : '')
                     + '.';
  
                 lineItems.add(buildRow(String.valueOf(slCounter++), descBrk, brkUnitPrice, gstPct, qty, freight));
@@ -382,6 +559,7 @@ public class HighMastSOWController {
         appendFreightRow(gstPct, freight, slCounter, totalPoleQty);
  
         if (lineItems.isEmpty()) {
+            startGroup();   // Reetabrata (18th Aug 2026)
             lineItems.add(buildRow('1',
                 'Supply of Mid Hinge Pole (please verify quote configuration).',
                 0, gstPct, 1, strVal(jsonData, 'freight_incoterms', 'Ex-works')));
@@ -440,10 +618,24 @@ public class HighMastSOWController {
             Decimal fbQty = decVal(jsonData, cp + 'bolt_quantity', 0);
             Decimal pcd   = decVal(jsonData, cp + 'pcd', 0);
             String  template = strVal(jsonData, cp + 'template', '');
-    
+
+            // FOUNDATION BOLT = N.R. -> not in our scope, same red sentence as every other
+            // product. THIS is the path a real Mid Hinge quote takes: the builder returns on
+            // _Final_Apex_Lines long before the c{n}_mhp_ fallback, so the rule has to live
+            // here too. The M-size comes from N.R FB DIAMETER, and the Nos. from BOLT
+            // QUANTITY falling back to FOUNDATION QUANTITY - the same chain the Octagonal
+            // sentence uses. buildRow() turns the sentinels into markup.
+            // Deepanjan (24th Aug 2026)
+            if (fbDia.equalsIgnoreCase('N.R.')) {
+                String  nrDia = strVal(jsonData, cp + 'nr_fb_diameter', '');
+                Decimal nrQty = decVal(jsonData, cp + 'bolt_quantity',
+                                decVal(jsonData, cp + 'fdn_quantity', 0));
+                return fdnNotInScopeDesc(nrDia, fbLen, nrQty, pcd);
+            }
+
             return 'Supply of FOUNDATION BOLTS'
-                + (fbDia != '' ? ' - M' + fbDia : '')
-                + (fbLen > 0   ? ' x ' + fbLen.intValue() : '')
+                + (fbDia != '' ? ' - M' + fbDia+'mm' : '')
+                + (fbLen > 0   ? ' x ' + fbLen.intValue() + 'mm' : '')
                 + (fbQty > 0   ? ' (' + fbQty.intValue() + ' Nos.)' : '')
                 + (pcd > 0     ? ' with PCD: ' + pcd.intValue() + ' mm,' : '')
                 + ' with Template and Anchor Plate'
@@ -454,15 +646,24 @@ public class HighMastSOWController {
         if (isBracket) {
             String bracketType = strVal(jsonData, cp + 'bracket_type', '');
             String  typeOfArm  = strVal(jsonData, cp + 'type_of_arm',  '');
+            String brPudesc        = strVal(jsonData, cp + 'pu_paint_br_desc',  ''); 
+
     
+            // Customized -> its description text; NO. OF ARM -> the word, and "arm(s)"
+            // becomes "arm" because the word already carries the count.
+            // Deepanjan (24th Aug 2026)
+            String brkLabel = bracketLabel(bracketType, cp, cp);
+            String armTxt   = armWord(typeOfArm);
             return 'Supply of Bracket / Arm'
-                + (bracketType != '' ? ' - ' + bracketType : '')
-                + (typeOfArm != '' ? ' with ' + typeOfArm + ' arm(s)' : '')
+                + (brkLabel != '' ? ' - ' + brkLabel : '') + ' bracket'
+                + (armTxt != '' ? ' with ' + armTxt + ' arm' : '')
+                +' '
+                + (brPudesc!= '' ? brPudesc : '')
                 + '.';
         }
     
         // Main pole description (original logic)
-        String  poleType    = strVal(jsonData, cp + 'pole_type',               'Polygonal');
+        String  poleType    = strVal(jsonData, cp + 'pole_type',               '');
         Decimal height      = decVal(jsonData, cp + 'height_of_pole',          0);
         Decimal topDia      = decVal(jsonData, cp + 'top_diameter',            0);
         Decimal botDia      = decVal(jsonData, cp + 'bottom_diameter',         0);
@@ -476,23 +677,24 @@ public class HighMastSOWController {
         String  stiffener   = strVal(jsonData, cp + 'stiffener_at_base',       '');
         String  extraMicron = strVal(jsonData, cp + 'extra_micron',            '');
         String  puPaint     = strVal(jsonData, cp + 'pu_paint_pole_brackets',  '');
+        String  addDes     = strVal(jsonData, cp + 'ad_description',  '');
         
         String description = 'Supply of'
-            + (height > 0 ? ' ' + height + ' MTR' : '')
-            + ' ' + poleType + ' Mid Hinge Pole'
-            + (sides != '' ? ', ' + sides + ' Sided' : '')
-            + ('Segment 2')
+            + (height > 0 ? ' ' + height + ' MTR ' : '')
+            + poleType +'('+ (sides != null ? sides : '')+ ' sided)' + ' Mid Hinge Pole '
+            + ('No. of Segment 2')
             + (topDia > 0 ? ', Top Dia: ' + topDia.intValue() + ' mm' : '')
             + (botDia > 0 ? ', Bottom Dia: ' + botDia.intValue() + ' mm' : '')
             + (segTopLen > 0 ? ', Length: ' + segTopLen.intValue() + ' mm' : '')
             + (segTopThk > 0 ? ', Thickness: ' + segTopThk.intValue() + ' mm' : '')
-            + (doorHeight != '' ? '. Door Height: ' + doorHeight + ' mm' : '')
-            + (bpType != '' ? '. Base Plate: ' + bpType
+            //+ (doorHeight != '' ? '. Door Height: ' + doorHeight + ' mm' : '')
+            + (bpType != '' ? ', Base Plate: ' + bpType
                 + (bpSize > 0 ? ' ' + bpSize.intValue() + ' mm' : '')
                 + (bpThk  > 0 ? ' x ' + bpThk.intValue() + ' mm' : '') : '')
-            + (stiffener != '' ? '. Stiffener at Base: ' + stiffener : '')
-            + (extraMicron != '' ? '. Extra Micron: ' + extraMicron : '')
+            //+ (stiffener != '' ? '. Stiffener at Base: ' + stiffener : '')
+            + (extraMicron != '' ? ', with ' + extraMicron + ' micron' : '')
             + (puPaint != '' ? '. PU Paint: ' + puPaint : '')
+            + (addDes != '' ? '. Additional Item: ' + addDes : '')
             + '.';
 
         String suffix = getWindSpeedSuffix();
@@ -506,6 +708,13 @@ public class HighMastSOWController {
     // ═══════════════════════════════════════════════════════════════════════
     // TRANSMISSION POLE BUILDER
     // ═══════════════════════════════════════════════════════════════════════
+    
+    // private class to fetch both poledesc with special desc & special desc price 
+    private class TPDescResult{
+        String description;
+        Decimal specialUnitPriceAdd;
+    }
+    
     private void buildTransmissionPoleLineItems() {
  
         Decimal gstPct    = 18;
@@ -518,20 +727,27 @@ public class HighMastSOWController {
             for (Object lineObj : apexLines) {
                 Map<String, Object> line = (Map<String, Object>) lineObj;
                 String  itemName  = strVal(line, 'name',     'Transmission Pole Item');
+                markFlatGroup(itemName);   // Reetabrata (18th Aug 2026)
  
                 if (isFreightLine(itemName)) {
                     Decimal freightAmt = decVal(line, 'expenses', 0)
                                              .setScale(2, RoundingMode.HALF_UP);
                     Decimal fQty        = decVal(line, 'quantity', 1);
+                    String displayItemName = itemName.replace('(Lump Sum)', '').trim();
+
                     lineItems.add(buildRow(String.valueOf(slCounter++),
-                                  itemName, freightAmt, gstPct, fQty, freight));
+                                  displayItemName, freightAmt, gstPct, fQty, freight));
                     continue;
                 }
  
                 Decimal qty       = decVal(line, 'quantity',  1);
                 Decimal unitPrice = (decVal(line, 'unitPrice', 0))
                                         .setScale(2, RoundingMode.HALF_UP);
-                String  description = buildTPDescription(itemName, line);
+                // update desc & unit with special desc
+                TPDescResult res = buildTPDescription(itemName, line);
+                unitPrice = (unitPrice + res.specialUnitPriceAdd).setScale(2, RoundingMode.HALF_UP);
+
+                String  description = res.description;
                 lineItems.add(buildRow(String.valueOf(slCounter++),
                               description, unitPrice, gstPct, qty, freight));
                 totalPoleQty += qty;
@@ -545,6 +761,7 @@ public class HighMastSOWController {
             for (Object rowObj : tableRows) {
                 Map<String, Object> row = (Map<String, Object>) rowObj;
                 String  itemName  = strVal(row, 'name',     'Transmission Pole Item');
+                markFlatGroup(itemName);   // Reetabrata (18th Aug 2026)
  
                 if (isFreightLine(itemName)) {
                     Decimal freightAmt = decVal(row, 'expenses', 0)
@@ -558,7 +775,9 @@ public class HighMastSOWController {
                 Decimal qty       = decVal(row, 'quantity',  1);
                 Decimal unitPrice = (decVal(row, 'unitPrice', 0) )
                                         .setScale(2, RoundingMode.HALF_UP);
-                String  description = buildTPDescription(itemName, row);
+                TPDescResult res = buildTPDescription(itemName, row);
+                unitPrice = (unitPrice + res.specialUnitPriceAdd).setScale(2, RoundingMode.HALF_UP);
+                String  description = res.description;
                 lineItems.add(buildRow(String.valueOf(slCounter++),
                               description, unitPrice, gstPct, qty, freight));
                 totalPoleQty += qty;
@@ -624,7 +843,7 @@ public class HighMastSOWController {
                         + (cabDia   > 0   ? '. Cable Dia: '   + cabDia.intValue() + ' mm' : '')
                         + (cabThk   > 0   ? ', Thickness: '   + cabThk.intValue() + ' mm' : '')
                         + (dan      > 0   ? '. DAN: ' + dan.intValue() : '')
-                        + (extra   != ''  ? '. Extra Micron: ' + extra : '')
+                        + (extra   != ''  ? ', with ' + extra + ' micron' : '')
                         + (note    != ''  ? '. Note: ' + note : '')
                         + '.';
 
@@ -676,7 +895,7 @@ public class HighMastSOWController {
                         + (s2CabDia   > 0   ? '. Cable Dia: ' + s2CabDia.intValue() + ' mm' : '')
                         + (s2CabThk   > 0   ? ', Thickness: ' + s2CabThk.intValue() + ' mm' : '')
                         + (s2Dan      > 0   ? '. DAN: ' + s2Dan.intValue() : '')
-                        + (s2Extra   != ''  ? '. Extra Micron: ' + s2Extra : '')
+                        + (s2Extra   != ''  ? ', with ' + s2Extra + ' micron' : '')
                         + (s2Note    != ''  ? '. Note: ' + s2Note : '')
                     + '.';
 
@@ -696,6 +915,7 @@ public class HighMastSOWController {
                 Decimal unitPrice = (decVal(jsonData, cp + 'unit_price', 0))
                                         .setScale(2, RoundingMode.HALF_UP);
                 if (height == 0 && unitPrice == 0) continue;
+                startGroup();   // one Transmission Pole = one line item. Reetabrata (18th Aug 2026)
  
                 Decimal qty         = decVal(jsonData, cp + 'qty', 1);
                 String  poleType    = strVal(jsonData, cp + 'pole_type',                  'Polygonal');
@@ -729,7 +949,7 @@ public class HighMastSOWController {
                     + (cabDia   > 0   ? '. Cable Dia: '       + cabDia.intValue() + ' mm' : '')
                     + (cabThk   > 0   ? ', Cable Thickness: ' + cabThk.intValue() + ' mm' : '')
                     + (dan      > 0   ? '. DAN: ' + dan.intValue()                     : '')
-                    + (extraMicron != '' ? '. Extra Micron: ' + extraMicron            : '')
+                    + (extraMicron != '' ? ', with ' + extraMicron + ' micron'            : '')
                     + (note     != '' ? '. Note: ' + note                              : '')
                     + '.';
 
@@ -747,13 +967,14 @@ public class HighMastSOWController {
         appendFreightRow(gstPct, freight, slCounter, totalPoleQty);
  
         if (lineItems.isEmpty()) {
+            startGroup();   // Reetabrata (18th Aug 2026)
             lineItems.add(buildRow('1',
                 'Supply of Transmission Pole (please verify quote configuration).',
                 0, gstPct, 1, strVal(jsonData, 'freight_incoterms', 'Ex-works')));
         }
     }
  
-    private String buildTPDescription(String itemName, Map<String, Object> lineMap) {
+    private TPDescResult buildTPDescription(String itemName, Map<String, Object> lineMap) {
  
         Integer colIdx = 1;
         System.debug('buildTPDescription called ->  ' + itemName);
@@ -775,6 +996,9 @@ public class HighMastSOWController {
         // 3. Dynamically construct prefix based on Segment Number
         String cp = 'c' + colIdx + '_tp_' ;
         String cp2 ='c' + colIdx + '_tp_s' + segmentNum + '_';
+        
+        TPDescResult result = new TPDescResult();
+    	result.specialUnitPriceAdd = 0;
 
         if(segmentNum == 1){
             String  poleType    = strVal(jsonData, cp + 'pole_type',                  'Polygonal');
@@ -810,7 +1034,7 @@ public class HighMastSOWController {
                 + (cabDia   > 0   ? '. Cable Dia: '       + cabDia.intValue() + ' mm' : '')
                 + (cabThk   > 0   ? ', Cable Thickness: ' + cabThk.intValue() + ' mm' : '')
                 + (dan      > 0   ? '. DAN: ' + dan.intValue()                     : '')
-                + (extraMicron != '' ? '. Extra Micron: ' + extraMicron            : '')
+                + (extraMicron != '' ? ', with ' + extraMicron + ' micron'            : '')
                 + (note     != '' ? '. Note: ' + note                              : '')
                 + '.';
             
@@ -818,7 +1042,18 @@ public class HighMastSOWController {
             if (String.isNotBlank(suffix)) {
                 description = description +' '+suffix;
             }
-            return description;
+            
+            Boolean hasSpecialDesc = boolVal(jsonData, cp + 'is_special_desc', false);
+            if (hasSpecialDesc) {
+                String  specialText  = strVal(jsonData, cp + 'special_desc_text', '');
+                Decimal specialPrice = decVal(jsonData, cp + 'special_desc_unitPrice', 0);
+                if (String.isNotBlank(specialText)) {
+                    description += '. Special: ' + specialText;
+                }
+                result.specialUnitPriceAdd = specialPrice;   
+            }
+            result.description = description;
+            return result;
         }
         if(segmentNum == 2)
         {
@@ -856,12 +1091,12 @@ public class HighMastSOWController {
                 + (s2LenBot    > 0 ? ', Length(Bot) - ' + s2LenBot.intValue()    + ' mm' : '')
                 + (s2ThkTop    > 0 ? ', Thickness(Top) - ' + s2ThkTop.intValue() + ' mm' : '')
                 + (s2ThkBot    > 0 ? ', Thickness(Bot) - ' + s2ThkBot.intValue() + ' mm' : '')
-                + (s2Overlap   > 0 ? ', Overlap - ' + s2Overlap.intValue() + ' mm' : '')
+                //+ (s2Overlap   > 0 ? ', Overlap - ' + s2Overlap.intValue() + ' mm' : '')
                 + (s2BpType   != '' ? '. ' + buildBearingPlateDesc(s2BpType, s2BpSize, s2BpThk) : '')
                 + (s2CabDia   > 0   ? '. Cable Dia: ' + s2CabDia.intValue() + ' mm' : '')
                 + (s2CabThk   > 0   ? ', Thickness: ' + s2CabThk.intValue() + ' mm' : '')
                 + (s2Dan      > 0   ? '. DAN: ' + s2Dan.intValue() : '')
-                + (s2Extra   != ''  ? '. Extra Micron: ' + s2Extra : '')
+                + (s2Extra   != ''  ? ', with ' + s2Extra + ' micron' : '')
                 + (s2Note    != ''  ? '. Note: ' + s2Note : '')
             + '.';
 
@@ -869,31 +1104,50 @@ public class HighMastSOWController {
             if (String.isNotBlank(suffix)) {
                 descPole2 += suffix;
             }
-            return descPole2;
+            
+            Boolean hasSpecialDesc = boolVal(jsonData, cp2 + 'is_special_desc', false);
+            if (hasSpecialDesc) {
+                String  specialText  = strVal(jsonData, cp2 + 'special_desc_text', '');
+                Decimal specialPrice = decVal(jsonData, cp2 + 'special_desc_unitPrice', 0);
+                if (String.isNotBlank(specialText)) {
+                    descPole2 += '. Special Description: ' + specialText;
+                }
+                result.specialUnitPriceAdd = specialPrice;   
+            }
+            
+            result.description = descPole2;
+        	return result;
         }
-        return '';
+        return result;
     }
  
     // ═══════════════════════════════════════════════════════════════════════
     // LIGHTING POLE BUILDER
     // ═══════════════════════════════════════════════════════════════════════
     private void buildLightingPoleLineItems() {
-
+		
+		System.debug('Inside buildLightingPoleLineItems');
+        
         Decimal gstPct    = 18;
         String  freight   = strVal(jsonData, 'freight_incoterms', 'Ex-works');
         Integer slCounter = 1;
         Decimal totalPoleQty = 0;
+        typeOfMast       = strVal(jsonData, 'type_of_mast', '');
 
-        List<Object> apexLines = getList(jsonData, '_Final_Apex_Lines');
+        List<Object> apexLines = orderFlatLinesByItem(getList(jsonData, '_Final_Apex_Lines'));
+        Set<String> fdnAlreadyThere = fdnSetsPresent(apexLines);
         if (!apexLines.isEmpty()) {
             for (Object lineObj : apexLines) {
                 Map<String, Object> line = (Map<String, Object>) lineObj;
                 String  itemName  = strVal(line, 'name',      'Lighting Pole Item');
+                markFlatGroup(itemName);   // Reetabrata (18th Aug 2026)
 
                 if (isFreightLine(itemName)) {
                     Decimal freightAmt = decVal(line, 'expenses', 0).setScale(2, RoundingMode.HALF_UP);
                     Decimal fQty       = decVal(line, 'quantity', 1);
-                    lineItems.add(buildRow(String.valueOf(slCounter++), itemName, freightAmt, gstPct, fQty, freight));
+                    String displayItemName = itemName.replace('(Lump Sum)', '').trim();
+
+                    lineItems.add(buildRow(String.valueOf(slCounter++), displayItemName, freightAmt, gstPct, fQty, freight));
                     continue;
                 }
 
@@ -906,22 +1160,34 @@ public class HighMastSOWController {
                         && !itemName.containsIgnoreCase('Bracket')
                         && !itemName.containsIgnoreCase('Arm')) {
                     totalPoleQty += qty;
+                    // FOUNDATION BOLT = N.R. and the estimator saved no Foundation line for
+                    // this pole (its FOUNDATION QUANTITY was left blank), so the out-of-scope
+                    // sentence would have had nowhere to print. Emit it right after the pole
+                    // row, at rate 0, inside the same line item - so the set reads
+                    // pole -> foundation -> bracket. Nothing else is added or removed.
+                    // Deepanjan (24th Aug 2026)
+                    slCounter = addFdnNotInScopeRow(itemName, fdnAlreadyThere, qty,
+                                                    gstPct, freight, slCounter);
                 }
             }
             //appendFreightRow(gstPct, freight, slCounter, totalPoleQty);
             return;
         }
-
-        List<Object> tableRows = getList(jsonData, '_Saved_Table_Rows');
+        
+        List<Object> tableRows = orderFlatLinesByItem(getList(jsonData, '_Saved_Table_Rows'));
+        fdnAlreadyThere = fdnSetsPresent(tableRows);
         if (!tableRows.isEmpty()) {
             for (Object rowObj : tableRows) {
                 Map<String, Object> row = (Map<String, Object>) rowObj;
                 String  itemName  = strVal(row, 'name',      'Lighting Pole Item');
+                markFlatGroup(itemName);   // Reetabrata (18th Aug 2026)
 
                 if (isFreightLine(itemName)) {
                     Decimal freightAmt = decVal(row, 'expenses', 0).setScale(2, RoundingMode.HALF_UP);
                     Decimal fQty       = decVal(row, 'quantity', 1);
-                    lineItems.add(buildRow(String.valueOf(slCounter++), itemName, freightAmt, gstPct, fQty, freight));
+                    String displayItemName = itemName.replace('(Lump Sum)', '').trim();
+
+                    lineItems.add(buildRow(String.valueOf(slCounter++), displayItemName, freightAmt, gstPct, fQty, freight));
                     continue;
                 }
 
@@ -934,12 +1200,20 @@ public class HighMastSOWController {
                         && !itemName.containsIgnoreCase('Bracket')
                         && !itemName.containsIgnoreCase('Arm')) {
                     totalPoleQty += qty;
+                    // FOUNDATION BOLT = N.R. and the estimator saved no Foundation line for
+                    // this pole (its FOUNDATION QUANTITY was left blank), so the out-of-scope
+                    // sentence would have had nowhere to print. Emit it right after the pole
+                    // row, at rate 0, inside the same line item - so the set reads
+                    // pole -> foundation -> bracket. Nothing else is added or removed.
+                    // Deepanjan (24th Aug 2026)
+                    slCounter = addFdnNotInScopeRow(itemName, fdnAlreadyThere, qty,
+                                                    gstPct, freight, slCounter);
                 }
             }
             //appendFreightRow(gstPct, freight, slCounter, totalPoleQty);
             return;
         }
-
+        
         List<Integer> sections = new List<Integer>{ 1, 2 };
 
         for (Integer sec : sections) {
@@ -968,6 +1242,7 @@ public class HighMastSOWController {
                                     .setScale(2, RoundingMode.HALF_UP);
                 
                 if (height == 0 && segUnitPrice == 0) continue;
+                startGroup();   // one Lighting Pole = one line item. Reetabrata (18th Aug 2026)
 
                 // Attribute Fallbacks (Standard -> Custom Op)
                 String  poleType    = strVal(jsonData, cs + 'pole_type',               strVal(jsonData, csCus + 'pole_type', 'Polygonal'));
@@ -988,9 +1263,21 @@ public class HighMastSOWController {
                 String  template    = strVal(jsonData, cs + 'template',                strVal(jsonData, csCus + 'template', ''));
                 String  extraMicron = strVal(jsonData, cs + 'extra_micron',            strVal(jsonData, csCus + 'extra_micron', ''));
                 String  puPaintPole = strVal(jsonData, cs + 'pu_paint_pole',           strVal(jsonData, csCus + 'pu_paint_pole', ''));
-                String  solarStruct = strVal(jsonData, cs + 'solar_structure',         strVal(jsonData, csCus + 'solar_structure', ''));
+        // SOLAR STRUCTURE description - Deepanjan (6th September 2026). The Custom Octagonal
+                // blueprint names this field differently per section: Section 1 has
+                // s1_cus_op_solar_structure, Section 2 has s2_cus_op_solar_description. Reading only
+                // 'solar_structure' printed the sentence for Section 1 and silently dropped it for
+                // Section 2, while the weight formula (which uses the right key) still priced the
+                // solar structure - the customer paid for it and the offer never said so.
+                // 'solar_structure' stays FIRST in the chain, so every quote that printed before
+                // prints exactly as before; only the Section-2 blank is filled.
+                String  solarStruct = strVal(jsonData, cs + 'solar_structure',
+                                      strVal(jsonData, cs + 'solar_description',
+                                      strVal(jsonData, csCus + 'solar_structure',
+                                      strVal(jsonData, csCus + 'solar_description', ''))));
                 String  batteryBox  = strVal(jsonData, cs + 'battery_box',             strVal(jsonData, csCus + 'battery_box', ''));
                 String  laddar  	= strVal(jsonData, cs + 'ladder',             strVal(jsonData, csCus + 'ladder', ''));
+                String  addDes  	= strVal(jsonData, cs + 'ad_description',             strVal(jsonData, csCus + 'ad_description', ''));
                 
                 // Core Metrics with Standard -> Op -> Custom Op fallback chain
                 Decimal qty = decVal(jsonData, 'c' + col + '_lp_s' + sec + '_quantity',
@@ -1020,7 +1307,10 @@ public class HighMastSOWController {
                                     
                 Decimal realization = decVal(jsonData, 'c' + col + '_lp_s' + sec + '_realization_on_segment_price', 
                                         decVal(jsonData, cCusS + 'realization_on_segment_price', 5));
-
+                
+				System.debug('addDes --> '+ addDes);
+                System.debug('doorHeight --> '+doorHeight);
+                
                 String descPole =
                     'Supply of'
                     + (height > 0 ? ' ' + height + ' MTR' : '')
@@ -1033,13 +1323,14 @@ public class HighMastSOWController {
                     + (bpType != ''   ? '. Base Plate: '  + bpType
                         + (bpSize > 0 ? ' ' + bpSize.intValue()  + ' mm' : '')
                         + (bpThk  > 0 ? ' x ' + bpThk.intValue() + ' mm' : '')             : '')
-                    + (stiffener != '' ? '. Stiffener at Base: ' + stiffener               : '')
-                    + (doorHeight > 0  ? '. Door Height: ' + doorHeight.intValue() + ' mm' : '')
-                    + (extraMicron != '' ? '. Extra Micron: ' + extraMicron                : '')
+                    //+ (stiffener != '' ? '. Stiffener at Base: ' + stiffener               : '')
+                    //+ (doorHeight > 0  ? '. Door Height: ' + doorHeight.intValue() + ' mm' : '')
+                    + (extraMicron != '' ? ', with ' + extraMicron + ' micron'                : '')
                     + (puPaintPole != '' ? '. PU Paint: ' + puPaintPole                    : '')
                     + (solarStruct != '' ? '. Solar Structure: ' + solarStruct             : '')
                     + (batteryBox  != '' ? '. Battery Box: ' + batteryBox                  : '')
                     + (laddar  != '' ? '. Laddar: ' + laddar                  : '')
+                    + (addDes  != '' ? '. Additional Item: ' + addDes                  : '')
                     + '.';
 
                 String suffix = getWindSpeedSuffix();
@@ -1053,8 +1344,8 @@ public class HighMastSOWController {
                 if (fndUnitPrice > 0 || fndWeight > 0) {
                     String descFnd =
                         'Supply of FOUNDATION BOLTS'
-                        + (boltDia != '' ? ' - M' + boltDia                                : '')
-                        + (boltLen > 0   ? ' x '  + boltLen.intValue()                     : '')
+                        + (boltDia != '' ? ' - M' + boltDia +'mm'                                : '')
+                        + (boltLen > 0   ? ' x '  + boltLen.intValue() + 'mm'                     : '')
                         + (boltQty > 0   ? ' ('   + boltQty.intValue() + ' Nos.)'          : '')
                         + (pcd > 0       ? ' with PCD: ' + pcd.intValue() + ' mm,'         : '')
                         + ' with Template and Anchor Plate'
@@ -1069,11 +1360,15 @@ public class HighMastSOWController {
                     String typeOfArm = strVal(jsonData, cs + 'type_of_arm',  strVal(jsonData, csCus + 'type_of_arm', ''));
                     Decimal armLen   = decVal(jsonData, cs + 'arm_length',   decVal(jsonData, csCus + 'arm_length', 0));
                     Decimal armDia   = decVal(jsonData, cs + 'arm_dia_od',   decVal(jsonData, csCus + 'arm_dia_od', 0));
-
+                    
+                    // Customized -> its description text; NO. OF ARM -> the word.
+                    // Deepanjan (24th Aug 2026)
+                    String brkLabel = bracketLabel(brkType, cs, csCus);
+                    String armTxt   = armWord(typeOfArm);
                     String descBrk =
                         'Supply of Bracket / Arm'
-                        + (brkType  != '' ? ' - ' + brkType                                : '')
-                        + (typeOfArm != '' ? ', Type: ' + typeOfArm                        : '')
+                        + (brkLabel  != '' ? ' - ' + brkLabel                              : '')
+                        + (armTxt != '' ? ', Type: ' + armTxt                              : '')
                         + (armLen > 0     ? ', Arm Length: ' + armLen.intValue()  + ' mm'  : '')
                         + (armDia > 0     ? ', Arm Dia: '   + armDia.intValue()   + ' mm'  : '')
                         + '.';
@@ -1086,6 +1381,7 @@ public class HighMastSOWController {
         appendFreightRow(gstPct, freight, slCounter, totalPoleQty);
 
         if (lineItems.isEmpty()) {
+            startGroup();   // Reetabrata (18th Aug 2026)
             lineItems.add(buildRow('1', 'Supply of Lighting Pole (please verify quote configuration).', 0, gstPct, 1, strVal(jsonData, 'freight_incoterms', 'Ex-works')));
         }
     }
@@ -1128,19 +1424,65 @@ public class HighMastSOWController {
             Decimal fbQty    = decVal(jsonData, prefix + 'bolt_quantity',          decVal(jsonData, prefixCus + 'bolt_quantity', 0));
             String  template = strVal(jsonData, prefix + 'template',               strVal(jsonData, prefixCus + 'template', ''));
             String  boltType = template.toLowerCase().contains('j') ? 'J Type' : 'Standard';
+            Boolean addFBflag  = boolVal(jsonData, prefixCus + 'fdn_ad', false);
+            String addFBDes    = strVal(jsonData, prefixCus + 'fdn_ad_description', '');
 
-            return 'Supply of FOUNDATION BOLTS - ' + boltType + ' Bolts M' + fbDia + ' x ' + fbLen.intValue() + ' (' + fbQty.intValue() + ' Nos.)';
+            // FOUNDATION BOLT = N.R. -> the bolts are NOT in our scope. Same sentence and the
+            // same red styling every other product already prints, and buildRow() turns the
+            // sentinels into markup. The dimensions still come from N.R FB DIAMETER / LENGTH /
+            // BOLT QUANTITY / P.C.D, each dropped when blank. Deepanjan (24th Aug 2026)
+            if (fdnIsNotInScope(prefix, prefixCus)) {
+                Decimal fbPcd = decVal(jsonData, prefix + 'pcd', decVal(jsonData, prefixCus + 'pcd', 0));
+            // The Nos. comes from BOLT QUANTITY, falling back to FOUNDATION QUANTITY -
+            // the two scopes resolve it from different keys for the normal bolt text
+            // (Single reads bolt_quantity, Combined reads fdn_quantity for a Custom
+            // Octagonal), so this sentence reads BOTH and stays identical in the two
+            // PDFs whichever field the user fills. Deepanjan (24th Aug 2026)
+                Decimal fbNisQty = fdnNisQty(prefix, prefixCus, fbQty);
+                return fdnNotInScopeDesc(fbDia, fbLen, fbNisQty, fbPcd);
+            }
+
+            return 'Supply of FOUNDATION BOLTS - ' + 'J Type' + ' Bolts M' + fbDia + ' x ' + fbLen.intValue() + 'mm (' + fbQty.intValue() + ' Nos.)' + (addFBflag ? ' '+ addFBDes:'');
         }
 
         // ── 2. Bracket / Arm Description ───────────────────────────────────────
         if (isBracket) {
-            String bracketType = strVal(jsonData, prefix + 'bracket_type', strVal(jsonData, prefixCus + 'bracket_type', 'Standard'));
-            String typeOfArm   = strVal(jsonData, prefix + 'type_of_arm',   strVal(jsonData, prefixCus + 'type_of_arm', '1'));
+            // NO FALLBACK on either field - BRACKET TYPE used to default to 'Standard' and
+            // NO. OF ARM to '1', so a bracket row with nothing entered still read "Standard
+            // bracket with 1 arm(s)." Customized now prints its CUSTOMIZED DESCRIPTION text,
+            // and a numeric NO. OF ARM prints as the word. Deepanjan (24th Aug 2026)
+            String bracketType = strVal(jsonData, prefix + 'bracket_type', strVal(jsonData, prefixCus + 'bracket_type', ''));
+            String typeOfArm   = strVal(jsonData, prefix + 'type_of_arm',   strVal(jsonData, prefixCus + 'type_of_arm', ''));
+            String  armdiaod   = strVal(jsonData, prefix + 'arm_dia_od', strVal(jsonData, prefixCus + 'arm_dia_od', ''));
+            String  armlength   = strVal(jsonData, prefix + 'arm_length', strVal(jsonData, prefixCus + 'arm_length', ''));
+            String sleeveLength = strVal(jsonData, prefix + 'sleeve_length', strVal(jsonData, prefixCus + 'sleeve_length', ''));
+            Boolean addBrflag  = boolVal(jsonData, prefixCus + 'br_ad', false);
+            String addBrDes    = strVal(jsonData, prefixCus + 'br_ad_description', '');
+            String brkPUDesc = strVal(jsonData, prefix + 'pu_paint_br_desc', strVal(jsonData, prefixCus + 'pu_paint_br_desc', ''));
+            String brkCusDesc = strVal(jsonData, prefix + 'customized_description', strVal(jsonData, prefixCus + 'customized_description', ''));
+            String brkRingDesc = strVal(jsonData, prefix + 'ring_description', strVal(jsonData, prefixCus + 'ring_description', ''));
+            Boolean brkPUlag  = boolVal(jsonData, prefixCus + 'pu_paint_checkbox', false);
 
-            Boolean hasArms = String.isNotBlank(typeOfArm) && !typeOfArm.equalsIgnoreCase('0') && !typeOfArm.equalsIgnoreCase('N/A');
             
-            return 'Supply of Bracket / Arm - ' + bracketType + ' bracket' + 
-                (hasArms ? (typeOfArm.isNumeric() ? (' with ' + typeOfArm + ' arm(s).') : (' (' + typeOfArm + ').')) : '.');
+            Boolean hasArms = String.isNotBlank(typeOfArm) && !typeOfArm.equalsIgnoreCase('0') && !typeOfArm.equalsIgnoreCase('N/A');
+            String  brkLabel = bracketLabel(bracketType, prefix, prefixCus);
+            String  armTxt   = armWord(typeOfArm);
+            String  armNumber = armNumtoWord(typeOfArm);
+
+            return ''
+            + (String.isNotBlank(brkLabel) ? brkLabel : '')
+            + (hasArms ? (typeOfArm.isNumeric() ? (' '+ armTxt + ' arm') : (' ' + armTxt)) : '')
+            + ' bracket'
+            + (typeOfArm.isNumeric() 
+                ? (
+                    (armLength != '' ? ' ' + armLength + ' mm long on ' + armNumber + ' side' : '')
+                    + (armdiaod != '' ? ' with ' + armdiaod + ' OD GI Pipe' : '')
+                    + (String.isNotBlank(sleeveLength) ? ', ' + sleeveLength.trim() + 'mm Sleeve' : '')
+                    + '.'
+                )
+                : (brkRingDesc != '' ? ' ' + brkRingDesc : ''))
+            + (addBrflag && String.isNotBlank(addBrDes) ? ' ' + addBrDes + '.' : '')
+            + (brkPUDesc != '' && brkPUlag ? ' PU Paint : ' + brkPUDesc + '.' : '');
         }
 
         // ── 3. Lighting Pole Description ───────────────────────────────────────
@@ -1154,13 +1496,25 @@ public class HighMastSOWController {
 
         String  extraMicron = strVal(jsonData, prefix + 'extra_micron',            strVal(jsonData, prefixCus + 'extra_micron', ''));
         String  puPaintPole = strVal(jsonData, prefix + 'pu_paint_pole_brackets',           strVal(jsonData, prefixCus + 'pu_paint_pole_brackets', ''));
-        String  solarStruct = strVal(jsonData, prefix + 'solar_structure',         strVal(jsonData, prefixCus + 'solar_structure', ''));
+        // SOLAR STRUCTURE description - Deepanjan (6th September 2026). The Custom Octagonal
+        // blueprint names this field differently per section: Section 1 has
+        // s1_cus_op_solar_structure, Section 2 has s2_cus_op_solar_description. Reading only
+        // 'solar_structure' printed the sentence for Section 1 and silently dropped it for
+        // Section 2, while the weight formula (which uses the right key) still priced the
+        // solar structure - the customer paid for it and the offer never said so.
+        // 'solar_structure' stays FIRST in the chain, so every quote that printed before
+        // prints exactly as before; only the Section-2 blank is filled.
+        String  solarStruct = strVal(jsonData, prefix + 'solar_structure',
+                              strVal(jsonData, prefix + 'solar_description',
+                              strVal(jsonData, prefixCus + 'solar_structure',
+                              strVal(jsonData, prefixCus + 'solar_description', ''))));
         String  batteryBox  = strVal(jsonData, prefix + 'battery_box',             strVal(jsonData, prefixCus + 'battery_box', ''));
         String  laddar  	= strVal(jsonData, prefix + 'ladder_description',             strVal(jsonData, prefixCus + 'ladder_description', ''));
         Decimal bpSize = decVal(jsonData, prefix + 'size_dia_of_base_plate',  decVal(jsonData, prefixCus + 'size_dia_of_base_plate', 0));
         Decimal bpThk  = decVal(jsonData, prefix + 'thickness_of_base_plate', decVal(jsonData, prefixCus + 'thickness_of_base_plate', 0));
         String  bpType = strVal(jsonData, prefix + 'base_plate_type',         strVal(jsonData, prefixCus + 'base_plate_type', 'Square'));
-
+		String  addDes  	= strVal(jsonData, prefix + 'ad_description',             strVal(jsonData, prefixCus + 'ad_description', ''));
+        
         String descPole = 'Supply of ' + poleHeight + ' MTR ' 
                         + shapeLabel + ' Pole as per Dimension: '
                         + 'Top Dia. - ' + topDia.intValue() + ' mm, '
@@ -1183,17 +1537,18 @@ public class HighMastSOWController {
             descPole += 'Section - 2 '
                     + '(Top Segment Length - ' + segTopLen.intValue() + ' mm, '
                     + 'Bottom Segment Length - ' + segBotLen.intValue() + ' mm'
-                    + (overlap > 0 ? ', Overlap - ' + overlap.intValue() + ' mm' : '') + '), '
-                    + 'Thickness - ' + segTopThk.intValue() + ' mm (Top) / '
+                    //+ (overlap > 0 ? ', Overlap - ' + overlap.intValue() + ' mm' : '') + '), '
+                    + 'Thickness - ' + segTopThk.intValue() + ' mm (Top) , '
                     + segBotThk.intValue() + ' mm (Bottom). ';
         }
 
         descPole += buildBasePlateDesc(bpType, bpSize, bpThk) 
-            		+ (extraMicron != '' ? '. Extra Micron: ' + extraMicron                : '')
+            		+ (extraMicron != '' ? ', with ' + extraMicron + ' micron'                : '')
                     + (puPaintPole != '' ? '. PU Paint: ' + puPaintPole                    : '')
                     + (solarStruct != '' ? '. Solar Structure: ' + solarStruct             : '')
                     + (batteryBox  != '' ? '. Battery Box: ' + batteryBox                  : '')
                     + (laddar  != '' ? '. Laddar: ' + laddar                  : '')
+            		+ (addDes  != '' ? '. Additional Item: ' + addDes                  : '')
                 	+'.';
             		
 
@@ -1220,6 +1575,7 @@ public class HighMastSOWController {
  
             Decimal mastHeight = decVal(jsonData, p + 'lm_height_of_mast', 0);
             if (mastHeight == 0) continue;
+            startGroup();   // one mast row = one line item. Reetabrata (18th Aug 2026)
  
             Decimal segCount   = decVal(jsonData, p + 'lm_no_of_segment', 1);
             // TOP DIA: seg 1 uses lm_1_oaf_top, seg 2..N use the top segment's OAF top - Reetabrata (8th July 2026)
@@ -1235,9 +1591,10 @@ public class HighMastSOWController {
             Decimal bpThk = decVal(jsonData, p + 'lm_thickness_of_base_plate', 0);
             Decimal pcd   = decVal(jsonData, p + 'lm_pcd',                     0);
  
-            String  boltDia   = strVal(jsonData, p + 'lm_fdn_bolt_dia',    '24');
-            Decimal boltLen   = decVal(jsonData, p + 'lm_fdn_bolt_length',  850);
-            Decimal noOfBolts = decVal(jsonData, p + 'lm_fdn_no_of_bolt',    6);
+            // null stays null - no invented 24/850/6 in the offer. Deepanjan (20th Aug 2026)
+            String  boltDia   = strVal(jsonData, p + 'lm_fdn_bolt_dia',    '');
+            Decimal boltLen   = decVal(jsonData, p + 'lm_fdn_bolt_length',  0);
+            Decimal noOfBolts = decVal(jsonData, p + 'lm_fdn_no_of_bolt',    0);
  
             Decimal mastUnitPrice = 0;
             for (Integer s = 1; s <= segCount.intValue(); s++) { // Reetabrata (8th July 2026)
@@ -1245,6 +1602,17 @@ public class HighMastSOWController {
             }
             if (mastUnitPrice == 0) {
                 mastUnitPrice = decVal(jsonData, p + 'lm_1_unit_price', 0);
+            }
+
+            mastUnitPrice = perPolfrieght ? mastUnitPrice + perPolTPCharg : mastUnitPrice;
+
+            // Changes for bug UIL-HM-143
+            Decimal latchingDeviceRate = decVal(jsonData, 'lm_lc_rate',        0);
+            String latchDeviceDes = '';
+            System.debug('latchingDeviceRate --> ' + latchingDeviceRate + ' | isLatchingMast --> '+ isLatchingMast);
+            if(isLatchingMast && latchingDeviceRate > 0){
+                latchDeviceDes = 'with Latching Device ';
+                mastUnitPrice += latchingDeviceRate;
             }
 
             /*
@@ -1264,6 +1632,24 @@ public class HighMastSOWController {
                 mastUnitPrice += rowDec(jsonData, p, 'lm_spike_unit_price', 0)
                                + rowDec(jsonData, p, 'lm_dc_unit_price',    0);
             }
+            Boolean hasSpecialDesc    = siBoolVal(jsonData, p + 'lm_is_special_desc');
+            // added special description for lightning mast
+            String  specialDescClause = '';
+            if (hasSpecialDesc) {
+                String  specialDescText  = strVal(jsonData, p + 'lm_special_desc_text', '');
+                Decimal specialDescPrice = decVal(jsonData, p + 'lm_special_desc_unitPrice', 0);
+                if (String.isNotBlank(specialDescText)) {
+                    specialDescClause = ' SPECIAL: ' + specialDescText + '.';
+                }
+                mastUnitPrice += specialDescPrice;
+            }
+
+            // PU PAINT is no longer added here. Since 8 Sep 2026 the realized PU Paint rate is
+            // part of lm_{s}_unit_price itself (segmentGenerator.js, same rule as the normal LCLM
+            // blueprint), so the segment sum above already carries it. The 4 Sep Apex fold
+            // charged it a second time and was removed. Deepanjan (8th September 2026)
+
+
             Decimal boltUnitPrice = decVal(jsonData, p + 'lm_fdn_unit_price', 0);
  
             // Segment Above 5 writes lm_* keys and must NOT inherit the legacy hm_* defaults.
@@ -1290,12 +1676,19 @@ public class HighMastSOWController {
             String cableSets = codeOrBlank(accSpecRaw(jsonData, kit, p, 'hm_no_of_cable', 'lm_no_of_cable',
                                  isSegAbove5 ? '' : '1=Single cable'));
     
-            String winchSpec = specOrBlank(accSpecRaw(jsonData, kit, p, 'hm_type_of_winch', 'lm_type_of_winch',
-                                 isSegAbove5 ? '' : 'E=350 kg')).replace(' kg', 'Kg').replace(' KG', 'Kg');
-            String toolSpec  = specOrBlank(accSpecRaw(jsonData, kit, p, 'hm_type_of_power_tool', 'lm_type_of_power_tool',
-                                 isSegAbove5 ? '' : 'G=Motor,3PH'));
-            String ropeSpec  = specOrBlank(accSpecRaw(jsonData, kit, p, 'hm_wire_rope', 'lm_type_of_wire_rope',
-                                 isSegAbove5 ? '' : '5=5mm dia'));
+            String winchSpec = withDrum(withUnit(
+                                 specOrBlank(accSpecRaw(jsonData, kit, p, 'hm_type_of_winch', 'lm_type_of_winch',
+                                 isSegAbove5 ? '' : 'E=350 kg')).replace(' kg', 'Kg').replace(' KG', 'Kg'),
+                                 isSegAbove5 ? accSpecRaw(jsonData, kit, p, 'lm_winch_unit', 'lm_winch_unit', '') : ''),
+                                 isSegAbove5 ? accSpecRaw(jsonData, kit, p, 'lm_winch_drum', 'lm_winch_drum', '') : '');
+            String toolSpec  = withUnit(
+                                 specOrBlank(accSpecRaw(jsonData, kit, p, 'hm_type_of_power_tool', 'lm_type_of_power_tool',
+                                 isSegAbove5 ? '' : 'G=Motor,3PH')),
+                                 isSegAbove5 ? accSpecRaw(jsonData, kit, p, 'lm_power_tool_unit', 'lm_power_tool_unit', '') : '');
+            String ropeSpec  = withUnit(
+                                 specOrBlank(accSpecRaw(jsonData, kit, p, 'hm_wire_rope', 'lm_type_of_wire_rope',
+                                 isSegAbove5 ? '' : '5=5mm dia')),
+                                 isSegAbove5 ? accSpecRaw(jsonData, kit, p, 'lm_wire_rope_unit', 'lm_wire_rope_unit', '') : '');
      
             String  st = '';
             Decimal accUnitPrice = 0;
@@ -1321,7 +1714,7 @@ public class HighMastSOWController {
  
             String descMast =
                 'Supply of ' + mastHeight + ' MTRS '
-                + + (isLCLM ? 'LCLM' : (isSignageMast ? 'SIGNAGE MAST' : (isLatchingMast ? 'LATCHING MAST' : (isCustomLightningMast ? 'CUSTOM LIGHTNING MAST' : 'LIGHTING MAST')))) + ' '   // CLM branch: Faizan (24th July 2026) + ' '   // Reetabrata (15th July 2026) // Signage branch: Reetabrata (16th July 2026)
+                + + (isLCLM ? 'LCLM' : (isSignageMast ? signageMastName() : (isLatchingMast ? 'LATCHING MAST' : (isCustomLightningMast ? 'CUSTOM LIGHTNING MAST' : 'LIGHTING MAST')))) + ' '   // CLM branch: Faizan (24th July 2026) + ' '   // Reetabrata (15th July 2026) // Signage branch: Reetabrata (16th July 2026)
                 + 'FABRICATED AS PER DIMENSION :. '
                 + 'TOP DIA - ' + topDia.intValue() + ' mm, '
                 + 'BOTTOM DIA - ' + lastBotDia.intValue() + ' mm, '
@@ -1335,21 +1728,68 @@ public class HighMastSOWController {
                 + ' nos. of LED Luminaries ' + lumType
                 + ' in ' + weldedArms.intValue() + ' welded arm, '
                 + suspNum + ' suspension Head frame, '
-                + 'L-Stopper (' + suspNum + ' Nos.), Mounting Plates, '
+                + latchDeviceDes
+                + 'L-Stopper , Mounting Plates, '    // updated  'L-Stopper (' + suspNum + ' Nos.)' to 'L-Stopper' for bug UIL-HM-134
                 // Only the arrestor phrase differs for LCLM. Reetabrata (15th July 2026)
                 + (isLCLM ? lclmSpikeClause(p) : 'Lighting Arrestor')
-                + ' and Earthing Spikes (MS GI).'
+                + ' (MS GI).' // updated ' Lighting Arrestor and Earthing Spikes (MS GI)' to 'Lighting Arrestor (MS GI)' for bug UIL-HM-136
                 // Segment Above 5 lets the user add an extra-micron spec and a PU paint note.
                 // Both are galvanising / finish specs rather than separate goods, so they read
                 // as one more sentence of this same paragraph. The helper returns '' when
                 // neither was entered, which leaves this description byte-identical to before
                 // for every quote that does not use them. Reetabrata (15th July 2026)
                 + micronPaintClause(p)
+                + specialDescClause
                 // CUSTOM LIGHTNING MAST ONLY. Guarded by the flag, so for High Mast /
                 // Lighting Mast / LCLM / Signage / Latching this contributes the empty
                 // string and the description above is byte-identical to before.
                 // Faizan (24th July 2026)
                 + (isCustomLightningMast ? buildSpecialAdditionsClause(jsonData, p) : '');
+
+            if(isSignageMast){
+               	Decimal adUnit = decVal(jsonData, p + 'lm_ad_unit_price',  0);
+                String  adDesc = strVal(jsonData, p + 'lm_ad_description', '');
+                String s_a_d = '';
+                System.debug('adUnit --> '+adUnit +'| adDesc --> '+adDesc );
+                if (adUnit > 0 && String.isNotBlank(adDesc)) {
+                    mastUnitPrice += adUnit;
+                    s_a_d += '\u0002_SINGAGE_MAST_ADD_DES\u0002';
+                    singageSpecAdd = adDesc;
+                }
+
+                descMast =
+                'Supply of ' + mastHeight + ' MTRS '
+                + signageMastName() + ' '   // separator - without it the name ran
+                                            // straight into FABRICATED, e.g.
+                                            // "LIGHTNENING MASTFABRICATED".
+                                            // The general branch above already had
+                                            // it. Deepanjan (19th Aug 2026)
+                + 'FABRICATED AS PER DIMENSION :. '
+                + 'TOP DIA - ' + topDia.intValue() + ' mm, '
+                + 'BOTTOM DIA - ' + lastBotDia.intValue() + ' mm, '
+                + 'SECTION - ' + segCount.intValue() + ' '
+                + '(SECTION LENGTH - ' + lenList + 'mm) '
+                + 'THICKNESS - ' + thkList + ' mm. '
+                + 'BASE PLATE - ' + bpOD.intValue() + 'mm x ' + bpThk.intValue() + 'mm, '
+                + 'PCD - ' + pcd.intValue() + 'mm, '
+                + 'with the following items: High Mast sections with base plate & Lighting Arrestor '
+                + s_a_d
+                + micronPaintClause(p);
+            }
+
+
+            // ─── SPECIAL ITEM, 'Show separate in offer' UNTICKED ─── Deepanjan (4th September 2026)
+            // The estimator has already folded the VALUE into lm_{n}_unit_price through the
+            // hidden lm_si_price_add / lm_si_weight_add formulas, so the money is correct - but
+            // the typed ITEM DESCRIPTION was printed nowhere at all. TEXT ONLY here; adding the
+            // rate again would double-charge. This is the same sentence cmStadiumLines has
+            // always printed for the Stadium recipe (its "siHas && !siSep" branch), which is
+            // why Stadium never showed this bug.
+            // No-op for any recipe without lm_si_* keys, and for a ticked item (that one still
+            // prints as its own line below, unchanged).
+            if (siHasRow(jsonData, p) && !showSpecialItemSeparatelyRow(jsonData, p)) {
+                descMast += ' SPECIAL ITEM: ' + specialItemDescriptionRow(jsonData, p) + '.';
+            }
 
             String suffix = getWindSpeedSuffix();
             if (String.isNotBlank(suffix)) {
@@ -1362,24 +1802,59 @@ public class HighMastSOWController {
  
             String descBolt =
                 'Supply of FOUNDATION BOLTS - M ' + boltDia
-                + ' x ' + boltLen.intValue()
+                + ' x ' + boltLen.intValue() +'mm'
                 + ' (' + noOfBolts.intValue() + ' Nos.) with Template and Anchor Plate.';
             if(boltDia == 'N.R.'){
                     descBolt += ' \u0001BOLT_N_R\u0001';
                     //descBolt += ' (NOT REFLECTED ON UI)';
                     //descBolt += '<span style="color:#c00000;font-weight:bold;">( NOT REFLECTED ON UI)</span>';
                 }
-            lineItems.add(buildRow(String.valueOf(slCounter++), descBolt,
-                          boltUnitPrice, gstPct, qty , freight));
+            // Emit only when there is real foundation data - same rule the seg5
+            // Flag Mast row already uses (fndPrice > 0 || fbNo > 0). With the
+            // 24/850/6 defaults gone, an untouched section would otherwise print
+            // "M  x 0 (0 Nos.)" at 0. "Without Foundation" also drops the line.
+            // Deepanjan (20th Aug 2026)
+            // "Without Foundation" no longer drops the line - it states the bolt
+            // spec and marks it out of scope, in red, at rate 0. Deepanjan (21st Aug 2026)
+            if (fdnSuppressed(jsonData, p)) {
+                lineItems.add(buildRow(String.valueOf(slCounter++),
+                              fdnNotInScopeDesc(boltDia, boltLen, noOfBolts, pcd),
+                              0, gstPct, qty, freight));
+            } else if (boltUnitPrice > 0 || noOfBolts > 0) {
+                lineItems.add(buildRow(String.valueOf(slCounter++), descBolt,
+                              boltUnitPrice, gstPct, qty , freight));
+            }
  
             // The accessories line is emitted ONLY when it is actually priced. A zero-rate
             // row used to print anyway, filled with hardcoded default specs.
             //  - Reetabrata (9th July 2026)
-            if (accUnitPrice > 0) {
+                        // Segment Above 5: the RATE is optional, the specification is not. A row that
+            // carries winch / power tool / wire rope / cable specs, or has OPTIONAL ELECTRICAL
+            // ITEMS ticked, but no RATE printed nothing at all - the whole ACCESSORIES PART
+            // sentence vanished (Q 00001324). It now prints at rate 0, exactly as the
+            // Without-Foundation bolt line already does. Deepanjan (9th September 2026)
+            Boolean accSpecOnly = isSegmentAbove5 == true && isSegAbove5 && accUnitPrice <= 0
+                && (String.isNotBlank(winchSpec) || String.isNotBlank(toolSpec)
+                    || String.isNotBlank(ropeSpec) || String.isNotBlank(cableSpec)
+                    || hasOptionalElectricalItems(jsonData, kit, p));
+            
+            if (accUnitPrice > 0 || accSpecOnly) {
+                Boolean hasOptElec = hasOptionalElectricalItems(jsonData, kit, p);
+                String  aolVal = hasOptElec ? optElecVal(jsonData, kit, p, 'lm_type_of_aol') : '';
+                String  controlSwitchVal = hasOptElec ? optElecVal(jsonData, kit, p, 'lm_no_of_aviation_light') : '';
+                String  feederPillarVal  = hasOptElec ? optElecVal(jsonData, kit, p, 'lm_feeder_piller_control') : '';
+                //String descAcc = buildAccessoriesDesc(true, mastHeight, winchSpec, toolSpec,ropeSpec, cableSets, cableSpec);
+                // call overload method
+                System.debug('***line 1700 kit electric '+ hasOptElec + ' ' + aolVal + ' ' + controlSwitchVal + ' ' + feederPillarVal);
                 String descAcc = buildAccessoriesDesc(true, mastHeight, winchSpec, toolSpec,
-                                                      ropeSpec, cableSets, cableSpec);
+                                                      ropeSpec, cableSets, cableSpec,
+                                                      hasOptElec, aolVal, controlSwitchVal, feederPillarVal);
+                                // Rate 0 => the numeric cells read '-' instead of 0.00, exactly like the
+                // Without-Foundation line. Deepanjan (9th September 2026)
+                if (accSpecOnly) descAcc += '\u0001NO_RATE\u0001';
+                
                 lineItems.add(buildRow(String.valueOf(slCounter++), descAcc,
-                              accUnitPrice, gstPct, 1, freight));
+                              accUnitPrice, gstPct, qty, freight));
             }
  
             // Per-row SPECIAL ITEM (27-Jul per-row sections): each mast row now
@@ -1391,12 +1866,16 @@ public class HighMastSOWController {
             if (showSpecialItemSeparatelyRow(jsonData, p)) {
                 lineItems.add(buildRow(String.valueOf(slCounter++),
                               specialItemDescriptionRow(jsonData, p),
-                              specialItemUnitRateRow(jsonData, p), gstPct, 1, freight));
+                              // QTY was hardcoded 1: one Motor priced once, however many masts
+                              // the row carries. It belongs to THIS mast row, so it takes the
+                              // row's own quantity. Deepanjan (4th September 2026)
+                              specialItemUnitRateRow(jsonData, p), gstPct, qty, freight));
             }
 
             System.debug('totalPoleQty --> ' + totalPoleQty);
-            if (totalPoleQty > 0 && (isCustomLightningMast || isSignageMast || isLatchingMast)) {
-                System.debug('isCustomLightningMast --> '+isCustomLightningMast + '| isSignageMast --> '+isSignageMast + ' | isLatchingMast --> '+ isLatchingMast);
+            System.debug('Qty --> ' + qty);
+            if (totalPoleQty > 0 && (isCustomLightningMast || isLatchingMast)) {
+                System.debug('isCustomLightningMast --> '+isCustomLightningMast + ' | isLatchingMast --> '+ isLatchingMast);
                 Decimal adUnit = decVal(jsonData, p + 'lm_ad_unit_price',  0);
                 String  adDesc = strVal(jsonData, p + 'lm_ad_description', '');
 
@@ -1411,7 +1890,7 @@ public class HighMastSOWController {
                         adText += ' - ' + cmNum(adWt) + ' Kg';
                     }*/
                     lineItems.add(buildRow(String.valueOf(slCounter++), adText + '.',
-                                adRate, gstPct, 1, freight));
+                                adRate, gstPct, qty, freight));
                 }
             }
         }
@@ -1419,6 +1898,7 @@ public class HighMastSOWController {
         // SPECIAL ITEMS: one line at the end of the offer, only when ticked. - Reetabrata (9th July 2026)
         // (Legacy quote-level keys only - see the per-row block inside the loop.)
         if (totalPoleQty > 0 && showSpecialItemSeparately(jsonData)) {
+            startGroup();   // quote-level row, own line item. Reetabrata (18th Aug 2026)
             lineItems.add(buildRow(String.valueOf(slCounter++),
                           specialItemDescription(jsonData),
                           specialItemUnitRate(jsonData), gstPct, 1, freight));
@@ -1465,23 +1945,179 @@ public class HighMastSOWController {
         // The lm_lc_* keys are unprefixed (one set per quote), so this also sits outside the
         // per-mast loop. Guarded by isLatchingMast, false for every other mast type, so no
         // existing offer gains a row. Reetabrata (16th July 2026)
-        if (totalPoleQty > 0 && isLatchingMast) {
-            Decimal lcRate = decVal(jsonData, 'lm_lc_rate', 0);
-            if (lcRate > 0) {
-                Decimal lcQty = decVal(jsonData, 'lm_lc_quantity', 1);
-                if (lcQty <= 0) lcQty = 1;
-                lineItems.add(buildRow(String.valueOf(slCounter++), 'Costing of Latching.',
-                              lcRate, gstPct, lcQty, freight));
-            }
-        }
+
+        // Changes for bug UIL-HM-143
+        // if (totalPoleQty > 0 && isLatchingMast) {
+        //     Decimal lcRate = decVal(jsonData, 'lm_lc_rate', 0);
+        //     if (lcRate > 0) {
+        //         Decimal lcQty = decVal(jsonData, 'lm_lc_quantity', 1);
+        //         if (lcQty <= 0) lcQty = 1;
+        //         startGroup();   // quote-level row, own line item. Reetabrata (18th Aug 2026)
+        //         lineItems.add(buildRow(String.valueOf(slCounter++), 'Costing of Latching.',
+        //                       lcRate, gstPct, lcQty, freight));
+        //     }
+        // }
  
         appendFreightRow(gstPct, freight, slCounter, totalPoleQty);
  
         if (lineItems.isEmpty()) {
+            startGroup();   // Reetabrata (18th Aug 2026)
             lineItems.add(buildRow('1',
                 'Supply of LIGHTING MAST (please verify quote configuration).',
                 decVal(jsonData, 'r1_lm_1_unit_price', 0), gstPct, 1, freight));
         }
+    }
+    
+    // method to check option electrical line item selected for kit code - rajeev 26-08
+    // OPTIONAL ELECTRICAL ITEMS on the ROW - Deepanjan (6th September 2026)
+    // rowPfx was accepted but never read. Segment Above 5 keeps the optional electrical
+    // items inside its own accessories section, saved on the row (r{n}_lm_optional_
+    // electrical_items / _type_of_aol / _no_of_aviation_light / _feeder_piller_control),
+    // not in a KIT line - so for every seg5 mast hasOptElec came back false and the offer
+    // printed "(without luminaries, AOL, Control Switch & Feeder Pillar)" while the
+    // customer had ticked them (Q 00001316). KIT is still consulted FIRST, then the row,
+    // so normal Lighting Mast (optional items in the KIT modal) is unchanged; callers
+    // that pass rowPfx = '' are unchanged too.
+    private Boolean hasOptionalElectricalItems(Map<String,Object> m, String kitPfx, String rowPfx) {
+        if (String.isNotBlank(kitPfx) && m.containsKey(kitPfx + 'lm_optional_electrical_items')) {
+            return siBoolVal(m, kitPfx + 'lm_optional_electrical_items');
+        }
+        if (String.isNotBlank(rowPfx) && m.containsKey(rowPfx + 'lm_optional_electrical_items')) {
+            return siBoolVal(m, rowPfx + 'lm_optional_electrical_items');
+        }
+        return false;
+    }
+    
+    private String optElecVal(Map<String,Object> m, String kitPfx, String rowPfx, String key) {
+        if (String.isNotBlank(kitPfx)) {
+            String v = strVal(m, kitPfx + key, '');
+            if (String.isNotBlank(v)) return v;
+        }
+        // the row's own value (Segment Above 5) - Deepanjan (6th September 2026)
+        if (String.isNotBlank(rowPfx)) {
+            String v = strVal(m, rowPfx + key, '');
+            if (String.isNotBlank(v)) return v;
+        }
+        return strVal(m, key, '');
+    }
+    
+        // OPTIONAL ELECTRICAL ITEMS wording for Segment Above 5 (Q 00001316) - Deepanjan (7th September 2026)
+    // Now identical in shape to the KIT branch in buildAccessoriesDesc: picked items LEAD
+    // the clause by name, everything else falls in after "without luminaries", and
+    // luminaries always sits inside the bracket. Deepanjan (11th September 2026)
+    //
+    // FEEDER PILLAR and CONTROL SWITCH both come off the ONE feeder_piller_control
+    // picklist, so its code decides both:
+    //   X...  ("X=NA", "X=Neither fidder piller nor control piller") -> neither supplied
+    //   0...  ("0=No fidder piller needed")                          -> Control Switch only
+    //   any other code                                               -> Feeder Pillar only
+    // AOL is its own field and follows the plain X rule.
+    //
+    //   AOL + feeder picked : " AOL & Feeder Pillar with GI JB (without luminaries, Control Switch)."
+    //   AOL only, code 0    : " AOL & Control Switch with GI JB (without luminaries, Feeder Pillar)."
+    //   AOL only, code X    : " AOL with GI JB (without luminaries, Feeder Pillar & Control Switch)."
+    //   none picked         : " with GI JB (without luminaries, AOL, Feeder Pillar & Control Switch)."
+    private String seg5OptElecClause(String aolValue, String controlSwitchValue, String feederPillarValue) {
+        List<String> leadItems    = new List<String>();
+        List<String> withoutItems = new List<String>{ 'luminaries' };
+
+        if (String.isNotBlank(aolValue) && !aolValue.trim().startsWithIgnoreCase('X')) {
+            leadItems.add('AOL');
+        } else {
+            withoutItems.add('AOL');
+        }
+
+        String fpCode = String.isBlank(feederPillarValue) ? 'X' : feederPillarValue.trim().toUpperCase();
+
+        if (fpCode.startsWith('X')) {
+            withoutItems.add('Feeder Pillar');
+            withoutItems.add('Control Switch');
+        } else if (fpCode.startsWith('0')) {
+            leadItems.add('Control Switch');
+            withoutItems.add('Feeder Pillar');
+        } else {
+            leadItems.add('Feeder Pillar');
+            withoutItems.add('Control Switch');
+        }
+
+        String d = ' ';
+        if (!leadItems.isEmpty()) d += optElecJoin(leadItems) + ' ';
+        d += 'with GI JB (without ' + optElecJoin(withoutItems) + ').';
+        return d;
+    }
+
+    // A selection counts only when it is non-blank and its code is not X (NA) or 0 (none):
+    // "X= NA", "X=NA", "X=Neither fidder piller nor control piller", "0=No fidder piller needed".
+    private Boolean optElecPicked(String v) {
+        if (String.isBlank(v)) return false;
+        String code = v.trim().toUpperCase();
+        return !(code.startsWith('X') || code.startsWith('0'));
+    }
+
+    // "A", "A & B", "A, B & C"
+    private String optElecJoin(List<String> items) {
+        if (items.size() == 1) return items[0];
+        List<String> head = new List<String>(items);
+        String last = head.remove(head.size() - 1);
+        return String.join(head, ', ') + ' & ' + last;
+    }
+
+   	// New buildAccessoriesDesc overload method with optional electric items for consideration.
+   	private String buildAccessoriesDesc(Boolean withSupplyOf, Decimal mastHeight, String winchSpec,
+                                        String toolSpec, String ropeSpec, String cableSets, String cableSpec,
+                                        Boolean hasOptionalElectrical, String aolValue,
+                                        String controlSwitchValue, String feederPillarValue) {
+        String d = (withSupplyOf ? 'Supply of ' : '')
+                 + mastHeight + ' MTR '
+                 + (isLCLM ? 'LCLM' : (isSignageMast ? signageMastName() : (isLatchingMast ? 'LATCHING MAST' : 'LIGHTING MAST'))) + ' ACCESSORIES PART:';   // Reetabrata (15th July 2026) // Signage branch: Reetabrata (16th July 2026)
+        if (String.isNotBlank(winchSpec)) d += ' Double Drum Winch ' + winchSpec;
+        if (String.isNotBlank(toolSpec))  d += ', ' + toolSpec;   // updated 'Power Tool Motor with torque limiter' to 'Motor' for UIL-HM-137
+        if (String.isNotBlank(ropeSpec))  d += ', ' + ropeSpec + ' SS Wire Rope, Manual Operating Handle';
+        if (String.isNotBlank(cableSpec) && String.isNotBlank(cableSets)) {
+            d += ' Trailing Cable (' + cableSets + ' Sets ' + cableSpec + '. EPR PCP Sheathed Round Coated Copper Cable';
+        }
+        if (hasOptionalElectrical == true && isSegmentAbove5 == true) {
+            // Segment Above 5 wording - picked items outside the bracket, the rest inside.
+            // Normal Lighting Mast / Stadium (KIT path) keep the branch below. Q 00001316.
+            // Deepanjan (7th September 2026)
+            d += seg5OptElecClause(aolValue, controlSwitchValue, feederPillarValue);
+        } else                 if (hasOptionalElectrical == true) {
+            // Feeder Pillar and Control Switch both come off the ONE feeder_piller_control
+            // picklist, so its code decides both:
+            //   X... ("X=NA", "X=Neither fidder piller nor control piller") -> neither supplied
+            //   0... ("0=No fidder piller needed")                          -> Control Switch only
+            //   anything else                                              -> Feeder Pillar only
+            // AOL is its own field and follows the plain X rule.
+            // Deepanjan (9th September 2026)
+            List<String> leadItems    = new List<String>();
+            List<String> withoutItems = new List<String>{ 'luminaries' };
+
+            if (String.isNotBlank(aolValue) && !aolValue.trim().startsWithIgnoreCase('X')) {
+                leadItems.add('AOL');
+            } else {
+                withoutItems.add('AOL');
+            }
+
+            String fpCode = String.isBlank(feederPillarValue) ? 'X' : feederPillarValue.trim().toUpperCase();
+
+            if (fpCode.startsWith('X')) {
+                withoutItems.add('Feeder Pillar');
+                withoutItems.add('Control Switch');
+            } else if (fpCode.startsWith('0')) {
+                leadItems.add('Control Switch');
+                withoutItems.add('Feeder Pillar');
+            } else {
+                leadItems.add('Feeder Pillar');
+                withoutItems.add('Control Switch');
+            }
+
+            d += ' ';
+            if (!leadItems.isEmpty()) d += optElecJoin(leadItems) + ' ';
+            d += 'with GI JB (without ' + optElecJoin(withoutItems) + ').';
+        } else {
+            d += ' with GI JB (without luminaries, AOL, Control Switch & Feeder Pillar).';
+        }
+        return d;
     }
  
     // segment length/thickness by physical position (1=top, 2..N-1=middle, N=bottom); override value wins when entered - Reetabrata (8th July 2026)
@@ -1546,8 +2182,9 @@ public class HighMastSOWController {
             Decimal qty = 1;
             Decimal actGst = gstPct; 
             System.debug('inside if chcek block --> ');
+            startPlainGroup();   // numbered, no SUB-TOTAL. Reetabrata (18th Aug 2026)
             lineItems.add(buildRow(String.valueOf(slCounter),
-                'Transportation Charges (' + transportAs + ')', charge, actGst, qty, freight));
+                'Transportation Charges ', charge, actGst, qty, freight));
         } 
     }
  
@@ -1592,6 +2229,33 @@ public class HighMastSOWController {
     // BASE PRICE per kg, as persisted by the estimator (lm_N_base_price = Base_Amount__c).
     // Base_Amount__c is not on the Quote SOQL, so the evaluated value is read back
     // from the saved JSON. Falls back to the foundation, then to segment 1.
+    // Stadium Special Item rate per kg: the sub-mast's own realized rate, exactly what
+    // mrl_swd_display_unit_price / lwc_ladder_cage_unit_price price the mast at
+    // (Stadium carries realization as a PERCENT). base_amount alone has no realization
+    // in it, which is what made the item come out short.
+    //
+    // No mast-type branch here - both callers are gated on isSegmentAbove5, so this is
+    // only ever reached from Segment Above 5. Deepanjan (19th Aug 2026)
+    private Decimal stadiumSiRatePerKg(Map<String,Object> m, String p) {
+        // WAS: base_amount + realization. mrl_realization / lwc_realization are declared
+        // type:"hidden" in segmentGenerator.js and the estimator's save routine skips
+        // every hidden field, so that second term read 0 on every quote and the item came
+        // out at the bare base rate (108 instead of 118 per kg) - the very shortfall the
+        // 19-Aug comment above set out to fix. mrl_amount_realization / lwc_amount_realization
+        // is the same figure (Base_Amount__c + 10), is a visible field, and does persist.
+        // base_amount is kept only as a fallback for a quote saved before that field
+        // existed. Deepanjan (21st Aug 2026)
+        Decimal withRealz = decVal(m, p + 'amount_realization', 0);
+        if (withRealz > 0) return withRealz;
+        // Fallbacks, both of which DO persist: the sub-mast's own base price field, then
+        // the legacy base_amount key. base_amount itself is being hidden in the estimator
+        // (it duplicates BASE MAN RIDING PRICE / LADDER WITH CAGE BASE PRICE on screen),
+        // so it can no longer be the only source. Deepanjan (21st Aug 2026)
+        Decimal basePrice = decVal(m, p == 'mrl_' ? 'mrl_man_riding_base_price'
+                                                  : 'lwc_ladder_cage_base_price', 0);
+        return basePrice > 0 ? basePrice : decVal(m, p + 'base_amount', 0);
+    }
+
     private Decimal specialItemBasePricePerKg(Map<String,Object> m) {
         for (Integer r = 1; r <= 10; r++) {
             String p = 'r' + r + '_';
@@ -1608,9 +2272,17 @@ public class HighMastSOWController {
         return 0;
     }
  
+    // TYPE = Weight prices the item at VALUE kg x the quote's TOTAL PRICE (/KG),
+    // the same rate a segment is priced at. It used to use the BASE PRICE, which is
+    // Base_Amount__c with no realization - on Qno 00001135 that made a 10 kg item
+    // 105 x 10 = 1,050 instead of 110 x 10 = 1,100. Deepanjan (19th Aug 2026)
+    //
+    // Special Items exist only on the Segment Above 5 recipe today; any other recipe
+    // keeps the old base-price rate. TYPE = Price returns the typed value as-is.
     private Decimal specialItemUnitRate(Map<String,Object> m) {
         Decimal val = decVal(m, 'lm_si_value', 0);
         if (strVal(m, 'lm_si_type', '').equalsIgnoreCase('Weight')) {
+            if (isSegmentAbove5) return decVal(m, 'lm_total_price', 0) * val;
             return specialItemBasePricePerKg(m) * val;
         }
         return val;
@@ -1637,6 +2309,13 @@ public class HighMastSOWController {
         return siBoolVal(m, p + key) || siBoolVal(m, key);
     }
 
+    // Does this row carry a Special Item at all (ticked or not)? Companion to
+    // showSpecialItemSeparatelyRow, which answers "and is it shown on its own line".
+    // Deepanjan (4th September 2026)
+    private Boolean siHasRow(Map<String,Object> m, String p) {
+        return String.isNotBlank(strVal(m, p + 'lm_si_type', ''));
+    }
+
     private Boolean showSpecialItemSeparatelyRow(Map<String,Object> m, String p) {
         if (!siBoolVal(m, p + 'lm_si_show_separate')) return false;
         return String.isNotBlank(strVal(m, p + 'lm_si_type', ''));
@@ -1648,6 +2327,13 @@ public class HighMastSOWController {
     private Decimal specialItemUnitRateRow(Map<String,Object> m, String p) {
         Decimal val = decVal(m, p + 'lm_si_value', 0);
         if (strVal(m, p + 'lm_si_type', '').equalsIgnoreCase('Weight')) {
+            // Segment Above 5: VALUE kg x TOTAL PRICE (/KG). The mast type decides
+            // it, full stop - a zero rate means the quote's own TOTAL PRICE is zero
+            // and the item is worth zero, not that some other rate should stand in.
+            // Deepanjan (19th Aug 2026)
+            if (isSegmentAbove5) return rowDec(m, p, 'lm_total_price', 0) * val;
+
+            // every other recipe - old behaviour below, unchanged
             // this row's base price first, then the shared cross-row hunt
             Decimal bp = decVal(m, p + 'lm_fdn_base_price', 0);
             if (bp == 0) {
@@ -1678,6 +2364,46 @@ public class HighMastSOWController {
  
     // Returns the spec after '='. Blank when unset or explicitly not-applicable
     // ('X=NA', '0=NA', 'X'), so the clause is dropped from the description.
+    /* Unit box beside TYPE OF WINCH / POWER TOOL / WIRE ROPE - Deepanjan (21st Aug 2026).
+       Those three are free-text now, so the unit lives in its own disabled box in
+       the UI (lm_winch_unit KG, lm_power_tool_unit HP, lm_wire_rope_unit "mm Dia")
+       and has to be appended here: user types 500 -> offer reads "500 KG".
+       An older quote has no unit key at all and already carries the unit inside its
+       CODE=Description value, so unit comes back blank and its offer text is left
+       byte-identical. X / NA suppression is untouched - specOrBlank still returns
+       '' for those and this returns '' with it, so the whole clause still drops. */
+    private String withUnit(String spec, String unit) {
+        if (String.isBlank(spec)) return '';
+        if (String.isBlank(unit)) return spec;
+        String u = unit.trim();
+        // Already there? Test the unit's FIRST word, so "8mm" is not turned into
+        // "8 mm Dia mm" and "500KG" is left alone.
+        String uHead = u.contains(' ') ? u.substringBefore(' ') : u;
+        if (spec.containsIgnoreCase(uHead)) return spec;
+        // The unit belongs right after the NUMBER, not at the end of the clause:
+        // "500 DGDD" has to read "500 KG DGDD", not "500 DGDD KG".
+        Matcher mNum = Pattern.compile('^\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(.*)$').matcher(spec);
+        if (mNum.matches()) {
+            String num  = mNum.group(1);
+            String rest = mNum.group(2).trim();
+            return String.isBlank(rest) ? num + ' ' + u : num + ' ' + u + ' ' + rest;
+        }
+        return spec + ' ' + u;   // no leading number - just append
+    }
+
+    /* Drum type (SGDD / DGDD) picked from its own box beside TYPE OF WINCH -
+       Deepanjan (21st Aug 2026). Kept separate from withUnit so the unit still
+       lands right after the number and the drum type goes last:
+       "1500" + "KG" + "DGDD" -> "1500 KG DGDD". Blank drum adds nothing, and a
+       drum already present in the typed text is not repeated. */
+    private String withDrum(String spec, String drum) {
+        if (String.isBlank(spec)) return '';
+        if (String.isBlank(drum)) return spec;
+        String d = drum.trim();
+        if (spec.containsIgnoreCase(d)) return spec;
+        return spec + ' ' + d;
+    }
+
     private String specOrBlank(String raw) {
         if (String.isBlank(raw)) return '';
         Boolean hasEq = raw.contains('=');
@@ -1702,27 +2428,52 @@ public class HighMastSOWController {
                                         String toolSpec, String ropeSpec, String cableSets, String cableSpec) {
         String d = (withSupplyOf ? 'Supply of ' : '')
                  + mastHeight + ' MTR '
-                 + (isLCLM ? 'LCLM' : (isSignageMast ? 'SIGNAGE MAST' : (isLatchingMast ? 'LATCHING MAST' : 'LIGHTING MAST'))) + ' ACCESSORIES PART:';   // Reetabrata (15th July 2026) // Signage branch: Reetabrata (16th July 2026)
+                 + (isLCLM ? 'LCLM' : (isSignageMast ? signageMastName() : (isLatchingMast ? 'LATCHING MAST' : 'LIGHTING MAST'))) + ' ACCESSORIES PART:';   // Reetabrata (15th July 2026) // Signage branch: Reetabrata (16th July 2026)
         if (String.isNotBlank(winchSpec)) d += ' Double Drum Winch ' + winchSpec;
-        if (String.isNotBlank(toolSpec))  d += ', Power Tool ' + toolSpec;
+        if (String.isNotBlank(toolSpec))  d += ', ' + toolSpec;   // updated 'Power Tool Motor with torque limiter' to 'Motor' for UIL-HM-137
         if (String.isNotBlank(ropeSpec))  d += ', ' + ropeSpec + ' SS Wire Rope, Manual Operating Handle';
         if (String.isNotBlank(cableSpec) && String.isNotBlank(cableSets)) {
-            d += ' Trailing Cable (' + cableSets + ' Sets ' + cableSpec + '. ERP PCP Round Copper.';
+            d += ' Trailing Cable (' + cableSets + ' Sets ' + cableSpec + '. EPR PCP Sheathed Round Coated Copper Cable.';
         }
         d += ' with GI JB (without luminaries, AOL, Control Switch & Feeder Pillar).';
         return d;
     }
  
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // SIGNAGE MAST - CUSTOM NAME  (Deepanjan, 18th Aug 2026)
+    //
+    // The estimator carries a YES/NO picklist sm_rename and a text sm_rename_value that
+    // only opens on YES - declared exactly like the wind_speed / wind_speed_value pair
+    // that already works in this same Section Logic record. When it is set to YES and a
+    // name is typed, that name prints wherever SIGNAGE MAST
+    // would have printed - description lines, the SUB-TOTAL heading and the weight
+    // sheet title.
+    //
+    // NOTHING else moves: no flag, no builder route, no rate, weight or formula.
+    // isSignageMast stays true, so every calculation runs exactly as it does today
+    // and only the printed words change.
+    //
+    // Not ticked, blank name, or a legacy quote with no sm_rename key at all - all
+    // three return 'SIGNAGE MAST', so existing offers are byte-identical.
+    // ═══════════════════════════════════════════════════════════════════════
+    private String signageMastName() {
+        if (!isSignageMast) return 'SIGNAGE MAST';
+        if (!'YES'.equalsIgnoreCase(strVal(jsonData, 'sm_rename', 'NO'))) return 'SIGNAGE MAST';
+        String nm = strVal(jsonData, 'sm_rename_value', '');
+        return String.isBlank(nm) ? 'SIGNAGE MAST' : nm.trim().toUpperCase();
+    }
+
     private LineItemWrapper buildRow(String slNo, String descriptions,
             Decimal unitRate, Decimal gstPct, Decimal qty, String freight) {
  
-        Decimal rUnitRate = unitRate.setScale(0, RoundingMode.HALF_UP);
-        Decimal gstAmt    = (rUnitRate * gstPct / 100).setScale(0, RoundingMode.HALF_UP);
+        Decimal rUnitRate = unitRate.setScale(2, RoundingMode.HALF_UP);
+        Decimal gstAmt    = (rUnitRate * gstPct / 100).setScale(2, RoundingMode.HALF_UP);
         Decimal unitAmt   = rUnitRate + gstAmt;
-        Decimal total     = (unitAmt * qty).setScale(0, RoundingMode.HALF_UP);
+        Decimal total     = (unitAmt * qty).setScale(2, RoundingMode.HALF_UP);
                 
-                System.debug('*****line 1667 '+qty+' '+ rUnitRate + ' '+ gstAmt + ' ' + unitAmt + ' ' + total);
- 
+       System.debug('***1941 buildRow method '+ rUnitRate + ' ' + gstAmt + ' ' + unitAmt + ' ' + total );
+                 
         LineItemWrapper w = new LineItemWrapper();
         w.slNo           = slNo;
         // Escape ALL descriptions (any mast type) so raw user text is safe under
@@ -1732,6 +2483,16 @@ public class HighMastSOWController {
         d = d.replace('\u0001RED_LED\u0001', ' <span style="color:#c00000;font-weight:bold;">(Without LED Floodlight &amp; aviation lights and feeder pillar panel)</span>');
         d = d.replace('\u0001RED_LED_LWC\u0001', ' <span style="color:#c00000;font-weight:bold;">(Without LED Floodlight &amp; aviation lights and feeder pillar panel &amp; wiring cable)</span>');   // Ladder With Cage variant. Reetabrata (13th July 2026)
         d = d.replace(' \u0001BOLT_N_R\u0001',' <span style="font-weight:bold;"> (NOT REFLECTED ON UI)</span>');
+        // "Without Foundation" out-of-scope sentence - whole line red. Deepanjan (21st Aug 2026)
+        d = d.replace('\u0001FDN_NIS_ON\u0001',  '<span style="color:#c00000;font-weight:bold;">');
+        d = d.replace('\u0001FDN_NIS_OFF\u0001', '</span>');
+        d = d.replace('\u0001BR\u0001', '<br/>');
+                // Marker only - carries no text. Deepanjan (9th September 2026)
+        d = d.replace('\u0001NO_RATE\u0001', '');
+                
+        if(singageSpecAdd != null){
+                d = d.replace('\u0002_SINGAGE_MAST_ADD_DES\u0002','<span style="color: red; font-weight: bold;">' + singageSpecAdd + '</span>');
+            }
         w.description    = d;
         w.unitRate       = formatINR(rUnitRate);
         w.gstPct         = String.valueOf(gstPct.intValue());
@@ -1745,6 +2506,34 @@ public class HighMastSOWController {
         w.gstAmountRaw   = gstAmt;
         w.unitAmountRaw  = unitAmt;
         w.totalAmountRaw = total;
+                
+                // Marker only - carries no text. Deepanjan (9th September 2026)
+                
+                if (descriptions != null && (descriptions.contains('\u0001FDN_NIS_ON\u0001')
+                                             || descriptions.contains('\u0001NO_RATE\u0001'))) {
+                                                 w.unitRateRaw    = 0;
+                                                 w.gstAmountRaw   = 0;
+                                                 w.unitAmountRaw  = 0;
+                                                 w.totalAmountRaw = 0;
+                                                 w.gstPct 		 = '-';
+                                                 w.qty    		 = '-';
+                                                 w.unitRate       = '-';
+                                                 w.gstAmount      = '-';
+                                                 w.unitAmount     = '-';
+                                                 w.totalAmount    = '-';
+                                                 w.freight		  = '-';
+                                             }
+
+        // ANNEXURE GROUPING: while a group is open the slNo handed in above
+        // is replaced by the hierarchical one, which is why none of the
+        // existing call sites had to change. Reetabrata (18th Aug 2026)
+        w.groupNo = curGroup;
+        if (curGroup > 0) {
+            curPart++;
+            w.slNo = curPlain
+                   ? String.valueOf(curGroup)
+                   : String.valueOf(curGroup) + '.' + String.valueOf(curPart);
+        }
         return w;
     }
     
@@ -1762,10 +2551,12 @@ private void buildCustomizedMastLineItems() {
  
     if (isStadiumMast) {
         if (cmBool(jsonData, 'man_riding_lift')) {
+            startGroup();   // MAN RIDING LIFT product. Reetabrata (18th Aug 2026)
             sl = cmStadiumLines(gstPct, freight, sl, 'mrl_');
             totalQty += decVal(jsonData, 'mrl_quantity', 1);
         }
         if (cmBool(jsonData, 'ladder_with_cage')) {
+            startGroup();   // LADDER WITH CAGE product. Reetabrata (18th Aug 2026)
             sl = cmStadiumLines(gstPct, freight, sl, 'lwc_');
             totalQty += decVal(jsonData, 'lwc_quantity', 1);
         }
@@ -1784,6 +2575,7 @@ private void buildCustomizedMastLineItems() {
     appendFreightRow(gstPct, freight, sl, totalQty);
  
     if (lineItems.isEmpty()) {
+        startGroup();   // Reetabrata (18th Aug 2026)
         lineItems.add(buildRow('1',
             'Supply of CUSTOMIZED MAST (please verify quote configuration).',
             0, gstPct, 1, freight));
@@ -1797,12 +2589,14 @@ private Integer cmStadiumLines(Decimal gstPct, String freight, Integer sl, Strin
     if (segCount <= 0) {
         // Mast is empty, but a ticked special item must still appear on its own line
         // (we can't assume the user filled the mast). Absent special item => no-op. Reetabrata (13th July 2026)
-        if (String.isNotBlank(strVal(m, p + 'si_type', '')) && siBoolVal(m, p + 'si_show_separate')) {
+        // Segment Above 5 only - same rule as siHas below. Deepanjan (19th Aug 2026)
+        if (isSegmentAbove5 && String.isNotBlank(strVal(m, p + 'si_type', ''))
+                && siBoolVal(m, p + 'si_show_separate')) {
             String d0 = strVal(m, p + 'si_description', '');
             if (String.isBlank(d0)) d0 = 'Special Item';
             Decimal v0 = decVal(m, p + 'si_value', 0);
             Decimal r0 = strVal(m, p + 'si_type', '').equalsIgnoreCase('Weight')
-                           ? decVal(m, p + 'base_amount', 0) * v0 : v0;
+                           ? stadiumSiRatePerKg(m, p) * v0 : v0;
             lineItems.add(buildRow(String.valueOf(sl++),
                 'Supply of SPECIAL ITEM: ' + d0 + '.', r0, gstPct, 1, freight));
         }
@@ -1819,7 +2613,9 @@ private Integer cmStadiumLines(Decimal gstPct, String freight, Integer sl, Strin
                                         : 'lwc_ladder_cage_weight', 0);
     Decimal qty = decVal(m, p + 'quantity', 1);
     if (qty == 0) qty = 1;
- 
+    
+    segPrice = perPolfrieght ? segPrice + perPolTPCharg : segPrice;
+
     Decimal segHt    = decVal(m, p + 'segment_height',    0);
     Decimal headFrm  = decVal(m, p + 'head_frame_height', 0);
     Decimal mastHt   = decVal(m, p + 'height_of_mast',    0);
@@ -1860,20 +2656,19 @@ private Integer cmStadiumLines(Decimal gstPct, String freight, Integer sl, Strin
         descMast += ', Fixed Lantern carriage suitable to fix ' + cmNum(noOfLum) + ' nos. of Luminaries'
             + (String.isNotBlank(lumType) ? ' (' + lumType : '')
             + (watt > 0 ? ' ' + cmNum(watt) + ' watt' : '')
-            + (String.isNotBlank(lumType) ? ')' : '')
-            + ' asymmetrically';
+            + (String.isNotBlank(lumType) ? ')' : '');
     }
     
     // adding pu-paint/ micron details to main line - 06-Aug
     if (cmBool(m, p + 'is_extra_micron')) {
         String micronVal = strVal(m, p + 'extra_micron', '');
         if (String.isNotBlank(micronVal)) {
-            descMast += '. Extra Micron: ' + micronVal + ' Micron';
+            descMast += ', with ' + micronVal + ' micron';
         }
     }
     if (cmBool(m, p + 'pu_paint')) {
         String puNote = strVal(m, p + 'pu_paint_note', '');
-        descMast += '. PU Paint' + (String.isNotBlank(puNote) ? ' - ' + puNote.trim() : '');
+        descMast += String.isNotBlank(puNote) ? '. PU Paint' + ' - ' + puNote.trim() : '';
     }
 
     String suffix = isMrl ? strVal(m, 'man_riding_wind_speed', '') : strVal(m, 'ladder_cage_wind_speed', '');
@@ -1884,7 +2679,8 @@ private Integer cmStadiumLines(Decimal gstPct, String freight, Integer sl, Strin
     // adding special note description
     if(strVal(m, p + 'special_note', '')!=null){
         String specialNote = strVal(m, p + 'special_note', '');
-        descMast += ' Special Note: ' + specialNote;
+        
+        descMast += String.isNotBlank(specialNote.trim()) ? ' Special Note: ' + specialNote : '';
     }
  
     // Red exclusion clause (Stadium only). Escape the dynamic description, then
@@ -1896,13 +2692,20 @@ private Integer cmStadiumLines(Decimal gstPct, String freight, Integer sl, Strin
     // TICKED -> emitted as its own line after the accessories block. Absent keys => no-op.
     // The Stadium unit price does NOT fold si_price_add, so Apex owns the price here. Reetabrata (13th July 2026)
     String  siType   = strVal(m, p + 'si_type', '');
-    Boolean siHas    = String.isNotBlank(siType);
+    // Special Items are a Segment Above 5 feature: the normal Customized Mast section
+    // logic carries no si_ field at all. Gating siHas on the mast type makes every path
+    // below - folding into the mast line and the separate line - a no-op for any other
+    // recipe, so Stadium quotes outside Segment Above 5 print exactly what they print
+    // today. Deepanjan (19th Aug 2026)
+    Boolean siHas    = isSegmentAbove5 && String.isNotBlank(siType);
     Boolean siSep    = siHas && siBoolVal(m, p + 'si_show_separate');
     String  siDesc   = strVal(m, p + 'si_description', '');
     if (String.isBlank(siDesc)) siDesc = 'Special Item';
     Decimal siVal    = decVal(m, p + 'si_value', 0);
+    // TYPE = Weight prices the item at VALUE kg x the sub-mast's rate; TYPE = Price
+    // returns the typed value as-is. Deepanjan (19th Aug 2026)
     Decimal siRate   = siType.equalsIgnoreCase('Weight')
-                         ? decVal(m, p + 'base_amount', 0) * siVal
+                         ? stadiumSiRatePerKg(m, p) * siVal
                          : siVal;
     if (siHas && !siSep) {
         descMast += ' SPECIAL ITEM: ' + siDesc + '.';
@@ -1918,17 +2721,33 @@ private Integer cmStadiumLines(Decimal gstPct, String freight, Integer sl, Strin
     Decimal fbQty = decVal(m, p + 'fb_quantity', 0);
     if (fbQty <= 0) fbQty = 1;
     String  descBolt = '';
-    if (!strVal(m, p + 'foundation_bolt_type', '').containsIgnoreCase('without')) {
+    String  fbDia = strVal(m, p + 'fb_diameter', '');
+    Decimal fbLen = decVal(m, p + 'fb_length', 0);
+    Decimal fbNo  = decVal(m, p + 'fb_no_of_bolt', 0);
+    // isSegmentAbove5 guard: a Customized Mast Stadium quote outside Segment Above 5
+    // can also carry foundation_bolt_type, and today it prints NOTHING when the user
+    // picks "without". This sentence is a seg5 requirement, so it is scoped to seg5
+    // and every other Stadium quote keeps printing exactly what it prints now.
+    // Deepanjan (21st Aug 2026)
+    if (strVal(m, p + 'foundation_bolt_type', '').containsIgnoreCase('without')) {
+        //if (isSegmentAbove5) {
+        // Without Foundation Bolt: state the spec the mast is suitable for and mark it
+        // out of scope, in red, at rate 0 - the same sentence Lighting Mast and Flag Mast
+        // already print. Stadium was simply dropping the line. Deepanjan (21st Aug 2026)
+        // if without foundation selected - foundation line item will be created with this desc for stadium mast as well
+            lineItems.add(buildRow(String.valueOf(sl++),
+                fdnNotInScopeDesc(fbDia, fbLen, fbNo, bpPcd),
+                0, gstPct, fbQty, freight));
+        //}
+        
+    } else {
         fndPrice = decVal(m, p + 'foundation_unit_price', 0).setScale(2, RoundingMode.HALF_UP);
         Decimal fndWt = decVal(m, p + 'foundation_weight', 0);
-        String  fbDia = strVal(m, p + 'fb_diameter', '');
-        Decimal fbLen = decVal(m, p + 'fb_length', 0);
-        Decimal fbNo  = decVal(m, p + 'fb_no_of_bolt', 0);
         if (fndPrice > 0 || fndWt > 0 || fbNo > 0) {
             // Weight clause removed from the Single Scope description. fndWt is still read
             // above because it gates whether this line is emitted at all. Deepanjan (16th July 2026)
             descBolt = 'Supply of FOUNDATION BOLTS - M' + (String.isBlank(fbDia) ? '0' : fbDia)
-                     + ' x ' + cmNum(fbLen)
+                     + ' x ' + cmNum(fbLen) +'mm'
                      + ' (' + cmNum(fbNo) + ' Nos.) with Template and Anchor Plate'
                      + '.';
             lineItems.add(buildRow(String.valueOf(sl++), descBolt, fndPrice, gstPct, fbQty, freight));
@@ -1945,7 +2764,7 @@ private Integer cmStadiumLines(Decimal gstPct, String freight, Integer sl, Strin
         if (accRate > 0 || String.isNotBlank(accDesc)) {
             String accLine = 'Supply of standard Manrider System'
                 + (String.isNotBlank(accDesc) ? ' - ' + accDesc : '')
-                + ' (common for all ' + cmNum(qty) + ' nos. above mast).';
+                + '.';
             lineItems.add(buildRow(String.valueOf(sl++), accLine, accRate, gstPct, accQty, freight));
         }
     } else {
@@ -1965,34 +2784,96 @@ private Integer cmStadiumLines(Decimal gstPct, String freight, Integer sl, Strin
  
     // ── Special item as its own line (only when 'show separate' is TICKED) ── Reetabrata (13th July 2026)
     if (siSep) {
+        // QTY: the sub-mast's own quantity. UNTICKED already charges siRate once per unit
+        // (it is added into segPrice above, which buildRow multiplies by qty), so a ticked
+        // item priced at qty 1 made the same item cost different money depending only on
+        // that checkbox. Deepanjan (4th September 2026)
         lineItems.add(buildRow(String.valueOf(sl++),
-            'Supply of SPECIAL ITEM: ' + siDesc + '.', siRate, gstPct, 1, freight));
+            'Supply of SPECIAL ITEM: ' + siDesc + '.', siRate, gstPct, qty, freight));
     }
     
     if (isMrl) {
         List<Integer> slHolder = new List<Integer>{ sl };
         addMrlKitAccessoryLine(mastHt, qty, segCount, gstPct, freight, slHolder);
+        // addMrlKitAccessoryLine only fires when the quote carries KIT data. A Segment
+        // Above 5 Stadium quote has none, so its Additional Accessories block never
+        // reached the offer at all. Emit it here, only when the KIT line did not.
+        // Deepanjan (21st Aug 2026)
+        if (isSegmentAbove5 && slHolder[0] == sl) {
+            addStadiumSeg5AccessoryLine(mastHt, qty, gstPct, freight, slHolder);
+        }
         sl = slHolder[0];
     }
     
     return sl;  
 }
+
+// ── Segment Above 5 Stadium: Additional Accessories -> offer line ──
+// The seg5 Stadium recipe keeps TYPE OF WINCH / POWER TOOL / WIRE ROPE and the rate in
+// the quote-level lm_* block (MRL only - the section is gated on man_riding_lift) and
+// prices it with lm_acc_total_rate (rate + realization). Wording is the shared
+// buildAccessoriesDesc, so the line reads exactly like Lighting Mast and Flag Mast, with
+// the unit and drum type appended the same way the seg5 LM path does.
+// Deepanjan (21st Aug 2026)
+private void addStadiumSeg5AccessoryLine(Decimal mastHt, Decimal qty, Decimal gstPct,
+                                         String freight, List<Integer> slHolder) {
+    Decimal accRate = decVal(jsonData, 'lm_acc_total_rate', 0);
+    if (accRate <= 0) accRate = decVal(jsonData, 'lm_acc_rate', 0);
+
+    String winchSpec = withDrum(withUnit(
+                          specOrBlank(strVal(jsonData, 'lm_type_of_winch', ''))
+                              .replace(' kg', 'Kg').replace(' KG', 'Kg'),
+                          strVal(jsonData, 'lm_winch_unit', '')),
+                          strVal(jsonData, 'lm_winch_drum', ''));
+    String toolSpec  = withUnit(specOrBlank(strVal(jsonData, 'lm_type_of_power_tool', '')),
+                                strVal(jsonData, 'lm_power_tool_unit', ''));
+    String ropeSpec  = withUnit(specOrBlank(strVal(jsonData, 'lm_type_of_wire_rope', '')),
+                                strVal(jsonData, 'lm_wire_rope_unit', ''));
+
+    // Nothing typed and nothing priced -> no line, same convention as everywhere else.
+    if (accRate <= 0 && String.isBlank(winchSpec)
+                     && String.isBlank(toolSpec) && String.isBlank(ropeSpec)) return;
+    
+    Boolean hasOptElec       = hasOptionalElectricalItems(jsonData, '', '');
+    String  aolVal           = hasOptElec ? optElecVal(jsonData, '', '', 'lm_type_of_aol') : '';
+    String  controlSwitchVal = hasOptElec ? optElecVal(jsonData, '', '', 'lm_no_of_aviation_light') : '';
+    String  feederPillarVal  = hasOptElec ? optElecVal(jsonData, '', '', 'lm_feeder_piller_control') : '';
+    String descAcc = buildAccessoriesDesc(true, mastHt, winchSpec, toolSpec, ropeSpec, '', '',
+                                          hasOptElec, aolVal, controlSwitchVal, feederPillarVal)
+                         .replace('LIGHTING MAST ACCESSORIES', 'STADIUM MAST ACCESSORIES');
+
+    //String descAcc = buildAccessoriesDesc(true, mastHt, winchSpec, toolSpec, ropeSpec, '', '')
+    //                    .replace('LIGHTING MAST ACCESSORIES', 'STADIUM MAST ACCESSORIES');
+
+    Integer sl = slHolder[0];
+    lineItems.add(buildRow(String.valueOf(sl++), descAcc,
+                  accRate.setScale(2, RoundingMode.HALF_UP), gstPct, qty, freight));
+    slHolder[0] = sl;
+}
 // Flag Mast
 private Integer cmFlagLines(Decimal gstPct, String freight, Integer sl) {
  
     Map<String,Object> m = jsonData;
+    
+        System.debug('***line 2561 transportation_as'+ strVal(jsonData, 'transportation_as', '') + ' ' + strVal(jsonData, 'transportation_charges', '') + freight);
  
     // Flag Mast is now row-driven: the estimator saves one r{n}_ block per mast
     // row using the Lighting Mast shape (fm_ prefix, no L-Ring). One mast line
     // per populated row; the shared sections below are emitted once.
     // Reetabrata (15th July 2026)
     Boolean anyRow = false;
+    Boolean scDone = false;
     for (Integer rowIdx = 1; rowIdx <= 10; rowIdx++) {
         String rPfx = 'r' + rowIdx + '_';
         if (String.isBlank(strVal(m, rPfx + 'fm_height_of_mast', ''))) continue;
         Integer segCount = decVal(m, rPfx + 'fm_no_of_segment', 0).intValue();
         if (segCount <= 0) continue;
         anyRow = true;
+        // Each populated r{n}_ row is one mast the customer ordered, so each one
+        // is its own line item: mast + foundation + PU paint + that row's
+        // accessory and additional grids all land inside it, then a SUB-TOTAL.
+        // Deepanjan (19th Aug 2026)
+        startGroup();
         sl = cmFlagRowLines(m, rPfx, segCount, gstPct, freight, sl);
         // Per-row annexure grids (r{n}_fm_ac_* / r{n}_fm_ad_*) - own rows, one per
         // grid, per mast. Legacy quotes have no r{n}_ grid keys -> both no-op, and
@@ -2000,16 +2881,18 @@ private Integer cmFlagLines(Decimal gstPct, String freight, Integer sl) {
         // shapes, so no line can ever print twice.
         Decimal rowQty = decVal(m, rPfx + 'fm_est_quantity', 1);
         if (rowQty == 0) rowQty = 1;
-        sl = cmFlagRowGridLine(m, rPfx, 'fm_ac_', FM_AC_LABELS, FM_AC_ROWS,
-                               'Supply of FLAG MAST ACCESSORY', rowQty, gstPct, freight, sl);
-        sl = cmFlagRowGridLine(m, rPfx, 'fm_ad_', FM_AD_LABELS, FM_ADD_ROWS,
-                               'Supply of FLAG MAST ADDITIONAL ITEM', rowQty, gstPct, freight, sl);
+                sl = cmFlagRowGridMerged(m, rPfx, rowQty, gstPct, freight, sl, false, !scDone);
+        scDone = true;
     }
     if (!anyRow) return sl;
     
     // -- Aditional and accessory part
+    // Everything below the row loop is quote-level (unprefixed keys), belonging to
+    // no single mast, so each shared section is its own line item.
+    // Deepanjan (19th Aug 2026)
+    startGroup();
     sl = cmFlagPuPaintLine(m, gstPct, freight, sl);
-    sl = cmFlagAccessoryItemLines(m, gstPct, freight, sl);
+    sl = cmFlagAccessoryItemLines(m, gstPct, freight, sl, false);
     sl = cmFlagAdditionalItemLines(m, gstPct, freight, sl);
     // ── Supplementary Costing (single section, unprefixed)
     List<String> supParts = new List<String>();
@@ -2018,6 +2901,7 @@ private Integer cmFlagLines(Decimal gstPct, String freight, Integer sl) {
     Decimal scQty   = decVal(m, 'fm_sc_quantity', 0);
     Decimal scAmt   = decVal(m, 'fm_sc_amount',   0);
     if (String.isNotBlank(scDesc) || scAmt > 0) {
+        startGroup();   // Deepanjan (19th Aug 2026)
         supParts.add(scDesc + (scQty > 0 ? ' - ' + cmNum(scQty) + ' Nos.' : ''));
         supAmt += scAmt;
         lineItems.add(buildRow(String.valueOf(sl++),
@@ -2033,6 +2917,7 @@ private Integer cmFlagLines(Decimal gstPct, String freight, Integer sl) {
     Decimal maQty  = decVal(m, 'fm_ma_quantity', 1);
     if (maQty == 0) maQty = 1;
     if (maRate > 0 || String.isNotBlank(maDesc)) {
+        startGroup();   // Deepanjan (19th Aug 2026)
         lineItems.add(buildRow(String.valueOf(sl++),
             'Supply of FLAG MAST ACCESSORIES'
             + (String.isNotBlank(maDesc) ? ' - ' + maDesc : '')
@@ -2047,6 +2932,7 @@ private Integer cmFlagLines(Decimal gstPct, String freight, Integer sl) {
         Decimal fpQty  = decVal(m, 'fm_fp_quantity', 1);
         if (fpQty == 0) fpQty = 1;
         if (fpRate > 0) {
+            startGroup();   // Deepanjan (19th Aug 2026)
             lineItems.add(buildRow(String.valueOf(sl++),
                 'Supply of FEEDER PILLAR as per standard.', fpRate, gstPct, fpQty, freight));
         }
@@ -2065,7 +2951,9 @@ private Integer cmFlagRowLines(Map<String,Object> m, String rPfx, Integer segCou
     Decimal segWeight = decVal(m, rPfx + 'fm_' + segCount + '_segment_weight', 0);
     Decimal qty       = decVal(m, rPfx + 'fm_est_quantity', 1);
     if (qty == 0) qty = 1;
- 
+    
+    segPrice = perPolfrieght ? segPrice + perPolTPCharg : segPrice;
+
     Decimal mastHt = decVal(m, rPfx + 'fm_height_of_mast', 0);
     // TOP/BOTTOM DIA come from the row's own segment OAF keys
     // (r{n}_fm_{seg}_oaf_top / _oaf_bottom). The unprefixed fm_top_dia /
@@ -2086,7 +2974,8 @@ private Integer cmFlagRowLines(Map<String,Object> m, String rPfx, Integer segCou
  
     // Extra Micron moved to per-row keys; bare keys are the legacy fallback.
     Boolean hasMicron = cmBool(m, rPfx + 'fm_is_extra_micron') || cmBool(m, 'fm_is_extra_micron');
-    String micron = hasMicron ? cmNum(decVal(m, rPfx + 'fm_extra_micron', decVal(m, 'fm_extra_micron', 0))) : '';
+    Decimal micronVal = decVal(m, rPfx + 'fm_extra_micron', decVal(m, 'fm_extra_micron', 0));                              
+    String micron = (hasMicron && micronVal>0) ? cmNum(micronVal) : '';                                   
      
     // PU PAINT and SPECIAL DESCRIPTION are folded INTO the mast line - text into the
     // description, price into the mast unit rate - mirroring the Combined Scope, which
@@ -2096,10 +2985,11 @@ private Integer cmFlagRowLines(Map<String,Object> m, String rPfx, Integer segCou
     // prints via the legacy cmFlagPuPaintLine after the loop.
     Boolean hasPu   = cmBool(m, rPfx + 'fm_pu_paint');
     String  puNote  = hasPu ? strVal(m, rPfx + 'fm_pu_paint_note', '') : '';
-    Decimal puRate  = hasPu ? decVal(m, rPfx + 'fm_pu_paint_value', 0) : 0;   // pre-GST Price Value
+    Decimal puRate  = hasPu ? decVal(m, rPfx + 'fm_pu_paint_unit_price', 0) : 0;   // pre-GST Price Value
 
     Boolean hasSd   = cmBool(m, rPfx + 'fm_is_special_desc');
     String  sdText  = hasSd ? strVal(m, rPfx + 'fm_special_desc_text', '') : '';
+    sdText = String.isNotBlank(sdText.trim())?' SPECIAL : ' + sdText.trim() + '.' : '';                       
     Decimal sdRate  = hasSd
         ? (decVal(m, rPfx + 'fm_special_desc_unitPrice', 0))
               .setScale(2, RoundingMode.HALF_UP)
@@ -2107,6 +2997,7 @@ private Integer cmFlagRowLines(Map<String,Object> m, String rPfx, Integer segCou
 
     if (puRate > 0) segPrice += puRate;
     if (sdRate > 0) segPrice += sdRate;
+                                   
     segPrice = segPrice.setScale(2, RoundingMode.HALF_UP);                               
  
     String descText =
@@ -2120,10 +3011,10 @@ private Integer cmFlagRowLines(Map<String,Object> m, String rPfx, Integer segCou
         + (bpDia > 0 ? ' BASE PLATE - ' + cmNum(bpDia) + ' mm x ' + cmNum(bpThk) + ' mm,' : '')
         + (bpPcd > 0 ? ' PCD - ' + cmNum(bpPcd) + ' mm.' : '')
         // Weight clause removed from the Single Scope description. Deepanjan (16th July 2026)
-        + (String.isNotBlank(micron) ? ' Extra Micron: ' + micron + ' Micron.' : '')
+        + (String.isNotBlank(micron) ? ' with ' + micron + ' micron.' : '')
         + (hasPu && String.isNotBlank(puNote) ? ' PU PAINT - ' + puNote.trim() + '.' : '')
-        + (hasSd && String.isNotBlank(sdText) ? ' SPECIAL DESCRIPTION: ' + sdText.trim() + '.' : '');
-    
+		+ sdText;
+        
     String suffix = getWindSpeedSuffix();
     if (String.isNotBlank(suffix)) {
         descText = descText +' '+suffix;
@@ -2138,15 +3029,21 @@ private Integer cmFlagRowLines(Map<String,Object> m, String rPfx, Integer segCou
     String  fbDia = strVal(m, rPfx + 'fm_fb_diameter', '');
     Decimal fbLen = decVal(m, rPfx + 'fm_fb_length',     0);
     Decimal fbNo  = decVal(m, rPfx + 'fm_fb_no_of_bolt', 0);
-    if (fndPrice > 0 || fndWt > 0 || fbNo > 0) {
+    String fbType = strVal(m, rPfx + 'fm_fdn_bolt_type', '');
+    Decimal fbPcd = decVal(m, rPfx + 'fm_bp_pcd',     0);                          
+                                   
+    if (fbType == 'With Foundation') {
         lineItems.add(buildRow(String.valueOf(sl++),
             // Weight clause removed from the Single Scope description. fndWt is still read
             // above because it gates whether this line is emitted at all. Deepanjan (16th July 2026)
             'Supply of FOUNDATION BOLTS - M' + (String.isBlank(fbDia) ? '0' : fbDia)
-            + ' x ' + cmNum(fbLen)
+            + ' x ' + cmNum(fbLen) + 'mm'
             + ' (' + cmNum(fbNo) + ' Nos.) with Template and Anchor Plate'
             + '.', fndPrice, gstPct, qty, freight));
     }
+                                   else if(fbType == 'Without Foundation'){
+                                       lineItems.add(buildRow(String.valueOf(sl++),fdnNotInScopeDesc(fbDia, fbLen, fbNo, fbPcd),fndPrice, gstPct, qty, freight));
+                                   }                              
                                                                   
     return sl;
 }
@@ -2154,7 +3051,8 @@ private Integer cmFlagRowLines(Map<String,Object> m, String rPfx, Integer segCou
 // method to added accessories seprately for flagMast
 private Integer cmFlagRowGridLine(Map<String,Object> m, String rPfx, String gridPfx,
                                   List<String> labels, Integer rows, String heading,
-                                  Decimal qty, Decimal gstPct, String freight, Integer sl) {
+                                  Decimal qty, Decimal gstPct, String freight, Integer sl,
+                                  Boolean seg5) {
     Decimal grand = decVal(m, rPfx + gridPfx + 'grand_total', 0);
     List<String> parts = new List<String>();
     for (Integer i = 1; i <= rows; i++) {
@@ -2162,15 +3060,98 @@ private Integer cmFlagRowGridLine(Map<String,Object> m, String rPfx, String grid
         Decimal q = decVal(m, p + 'qty', 0);
         if (q <= 0) continue;
         String opt = strVal(m, p + 'option', '');
-        parts.add(labels[i - 1]
-            + (String.isNotBlank(opt) ? ' (' + opt + ')' : '')
-            + ' - ' + cmNum(q) + ' Nos');
+        // seg5 ACCESSORY grid only - new wording. Every other caller keeps the old one.
+        if (seg5 == true && gridPfx == 'fm_ac_') {
+            // No quantity in the seg5 wording at all - his call, 21st Aug 2026.
+            // The row is still skipped when qty is 0 (the guard above), so a blank
+            // row cannot print; only the number stops being shown.
+            parts.add(labels[i - 1] + fmAcSpec(m, p, i));
+        } else {
+            parts.add(labels[i - 1]
+                + (String.isNotBlank(opt) ? ' (' + opt + ')' : ''));
+        }
+        
+       System.debug('**2379 ' + parts + ' ' + p + ' ' + q + ' ' + opt);
+
     }
     if (parts.isEmpty() || grand <= 0) return sl;   // absent r{n}_ keys (legacy quote) -> no-op
-    String mastNo = rPfx.removeStart('r').removeEnd('_');
+    String mastNo = rPfx.removeStart('r').removeEnd('_');                                      
     lineItems.add(buildRow(String.valueOf(sl++),
         heading + ' (Mast ' + mastNo + ') - ' + String.join(parts, ', ') + '.',
         grand.setScale(2, RoundingMode.HALF_UP), gstPct, qty, freight));
+    return sl;
+}
+    
+    
+    // ONE ROW for this mast's ACCESSORY + ADDITIONAL grids. Was two rows (1.3 and 1.4)
+// built by two cmFlagRowGridLine calls. Rate is the sum of the two grand totals at the
+// same quantity, so the money is identical to the rupee - only the presentation merges.
+// Deepanjan (9th September 2026)
+// ONE ROW per mast: ACCESSORIES, ADDITIONAL ITEM and (on the first populated row)
+// SUPPLEMENTARY ITEMS, as three labelled blocks separated by a blank line.
+// Was three separate line items. Deepanjan (9th September 2026)
+// ONE ROW per mast: ACCESSORIES, ADDITIONAL ITEM and (on the first populated row)
+// SUPPLEMENTARY ITEMS, as three labelled blocks separated by a blank line.
+// Was three separate line items. Deepanjan (9th September 2026)
+private Integer cmFlagRowGridMerged(Map<String,Object> m, String rPfx, Decimal qty,
+                                    Decimal gstPct, String freight, Integer sl,
+                                    Boolean seg5, Boolean isFirstRow) {
+    if (qty == null || qty <= 0) qty = 1;
+
+    Decimal acGrand = decVal(m, rPfx + 'fm_ac_grand_total', 0);
+    Decimal adGrand = decVal(m, rPfx + 'fm_ad_grand_total', 0);
+
+    List<String> acParts = new List<String>();
+    for (Integer i = 1; i <= FM_AC_ROWS; i++) {
+        String p = rPfx + 'fm_ac_' + i + '_';
+        Decimal q = decVal(m, p + 'qty', 0);
+        if (q <= 0) continue;
+        String opt = strVal(m, p + 'option', '');
+        acParts.add(seg5 == true
+            ? FM_AC_LABELS[i - 1] + fmAcSpec(m, p, i)
+            : FM_AC_LABELS[i - 1] + (String.isNotBlank(opt) ? ' (' + opt + ')' : ''));
+    }
+
+    List<String> adParts = new List<String>();
+    for (Integer i = 1; i <= FM_ADD_ROWS; i++) {
+        String p = rPfx + 'fm_ad_' + i + '_';
+        if (decVal(m, p + 'qty', 0) <= 0) continue;
+        adParts.add(FM_AD_LABELS[i - 1]);
+    }
+
+    // SUPPLEMENTARY - fm_sc_* is UNPREFIXED, one set per quote, so it prints on the
+    // first populated mast row only. Its amount is divided by this row's quantity
+    // because buildRow multiplies the rate back out: (scAmt / qty) x qty == scAmt,
+    // the same once-per-quote charge its own line used to carry at qty 1.
+    Decimal scAmt  = 0;
+    String  scDesc = '';
+    if (isFirstRow == true) {
+        scDesc = strVal(m, 'fm_sc_description', '');
+        if (String.isNotBlank(scDesc)) scAmt = decVal(m, 'fm_sc_amount', 0);
+    }
+
+    Decimal rate = (acGrand > 0 ? acGrand : 0)
+                 + (adGrand > 0 ? adGrand : 0)
+                 + (scAmt   > 0 ? scAmt / qty : 0);
+
+    List<String> blocks = new List<String>();
+    if (!acParts.isEmpty()) {
+        blocks.add('Supply of FLAG MAST ACCESSORIES - ' + String.join(acParts, ', '));
+    }
+    if (!adParts.isEmpty()) {
+        blocks.add(' Supply of FLAG MAST ADDITIONAL ITEM - ' + String.join(adParts, ', '));
+    }
+    if (String.isNotBlank(scDesc)) {
+        Decimal scQty = decVal(m, 'fm_sc_quantity', 0);
+        blocks.add(' Supply of FLAG MAST SUPPLEMENTARY ITEMS: ' + scDesc
+                   + (scQty > 0 ? ' - ' + cmNum(scQty) + ' Nos.' : ''));
+    }
+
+    if (blocks.isEmpty() || rate <= 0) return sl;   // legacy quote -> no row, as before
+
+    lineItems.add(buildRow(String.valueOf(sl++),
+                  String.join(blocks, '\u0001BR\u0001') + '.',
+                  rate.setScale(2, RoundingMode.HALF_UP), gstPct, qty, freight));
     return sl;
 }
     
@@ -2187,11 +3168,16 @@ private Decimal cmFlagBottomDia(Map<String,Object> m, String rPfx, Integer segCo
  
 // ── Segment slot resolution + primitives (same rules as the other classes)
 private String cmStadiumList(Map<String,Object> m, String p, Integer n, String attr, String sep) {
+    // The list stopped at mid4, so a 7-segment Stadium printed only 5 lengths and 5
+    // thicknesses (top, mid2, mid3, mid4, bottom) - mid5..mid14 were silently dropped.
+    // The estimator offers 6..15 segments, i.e. top + middles 2..n-1 + bottom, so
+    // mid{k} belongs on the list whenever n >= k + 1. Deepanjan (21st Aug 2026)
     List<String> keys = new List<String>();
     keys.add(p + 'top_segment_' + attr);
-    if (n >= 3) keys.add(p + 'middle_segment_' + attr);
-    if (n >= 4) keys.add(p + 'mid3_' + attr);
-    if (n >= 5) keys.add(p + 'mid4_' + attr);
+    if (n >= 3) keys.add(p + 'middle_segment_' + attr);          // middle_segment_ IS mid2
+    for (Integer k = 3; k <= 14; k++) {
+        if (n >= k + 1) keys.add(p + 'mid' + k + '_' + attr);
+    }
     keys.add(p + 'bottom_' + attr);
     return cmJoin(m, keys, sep);
 }
@@ -2283,6 +3269,21 @@ private Boolean cmBool(Map<String,Object> m, String key) {
     return s.equalsIgnoreCase('true') || s == '1';
 }
  
+    
+    // for wording and paisa 
+
+        private String amountInWords(Decimal amt) {
+        if (amt == null) amt = 0;
+        Decimal d     = amt.setScale(2, RoundingMode.HALF_UP);
+        Long    rupee = d.setScale(0, RoundingMode.DOWN).longValue();
+        Integer paise = ((d - rupee) * 100).setScale(0, RoundingMode.HALF_UP).intValue();
+        if (paise >= 100) { rupee += 1; paise = 0; }
+
+        String w = numberToWords(rupee);
+        if (paise == 0) return w;
+        return w.removeEnd(' Only').trim() + ' and '
+             + numberToWords(paise).removeEnd(' Only').trim() + ' Paise Only';
+    }
  
 // LCLM: replaces the 'Lighting Arrestor' phrase with the Lightning Spike (length + weight)
 // followed by the Down Conductor Fixing Arrangement (weight), per the client's mark-up.
@@ -2322,7 +3323,7 @@ private String micronPaintClause(String p) {
     String clause = '';
  
     String micron = rowStr(jsonData, p, 'lm_extra_micron', '');
-    if (String.isNotBlank(micron)) clause += ' Extra Micron - ' + micron.trim() + '.';
+    if (String.isNotBlank(micron)) clause += ' with ' + micron.trim() + ' micron.';
  
     if (rowBool(jsonData, p, 'lm_pu_paint')) {
         clause += ' PU Paint to be provided';
@@ -2430,13 +3431,13 @@ private static Decimal saDec(Map<String,Object> src, String key) {
 // Mirrors cmNum() - whole numbers print without a decimal tail.
 private static String saNum(Decimal d) {
     if (d == null) return '0';
-    if (d == d.setScale(0, RoundingMode.FLOOR)) return String.valueOf(d.longValue());
+    if (d == d.setScale(2, RoundingMode.FLOOR)) return String.valueOf(d.longValue());
     return String.valueOf(d.setScale(2, RoundingMode.HALF_UP));
 }
  
 private String cmNum(Decimal d) {
     if (d == null) return '0';
-    if (d == d.setScale(0, RoundingMode.FLOOR)) return String.valueOf(d.longValue());
+    if (d == d.setScale(2, RoundingMode.FLOOR)) return String.valueOf(d.longValue());
     return String.valueOf(d.setScale(2, RoundingMode.HALF_UP));
 }
     // ═══════════════════════════════════════════════════════════════════════
@@ -2482,8 +3483,18 @@ private void addMrlKitAccessoryLine(Decimal mastHt, Decimal qty, Integer segCoun
                           .replace(' kg', 'Kg').replace(' KG', 'Kg');
     String toolSpec  = specOrBlank(accSpecRaw(jsonData, kit, 'hm_type_of_power_tool', 'lm_type_of_power_tool', 'G=Motor,3PH'));
     String ropeSpec  = specOrBlank(accSpecRaw(jsonData, kit, 'hm_wire_rope', 'lm_type_of_wire_rope', '5=5mm dia'));
- 
-    String descAcc = buildAccessoriesDesc(true, mastHt, winchSpec, toolSpec, ropeSpec, cableSets, cableSpec)
+                                         
+ 	// check kit optional electric details
+ 	Boolean hasOptElec       = hasOptionalElectricalItems(jsonData, kit, '');
+    String  aolVal           = hasOptElec ? optElecVal(jsonData, kit, '', 'lm_type_of_aol') : '';
+    String  controlSwitchVal = hasOptElec ? optElecVal(jsonData, kit, '', 'lm_no_of_aviation_light') : '';
+    String  feederPillarVal  = hasOptElec ? optElecVal(jsonData, kit, '', 'lm_feeder_piller_control') : '';
+                                         
+    //String descAcc = buildAccessoriesDesc(true, mastHt, winchSpec, toolSpec, ropeSpec, cableSets, cableSpec)
+    //                     .replace('LIGHTING MAST ACCESSORIES', 'STADIUM MAST ACCESSORIES');
+    //call overload method
+    String descAcc = buildAccessoriesDesc(true, mastHt, winchSpec, toolSpec, ropeSpec, cableSets, cableSpec,
+                                          hasOptElec, aolVal, controlSwitchVal, feederPillarVal)
                          .replace('LIGHTING MAST ACCESSORIES', 'STADIUM MAST ACCESSORIES');
  
     Integer sl = slHolder[0];
@@ -2491,7 +3502,7 @@ private void addMrlKitAccessoryLine(Decimal mastHt, Decimal qty, Integer segCoun
     slHolder[0] = sl;
 }
     
-    private static final Integer FM_AC_ROWS  = 7;   // fm_ac_{n}_* fixed rows
+    private static final Integer FM_AC_ROWS  = 8;   // fm_ac_{n}_* fixed rows
 private static final Integer FM_ADD_ROWS = 5;   // fm_ad_{n}_* fixed rows
  
 // ═══════════════════════════════════════════════════════════════════════
@@ -2510,30 +3521,80 @@ private static final Integer FM_ADD_ROWS = 5;   // fm_ad_{n}_* fixed rows
 // ═══════════════════════════════════════════════════════════════════════
 private static final List<String> FM_AC_LABELS = new List<String>{
     'Wire Rope', 'Wire rope', 'Winch Gear', 'Motor',
-    'Snap hook', 'SS Accessories & Flag Clamps', 'Counter weight' };
+    'Snap hook', 'SS Accessories & Flag Clamps', 'Counter weight', 'Control Panel' };
  
+
+// ── FLAG MAST ACCESSORY spec text - Segment Above 5 ONLY. Deepanjan (21st Aug 2026)
+//    "Wire Rope (8) - 100 Nos"  ->  "Wire Rope 8 mm - 100"
+//    Brackets gone, the value carries its unit (mm / KG / HP, plus the SGDD/DGDD
+//    drum on Winch Gear), trailing "Nos" dropped. The unit is read from the
+//    estimator's own fm_ac_{n}_unit box and falls back to the fixed row unit, so a
+//    quote saved before that box existed still prints right. Reached only through
+//    the seg5 flag on the three printers below - the single-segment Customized Mast
+//    Flag Mast passes false and its wording is byte-identical to before.
+private static final List<String> FM_AC_UNITS = new List<String>{
+    'mm', 'mm', 'KG', 'HP', '', '', '', '' };
+
+private String fmAcSpec(Map<String,Object> m, String p, Integer i) {
+    String opt = strVal(m, p + 'option', '');
+    if (String.isBlank(opt)) return '';
+    String unit = strVal(m, p + 'unit',
+                  (i >= 1 && i <= FM_AC_UNITS.size()) ? FM_AC_UNITS[i - 1] : '');
+    String gear = strVal(m, p + 'gear', '');
+    String s = ' ' + opt.trim();
+    if (String.isNotBlank(unit)) s += ' ' + unit.trim();
+    if (String.isNotBlank(gear)) s += ' ' + gear.trim();
+    return s;
+}
+
+// PU PAINT for Segment Above 5 Flag Mast - no longer its own line item.
+// Deepanjan (21st Aug 2026). Lighting Mast has always printed PU Paint as a
+// clause inside the mast description (micronPaintClause) and never priced it in
+// the offer - the charge reaches the quote through the estimator's own
+// isUnitPrice line item on lm_pu_paint_unit_price. Flag Mast seg5 uses the same
+// lm_pu_paint* keys, so it now behaves identically: same wording, same row-key-
+// first / bare-key fallback, and no separate offer line.
+private String seg5FlagPuClause(Map<String,Object> m, String p, Boolean allowQuoteLevel) {
+    // Row key first. The QUOTE-LEVEL key (a pre-27-Jul quote that saved a single
+    // unprefixed lm_pu_paint) is honoured on the FIRST mast row only - a blanket
+    // bare-key fallback would repeat the same sentence on all ten rows, where the
+    // old seg5FlagPuPaintLine printed it exactly once. Deepanjan (21st Aug 2026)
+    Boolean rowOn = cmBool(m, p + 'lm_pu_paint');
+    Boolean qOn   = (allowQuoteLevel == true) && cmBool(m, 'lm_pu_paint');
+    if (!rowOn && !qOn) return '';
+    String note = rowOn ? strVal(m, p + 'lm_pu_paint_note', '')
+                        : strVal(m, 'lm_pu_paint_note', '');
+    String c = ' PU Paint to be provided';
+    if (String.isNotBlank(note)) c += ' (' + note.trim() + ')';
+    return c + '.';
+}
+
 private static final List<String> FM_AD_LABELS = new List<String>{
     '32A STD FEEDER PILLAR', 'GI STAND',
     'CONTROL PANEL FOR OPERATE ONLY MOTOR OPERATE',
-    'SMALL LIGHT FEEDER PILLAR WITH STAND', 'Decorative Dom' };
+    'SMALL LIGHT FEEDER PILLAR WITH STAND', 'Decorative Dome' };
  
 private Integer cmFlagAccessoryItemLines(Map<String,Object> m, Decimal gstPct,
-                                         String freight, Integer sl) {
+                                         String freight, Integer sl, Boolean seg5) {
     Decimal rz = 1 + (decVal(m, 'fm_ac_realization', 0) / 100);
  
     for (Integer i = 1; i <= FM_AC_ROWS; i++) {
         String p = 'fm_ac_' + i + '_';
+        
         Decimal q = decVal(m, p + 'qty', 0);
         if (q <= 0) continue;
         Decimal r = decVal(m, p + 'amount', 0) * rz;
  
         String label = FM_AC_LABELS[i - 1];
         String opt   = strVal(m, p + 'option', '');
+                
+        String spec = (seg5 == true)
+            ? fmAcSpec(m, p, i)
+            : (String.isNotBlank(opt) ? ' (' + opt + ')' : '');
         lineItems.add(buildRow(String.valueOf(sl++),
-            'Supply of FLAG MAST ACCESSORY - ' + label
-            + (String.isNotBlank(opt) ? ' (' + opt + ')' : '') + '.',
+            'Supply of FLAG MAST ACCESSORY - ' + label + spec + '.',
             r.setScale(2, RoundingMode.HALF_UP), gstPct, q, freight));
-    }
+    }                             
     return sl;
 }
  
@@ -2546,7 +3607,6 @@ private Integer cmFlagAdditionalItemLines(Map<String,Object> m, Decimal gstPct,
         Decimal q = decVal(m, p + 'qty', 0);
         if (q <= 0) continue;
         Decimal r = decVal(m, p + 'amount', 0) * rz;
- 
         lineItems.add(buildRow(String.valueOf(sl++),
             'Supply of FLAG MAST ADDITIONAL ITEM - ' + FM_AD_LABELS[i - 1] + '.',
             r.setScale(2, RoundingMode.HALF_UP), gstPct, q, freight));
@@ -2595,7 +3655,8 @@ private Integer seg5FlagRowCount() {
  
 private Integer cmSeg5FlagLines(Decimal gstPct, String freight, Integer sl) {
     Map<String,Object> m = jsonData;
- 
+    Boolean puQuoteLevelDone = false;   // quote-level PU Paint prints on one row only
+     
     for (Integer rowIdx = 1; rowIdx <= 10; rowIdx++) {
         String p = 'r' + rowIdx + '_';
  
@@ -2603,6 +3664,12 @@ private Integer cmSeg5FlagLines(Decimal gstPct, String freight, Integer sl) {
         if (mastHeight == 0) continue;
         Decimal segCount = decVal(m, p + 'lm_no_of_segment', 1);
         if (segCount <= 0) continue;
+        // Same rule as cmFlagLines: one populated r{n}_ row = one line item.
+        // Deepanjan (19th Aug 2026)
+        startGroup();
+        //get quantity
+        Decimal rowQty = decVal(m, p + 'lm_quantity', 1);
+        if (rowQty <= 0) rowQty = 1;
  
         // TOP/BOTTOM DIA and the per-segment lists reuse the LM helpers - the
         // row shape is exactly the Lighting Mast shape.
@@ -2624,13 +3691,23 @@ private Integer cmSeg5FlagLines(Decimal gstPct, String freight, Integer sl) {
             mastUnitPrice += decVal(m, p + 'lm_' + s + '_unit_price', 0);
         }
         if (mastUnitPrice == 0) mastUnitPrice = decVal(m, p + 'lm_1_unit_price', 0);
- 
+    
+        mastUnitPrice = perPolfrieght ? mastUnitPrice + perPolTPCharg : mastUnitPrice;
+
+            // PU PAINT is no longer added here. Since 8 Sep 2026 the realized PU Paint rate is
+            // part of lm_{s}_unit_price itself (segmentGenerator.js, same rule as the normal LCLM
+            // blueprint), so the segment sum above already carries it. The 4 Sep Apex fold
+            // charged it a second time and was removed. Deepanjan (8th September 2026)
+
         // Extra Micron is a finish spec - one more sentence of the description.
-        // PU Paint is NOT folded in here; it is priced as its own line below,
-        // matching the estimator's separate "Extra Micron & PU Paint" line.
+        // PU Paint IS folded into the rate now (just above); the sentence below is
+        // unchanged. Deepanjan (4th September 2026)
         String micron = rowBool(m, p, 'lm_is_extra_micron')
-            ? cmNum(rowDec(m, p, 'lm_extra_micron', 0)) : '';
+            ? rowStr(m, p, 'lm_extra_micron', '').trim() : '';
  
+        String puClause = seg5FlagPuClause(m, p, !puQuoteLevelDone);
+        if (String.isNotBlank(puClause) && !cmBool(m, p + 'lm_pu_paint')) puQuoteLevelDone = true;
+
         String descText =
             'Supply of ' + cmNum(mastHeight) + ' MTRS '
             + 'FLAG MAST FABRICATED AS PER DIMENSION: '
@@ -2641,14 +3718,30 @@ private Integer cmSeg5FlagLines(Decimal gstPct, String freight, Integer sl) {
             + 'THICKNESS - '  + thkList + ' mm.'
             + (bpOD > 0 ? ' BASE PLATE - ' + cmNum(bpOD) + ' mm x ' + cmNum(bpThk) + ' mm,' : '')
             + (pcd  > 0 ? ' PCD - ' + cmNum(pcd) + ' mm.' : '')
-            + (String.isNotBlank(micron) ? ' Extra Micron: ' + micron + ' Micron.' : '');
- 
+            + (String.isNotBlank(micron) ? ' with ' + micron + ' micron.' : '')
+            // PU Paint now reads inside the mast description, exactly as Lighting
+            // Mast has always done. Deepanjan (21st Aug 2026)
+            + puClause;
+
+        // ─── SPECIAL ITEM, 'Show separate in offer' UNTICKED ─── Deepanjan (4th September 2026)
+        // The estimator has already folded the VALUE into lm_{n}_unit_price through the
+        // hidden lm_si_price_add / lm_si_weight_add formulas, so the money is correct - but
+        // the typed ITEM DESCRIPTION was printed nowhere at all. TEXT ONLY here; adding the
+        // rate again would double-charge. This is the same sentence cmStadiumLines has
+        // always printed for the Stadium recipe (its "siHas && !siSep" branch), which is
+        // why Stadium never showed this bug.
+        // No-op for any recipe without lm_si_* keys, and for a ticked item (that one still
+        // prints as its own line below, unchanged).
+        if (siHasRow(m, p) && !showSpecialItemSeparatelyRow(m, p)) {
+            descText += ' SPECIAL ITEM: ' + specialItemDescriptionRow(m, p) + '.';
+        }
+
         String suffix = getWindSpeedSuffix();
         if (String.isNotBlank(suffix)) {
             descText = descText + ' ' + suffix;
         }
  
-        lineItems.add(buildRow(String.valueOf(sl++), descText, mastUnitPrice, gstPct, 1, freight));
+        lineItems.add(buildRow(String.valueOf(sl++), descText, mastUnitPrice, gstPct, rowQty, freight));
  
         // FOUNDATION BOLTS - LM key names on this recipe.
         String  fbDia    = strVal(m, p + 'lm_fdn_bolt_dia',    '');
@@ -2656,53 +3749,53 @@ private Integer cmSeg5FlagLines(Decimal gstPct, String freight, Integer sl) {
         Decimal fbNo     = decVal(m, p + 'lm_fdn_no_of_bolt',   0);
         Decimal fndPrice = decVal(m, p + 'lm_fdn_unit_price',   0)
                                .setScale(2, RoundingMode.HALF_UP);
-        if (fndPrice > 0 || fbNo > 0) {
+        // "Without Foundation": the out-of-scope sentence at rate 0, keeping the
+        // typed dia / length / nos. (they are NOT zeroed before the text is built
+        // any more). Deepanjan (21st Aug 2026)
+        if (fdnSuppressed(m, p)) {
+            lineItems.add(buildRow(String.valueOf(sl++),
+                fdnNotInScopeDesc(fbDia, fbLen, fbNo, pcd),
+                0, gstPct, rowQty, freight));
+        } else if (fndPrice > 0 || fbNo > 0) {
             lineItems.add(buildRow(String.valueOf(sl++),
                 'Supply of FOUNDATION BOLTS - M' + (String.isBlank(fbDia) ? '0' : fbDia)
-                + ' x ' + cmNum(fbLen)
+                + ' x ' + cmNum(fbLen) +'mm'
                 + ' (' + cmNum(fbNo) + ' Nos.) with Template and Anchor Plate.',
-                fndPrice, gstPct, 1, freight));
+                fndPrice, gstPct, rowQty, freight));
+        }
+        
+        Boolean scDone = false;   // SUPPLEMENTARY prints on the first populated row only    
+        sl = cmFlagRowGridMerged(m, p, rowQty, gstPct, freight, sl, true, !scDone);
+        scDone = true;
+        
+        // PER-ROW SPECIAL ITEM - Deepanjan (19th Aug 2026)
+        // The Segment Above 5 estimator repeats Special Items per mast row for Flag
+        // Mast exactly as it does for Lighting Mast and LCLM, saving r{n}_lm_si_*.
+        // This builder never read them, so with 'Show separate in offer' ON the item
+        // vanished from the offer altogether: si_weight_add goes to 0, so it is not
+        // in the mast rate either, and no line was printed for it.
+        //
+        // Same three helpers buildHighMastLineItems() uses, so the rule, the wording
+        // and the rate are identical: VALUE kg x TOTAL PRICE (/KG) for TYPE Weight,
+        // the typed amount as-is for TYPE Price. Lands inside THIS row's line item.
+        //
+        // Reached only from cmSeg5FlagLines, which runs for Segment Above 5 Flag Mast
+        // alone, and it is a no-op when the keys are absent - nothing else can see it.
+        if (showSpecialItemSeparatelyRow(m, p)) {
+            lineItems.add(buildRow(String.valueOf(sl++),
+                          specialItemDescriptionRow(m, p),
+                          // QTY: this row's own quantity, not 1. Deepanjan (4th September 2026)
+                          specialItemUnitRateRow(m, p), gstPct, rowQty, freight));
         }
     }
  
     // Once-per-quote sections. The accessory / additional grids save the SAME
     // unprefixed fm_ac_* / fm_ad_* keys as the single-segment Flag Mast, so the
     // existing builders are reused verbatim. PU Paint uses the LM keys here.
-    sl = seg5FlagPuPaintLine(jsonData, gstPct, freight, sl);
-    sl = cmFlagAccessoryItemLines(jsonData, gstPct, freight, sl);
+    // seg5FlagPuPaintLine() removed - PU Paint is a clause on the mast description
+    // now, not a line item of its own. Deepanjan (21st Aug 2026)
+    sl = cmFlagAccessoryItemLines(jsonData, gstPct, freight, sl, true);
     sl = cmFlagAdditionalItemLines(jsonData, gstPct, freight, sl);
-    return sl;
-}
- 
-// PU PAINT for Segment Above 5 Flag Mast - this recipe saves lm_pu_paint /
-// lm_pu_paint_price / lm_pu_paint_note (not the fm_* keys), one set per quote.
-private Integer seg5FlagPuPaintLine(Map<String,Object> m, Decimal gstPct,
-                                    String freight, Integer sl) {
-    // Per-row first (r{n}_lm_pu_paint*, one line per mast row - 27-Jul per-row
-    // sections), then the legacy quote-level keys. A quote only ever has one of
-    // the two shapes, so no line can print twice. Deepanjan (27th July 2026)
-    Boolean anyRow = false;
-    for (Integer r = 1; r <= 10; r++) {
-        String p = 'r' + r + '_';
-        if (!cmBool(m, p + 'lm_pu_paint')) continue;
-        Decimal rowVal = decVal(m, p + 'lm_pu_paint_price', 0);
-        if (rowVal <= 0) continue;
-        anyRow = true;
-        String rowNote = strVal(m, p + 'lm_pu_paint_note', '');
-        lineItems.add(buildRow(String.valueOf(sl++),
-            'Supply of FLAG MAST PU PAINT' + (String.isNotBlank(rowNote) ? ' - ' + rowNote : '') + '.',
-            rowVal.setScale(2, RoundingMode.HALF_UP), gstPct, 1, freight));
-    }
-    if (anyRow) return sl;
- 
-    if (!cmBool(m, 'lm_pu_paint')) return sl;
-    Decimal puVal = decVal(m, 'lm_pu_paint_price', 0);
-    if (puVal <= 0) return sl;
- 
-    String note = strVal(m, 'lm_pu_paint_note', '');
-    lineItems.add(buildRow(String.valueOf(sl++),
-        'Supply of FLAG MAST PU PAINT' + (String.isNotBlank(note) ? ' - ' + note : '') + '.',
-        puVal.setScale(2, RoundingMode.HALF_UP), gstPct, 1, freight));
     return sl;
 }
  
@@ -2722,10 +3815,214 @@ private Integer seg5FlagPuPaintLine(Map<String,Object> m, Decimal gstPct,
         } catch (Exception e) { return def; }
     }
  
+    /* FOUNDATION BOLT TYPE - Deepanjan (20th Aug 2026)
+       "Without Foundation" drops the whole foundation line - description AND
+       rate - exactly as the Customized Mast builder already does with
+       foundation_bolt_type. Any recipe without that picklist leaves the key
+       absent -> '' -> not 'without' -> every existing offer is unchanged. */
+    private Boolean fdnSuppressed(Map<String, Object> m, String p) {
+        return strVal(m, p + 'lm_fdn_bolt_type', '').containsIgnoreCase('without');
+    }
+
+    /* "Without Foundation" wording - Deepanjan (21st Aug 2026)
+       The foundation line used to be dropped entirely. It now prints the bolt
+       spec the mast is SUITABLE for and states that it is not supplied, in red,
+       at rate 0. The whole sentence is red, so it is wrapped in FDN_NIS_ON /
+       FDN_NIS_OFF sentinels that the description escape pass turns into a span -
+       the same trick RED_LED already uses, so the dynamic values still go
+       through the HTML escape first.
+       "PCD <n>mm " is omitted in full when lm_pcd is blank / 0 - his call.
+       Reached only when lm_fdn_bolt_type contains "without", a key that exists
+       on the Segment Above 5 recipes alone, so no other mast type can see it. */
+    // True when the FOUNDATION BOLT DIAMETER picklist is set to N.R. for this pole /
+    // section. Reads exactly the same two keys the description builder reads, so a
+    // group boundary can never disagree with the sentence. Deepanjan (24th Aug 2026)
+    // Which (section, item) sets already carry a Foundation row in the saved list.
+    // Deepanjan (24th Aug 2026)
+    private Set<String> fdnSetsPresent(List<Object> flat) {
+        Set<String> out = new Set<String>();
+        if (flat == null) return out;
+        for (Object o : flat) {
+            // initialised explicitly: Apex is unforgiving about a local read on a path
+            // where the only assignment sits inside a try. Deepanjan (24th Aug 2026)
+            Map<String, Object> line = null;
+            try { line = (Map<String, Object>) o; } catch (Exception e) { continue; }
+            if (line == null) continue;
+            String nm = strVal(line, 'name', '');
+            if (nm.containsIgnoreCase('Foundation')) {
+                out.add(String.valueOf(sectionIndexOf(nm)) + '|' + String.valueOf(itemIndexOf(nm)));
+            }
+        }
+        return out;
+    }
+
+    // Adds the red "Not in our Scope" foundation row for a pole whose FOUNDATION BOLT
+    // DIAMETER is N.R. and that has no Foundation row of its own. Rate 0, so no total
+    // moves. Returns the next Sl counter - unchanged when nothing was added.
+    // Deepanjan (24th Aug 2026)
+    // Which item indices already carry a Foundation row in the saved list (Mid Hinge has
+    // no section suffix in its names, so this keys on the item index alone).
+    // Deepanjan (24th Aug 2026)
+    private Set<String> fdnItemsPresent(List<Object> flat) {
+        Set<String> out = new Set<String>();
+        if (flat == null) return out;
+        for (Object o : flat) {
+            // initialised explicitly: Apex is unforgiving about a local read on a path
+            // where the only assignment sits inside a try. Deepanjan (24th Aug 2026)
+            Map<String, Object> line = null;
+            try { line = (Map<String, Object>) o; } catch (Exception e) { continue; }
+            if (line == null) continue;
+            String nm = strVal(line, 'name', '');
+            if (nm.containsIgnoreCase('Foundation')) out.add(String.valueOf(itemIndexOf(nm)));
+        }
+        return out;
+    }
+
+    // Mid Hinge twin of addFdnNotInScopeRow(). Same rule, different key shape: every Mid
+    // Hinge field lives under c{n}_mhp_. Rate 0, so no total moves. Returns the next Sl
+    // counter - unchanged when nothing was added. Deepanjan (24th Aug 2026)
+    private Integer addFdnNotInScopeRowMhp(String itemName, Set<String> fdnAlreadyThere,
+                                           Decimal poleQty, Decimal gstPct, String freight,
+                                           Integer slCounter) {
+        Integer ix = itemIndexOf(itemName);
+        if (fdnAlreadyThere.contains(String.valueOf(ix))) return slCounter;
+
+        String cp = 'c' + ix + '_mhp_';
+        if (!strVal(jsonData, cp + 'foundation_bolt_diameter', '').equalsIgnoreCase('N.R.')) return slCounter;
+
+        String  nrDia = strVal(jsonData, cp + 'nr_fb_diameter', '');
+        Decimal fbLen = decVal(jsonData, cp + 'foundation_bolt_length', 0);
+        Decimal fbQty = decVal(jsonData, cp + 'bolt_quantity', decVal(jsonData, cp + 'fdn_quantity', 0));
+        Decimal fbPcd = decVal(jsonData, cp + 'pcd', 0);
+
+        // FOUNDATION BOLT DIAMETER defaults to "N.R.", so N.R. alone is not proof the user
+        // meant anything by it - the row is only added when a foundation figure was entered.
+        if (String.isBlank(nrDia) && fbLen <= 0 && fbQty <= 0 && fbPcd <= 0) return slCounter;
+
+        Decimal rowQty = (poleQty == null || poleQty <= 0) ? 1 : poleQty;
+        lineItems.add(buildRow(String.valueOf(slCounter++),
+                      fdnNotInScopeDesc(nrDia, fbLen, fbQty, fbPcd),
+                      0, gstPct, rowQty, freight));
+        return slCounter;
+    }
+
+    // ── BRACKET WORDING ──────────────────────────────────────────────────────
+    // BRACKET TYPE = Customized -> print the CUSTOMIZED DESCRIPTION text instead of the
+    // word "Customized" (e.g. "Channel Bracket"). Blank description keeps "Customized",
+    // exactly as today. Every other type is returned untouched.
+    // Deepanjan (24th Aug 2026)
+    private String bracketLabel(String bracketType, String prefix, String prefixCus) {
+        if (!'Customized'.equalsIgnoreCase(bracketType)) return bracketType;
+        // NOTE: the local is custDesc, not desc - 'desc' is an Apex reserved word (SOQL
+        // ORDER BY ... DESC) and will not compile. Deepanjan (24th Aug 2026)
+        String custDesc = strVal(jsonData, prefix + 'customized_description',
+                          strVal(jsonData, prefixCus + 'customized_description', ''));
+        return String.isNotBlank(custDesc) ? custDesc.trim() : bracketType;
+    }
+
+    // NO. OF ARM is a 1/2/3/4 picklist (it only enables for a Standard bracket) and the
+    // offer must read the word: "Standard bracket with Double arm". Anything else - blank
+    // or a free-text value like "Ring" - comes back untouched. Deepanjan (24th Aug 2026)
+    private String armWord(String typeOfArm) {
+        if (String.isBlank(typeOfArm)) return typeOfArm;
+        String t = typeOfArm.trim();
+        if (t == '1') return 'Single';
+        if (t == '2') return 'Double';
+        if (t == '3') return 'Triple';
+        if (t == '4') return 'Four';
+        return t;
+    }
+
+    private String armNumtoWord(String typeOfArm) {
+        if (String.isBlank(typeOfArm)) return typeOfArm;
+        String t = typeOfArm.trim();
+        if (t == '1') return 'One';
+        if (t == '2') return 'Two';
+        if (t == '3') return 'Three';
+        if (t == '4') return 'Four';
+        return t;
+    }
+
+    private Integer addFdnNotInScopeRow(String itemName, Set<String> fdnAlreadyThere,
+                                        Decimal poleQty, Decimal gstPct, String freight,
+                                        Integer slCounter) {
+        Integer ix  = itemIndexOf(itemName);
+        Integer sec = sectionIndexOf(itemName);
+        if (fdnAlreadyThere.contains(String.valueOf(sec) + '|' + String.valueOf(ix))) return slCounter;
+
+        String prefix    = 'c' + ix + '_s' + sec + '_';
+        String prefixCus = 'c' + ix + '_s' + sec + '_cus_op_';
+        if (!fdnIsNotInScope(prefix, prefixCus)) return slCounter;
+
+        String fbDiaRaw = strVal(jsonData, prefix + 'nr_fb_diameter',
+                          strVal(jsonData, prefixCus + 'nr_fb_diameter', ''));
+        Decimal fbLen   = decVal(jsonData, prefix + 'foundation_bolt_length',
+                          decVal(jsonData, prefixCus + 'foundation_bolt_length', 0));
+        Decimal fbQty   = fdnNisQty(prefix, prefixCus, 0);
+        Decimal fbPcd   = decVal(jsonData, prefix + 'pcd',
+                          decVal(jsonData, prefixCus + 'pcd', 0));
+
+        Decimal rowQty = (poleQty == null || poleQty <= 0) ? 1 : poleQty;
+        lineItems.add(buildRow(String.valueOf(slCounter++),
+                      fdnNotInScopeDesc(fbDiaRaw, fbLen, fbQty, fbPcd),
+                      0, gstPct, rowQty, freight));
+        return slCounter;
+    }
+
+    // Nos. for the out-of-scope sentence: BOLT QUANTITY first, then FOUNDATION
+    // QUANTITY, then whatever the caller already resolved. Deepanjan (24th Aug 2026)
+    private Decimal fdnNisQty(String prefix, String prefixCus, Decimal fallback) {
+        Decimal q = decVal(jsonData, prefix + 'bolt_quantity',
+                    decVal(jsonData, prefixCus + 'bolt_quantity',
+                    decVal(jsonData, prefix + 'fdn_quantity',
+                    decVal(jsonData, prefixCus + 'fdn_quantity', 0))));
+        return q > 0 ? q : (fallback == null ? 0 : fallback);
+    }
+
+    private Boolean fdnIsNotInScope(String prefix, String prefixCus) {
+        return strVal(jsonData, prefix + 'foundation_bolt_diameter',
+               strVal(jsonData, prefixCus + 'foundation_bolt_diameter', '')).equalsIgnoreCase('N.R.');
+    }
+
+    private String fdnNotInScopeDesc(String fbDia, Decimal fbLen, Decimal fbNo, Decimal pcd) {
+        // Every part is dropped when it is blank / 0, same rule PCD follows, and the
+        // separator goes with the part it belongs to - so no stray " x ", no leading
+        // space and no dangling comma. Deepanjan (21st Aug 2026)
+        List<String> dims = new List<String>();
+        // '0' is what the callers substitute for a blank diameter, so it is treated as
+        // blank here too - otherwise an untouched foundation printed "dia. M0".
+        // A real bolt diameter is never 0. Deepanjan (24th Aug 2026)
+        // Add Dia with conditional "J Type " prefix
+        if (String.isNotBlank(fbDia) && !fbDia.trim().equals('0')) {
+            dims.add(('Octagonal Pole'.equalsIgnoreCase(typeOfMast) ? 'J Type Bolts M' : 'M') + fbDia.trim());
+        }
+        if (fbLen != null && fbLen > 0)          dims.add(cmNum(fbLen) + 'mm');
+        String spec = String.join(dims, ' x ');
+        if (fbNo != null && fbNo > 0) {
+            spec += (String.isBlank(spec) ? '' : ' ') + '(' + cmNum(fbNo) + 'nos.)';
+        }
+        if (pcd != null && pcd > 0) {
+            spec += (String.isBlank(spec) ? '' : ', ') + 'PCD ' + cmNum(pcd) + 'mm';
+        }
+        return '\u0001FDN_NIS_ON\u0001'
+             + 'Suitable for foundation bolt dia.'
+             + (String.isBlank(spec) ? '' : ' ' + spec)
+             + ' Not in our Scope'
+             + '\u0001FDN_NIS_OFF\u0001';
+    }
+
     private String strVal(Map<String, Object> m, String key, String def) {
         if (!m.containsKey(key) || m.get(key) == null) return def;
         String v = String.valueOf(m.get(key)).trim();
         return String.isNotBlank(v) ? v : def;
+    }
+    
+    private Boolean boolVal(Map<String, Object> data, String key, Boolean defaultVal) {
+        if (data == null || !data.containsKey(key) || data.get(key) == null) return defaultVal;
+        Object v = data.get(key);
+        if (v instanceof Boolean) return (Boolean) v;
+        String s = String.valueOf(v).trim();
+        return s.equalsIgnoreCase('true') || s == '1';
     }
  
     private String afterEq(String raw, String fallback) {
@@ -2733,7 +4030,7 @@ private Integer seg5FlagPuPaintLine(Map<String,Object> m, Decimal gstPct,
         return raw.contains('=') ? raw.substringAfter('=').trim() : raw.trim();
     }
  
-    private String buildAddress(Account a) {
+    /*private String buildAddress(Account a) {
         if (a == null) return '';
         List<String> parts = new List<String>();
         if (String.isNotBlank(a.BillingStreet))     parts.add(a.BillingStreet);
@@ -2741,20 +4038,54 @@ private Integer seg5FlagPuPaintLine(Map<String,Object> m, Decimal gstPct,
         if (String.isNotBlank(a.BillingState))      parts.add(a.BillingState);
         if (String.isNotBlank(a.BillingPostalCode)) parts.add(a.BillingPostalCode);
         return String.join(parts, ', ');
+    }*/
+    
+    private String buildAddress(Map<String,Object> jsonData, String prefix) {
+        if (jsonData == null) return '';
+        String destination = '';
+        List<String> addressParts = new List<String>();
+        List<String> fieldSuffixes = new List<String>{'street', 'city', 'state', 'zip', 'country'};
+
+        for (String suffix : fieldSuffixes) {
+            Object valObj = jsonData.get(prefix + suffix);
+            if (valObj != null) {
+                String val = String.valueOf(valObj).trim();
+                if (String.isNotBlank(val) && !val.equalsIgnoreCase('Not Found') && !val.equalsIgnoreCase('null')) {
+                    addressParts.add(val);
+                }
+            }
+        }
+        destination = String.join(addressParts, ', ');
+
+        return String.isNotBlank(destination) ? ' ' + destination : '';
     }
  
-    private String formatINR(Decimal val) {
-        if (val == null) return '0';
-        Long v = val.longValue();
-        String s = String.valueOf(v);
-        if (s.length() <= 3) return s;
-        String result    = s.substring(s.length() - 3);
-        String remaining = s.substring(0, s.length() - 3);
-        while (remaining.length() > 2) {
-            result    = remaining.substring(remaining.length() - 2) + ',' + result;
-            remaining = remaining.substring(0, remaining.length() - 2);
+        private String formatINR(Decimal val) {
+        if (val == null) return '0.00';
+        Decimal d   = val.setScale(2, RoundingMode.HALF_UP);
+        Boolean neg = d < 0;
+        d = d.abs();
+
+        Long    whole = d.setScale(2, RoundingMode.DOWN).longValue();
+        Integer paise = ((d - whole) * 100).setScale(2, RoundingMode.HALF_UP).intValue();
+        if (paise >= 100) { whole += 1; paise = 0; }   // guards 99.999 -> 100.00
+
+        String s = String.valueOf(whole);
+        String grouped;
+        if (s.length() <= 3) {
+            grouped = s;
+        } else {
+            String result    = s.substring(s.length() - 3);
+            String remaining = s.substring(0, s.length() - 3);
+            while (remaining.length() > 2) {
+                result    = remaining.substring(remaining.length() - 2) + ',' + result;
+                remaining = remaining.substring(0, remaining.length() - 2);
+            }
+            grouped = remaining + ',' + result;
         }
-        return remaining + ',' + result;
+
+        String pStr = (paise < 10 ? '0' : '') + String.valueOf(paise);
+        return (neg ? '-' : '') + grouped + '.' + pStr;
     }
  
     private String numberToWords(Long num) {
@@ -2902,8 +4233,212 @@ private Integer seg5FlagPuPaintLine(Map<String,Object> m, Decimal gstPct,
         return '';
     }
 
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ANNEXURE - A LINE ITEM GROUPING HELPERS - Reetabrata (18th Aug 2026)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Opens a new line item. Every buildRow() after this lands inside it.
+    private void startGroup() {
+        curGroup++;
+        curPart  = 0;
+        curPlain = false;
+    }
+
+    // Opens a group that carries a whole number and no SUB-TOTAL row
+    // (Transportation Charges - the same rule the Combined scope uses).
+    private void startPlainGroup() {
+        curGroup++;
+        curPart  = 0;
+        curPlain = true;
+        if (!SUBTOTAL_ON_FREIGHT_GROUP) plainGroups.add(curGroup);
+    }
+
+    // _Final_Apex_Lines / _Saved_Table_Rows are FLAT - the only thing that says
+    // which product a row belongs to is the "(Item n)" already embedded in the
+    // saved name, which the description builders in this class already parse.
+    // A new n opens a new line item; a freight row opens a plain group.
+    // ── FLAT SAVED LIST -> ONE SET PER POLE ──────────────────────────────────
+    // _Final_Apex_Lines / _Saved_Table_Rows come back in the order the estimator
+    // wrote them, which for Custom Lighting Pole is EVERY pole's segment first and
+    // then every pole's bracket:
+    //     Segment (Item 1), Segment (Item 2), Segment (Item 3),
+    //     Bracket (Item 1), Bracket (Item 2), Bracket (Item 3)
+    // markFlatGroup() opens a new line item whenever the (section, item) key
+    // changes, so that order produced SIX groups - 1.1, 2.1, 3.1, 4.1, 5.1, 6.1 -
+    // each with its own SUB-TOTAL row. It has to read as one set per pole:
+    //     Item 1: its segment, then its bracket  -> 1.1, 1.2, one SUB-TOTAL
+    //     Item 2: ...                            -> 2.1, ...
+    // This ONLY regroups: rows are bucketed by (section, item), buckets come out in
+    // first-appearance order, and the order INSIDE a bucket is left exactly as it
+    // was saved - no row is re-sorted by kind, dropped or merged. Freight rows and
+    // anything that is not a Map keep their own position by getting a bucket of
+    // their own, so a payload that was already set-by-set comes back byte-identical
+    // and every other department is untouched. If the rebuilt list ever came out a
+    // different length the original is returned. Deepanjan (24th Aug 2026)
+    private List<Object> orderFlatLinesByItem(List<Object> flat) {
+        if (flat == null || flat.size() < 2) return flat;
+        List<String>              keyOrder = new List<String>();
+        Map<String, List<Object>> buckets  = new Map<String, List<Object>>();
+        Integer loneSeq = 0;
+
+        for (Object o : flat) {
+            String key;
+            Map<String, Object> line = null;
+            try { line = (Map<String, Object>) o; } catch (Exception e) { line = null; }
+            if (line == null) {
+                key = 'X|' + String.valueOf(loneSeq++);          // keeps its place
+            } else {
+                String nm = strVal(line, 'name', '');
+                key = isFreightLine(nm)
+                        ? 'F|' + String.valueOf(loneSeq++)       // keeps its place
+                        : String.valueOf(sectionIndexOf(nm)) + '|' + String.valueOf(itemIndexOf(nm));
+            }
+            if (!buckets.containsKey(key)) {
+                buckets.put(key, new List<Object>());
+                keyOrder.add(key);
+            }
+            buckets.get(key).add(o);
+        }
+
+        List<Object> ordered = new List<Object>();
+        for (String k : keyOrder) ordered.addAll(buckets.get(k));
+        return ordered.size() == flat.size() ? ordered : flat;   // never lose a row
+    }
+
+    private void markFlatGroup(String itemName) {
+        if (isFreightLine(itemName)) {
+            startPlainGroup();
+            lastFlatItem    = -1;
+            lastFlatSection = -1;
+            return;
+        }
+        Integer ix = itemIndexOf(itemName);
+        // Custom Lighting Pole saves BOTH pole designs under "(Item 1)" and tells
+        // them apart only by the section suffix ("Segment - 1 ..." vs "- 2 ..."),
+        // so item index alone kept all six rows in one group: 1.1 ... 1.6 with a
+        // single SUB-TOTAL. The section index is now part of the key. Any payload
+        // where the section never varies gets sec = 1 throughout and behaves
+        // exactly as before. Deepanjan (20th Aug 2026)
+        Integer sec = sectionIndexOf(itemName);
+        if (curGroup == 0 || ix != lastFlatItem || sec != lastFlatSection) {
+            startGroup();
+            lastFlatItem    = ix;
+            lastFlatSection = sec;
+        }
+    }
+
+    // Same rule the description builders already use to pick the c{n}_s{sec}_
+    // prefix (Pattern '-\\s*(\\d+)\\s*(?:Pole Details|\\(Item)'), so a group boundary
+    // can never disagree with the description it produces. Names without that
+    // shape return 1, exactly as before. Deepanjan (20th Aug 2026)
+    private Integer sectionIndexOf(String itemName) {
+        if (String.isBlank(itemName)) return 1;
+        Integer secIdx = 1;
+        Matcher mSec = Pattern.compile('-\\s*(\\d+)\\s*(?:Pole Details|\\(Item)').matcher(itemName);
+        if (mSec.find()) {
+            try { secIdx = Integer.valueOf(mSec.group(1)); } catch (Exception ex) { secIdx = 1; }
+        }
+        if (secIdx < 1 || secIdx > 2) secIdx = 1;
+        return secIdx;
+    }
+
+    private Integer itemIndexOf(String itemName) {
+        if (String.isBlank(itemName)) return 1;
+        Matcher mIx = Pattern.compile('\\(Item\\s*(\\d+)\\)').matcher(itemName);
+        if (mIx.find()) {
+            try { return Integer.valueOf(mIx.group(1)); } catch (Exception ex) { return 1; }
+        }
+        return 1;
+    }
+
+    // Slices lineItems into line items WITHOUT reordering or dropping anything.
+    // Rows that were never marked (groupNo 0) keep their original number and
+    // get no SUB-TOTAL, so an unmarked path can never lose a row.
+    private void buildLineGroups() {
+        lineGroups = new List<LineGroupWrapper>();
+        if (lineItems == null || lineItems.isEmpty()) return;
+
+        Integer prevNo = null;
+        LineGroupWrapper g = null;
+
+        for (LineItemWrapper w : lineItems) {
+            Integer gNo = (w.groupNo == null ? 0 : w.groupNo);
+            if (g == null || gNo != prevNo) {
+                g = new LineGroupWrapper();
+                g.groupNo      = gNo;
+                g.rows         = new List<LineItemWrapper>();
+                g.showSubTotal = (gNo > 0 && !plainGroups.contains(gNo));
+                lineGroups.add(g);
+                prevNo = gNo;
+            }
+            g.rows.add(w);
+        }
+
+        // Renumber by appearance. A builder is free to open a group that then
+        // emits nothing (a shared section whose keys are all empty, for example);
+        // that group never reaches lineGroups, but it has already consumed a
+        // number, which would make the printed Sl. No. jump - 1, 2, then 4. So the
+        // number a row actually prints is decided here, once, from the groups that
+        // really exist. Deepanjan (19th Aug 2026)
+        Integer shown = 0;
+        for (LineGroupWrapper grp : lineGroups) {
+            if (grp.groupNo == null || grp.groupNo <= 0) continue;   // unmarked rows keep their own number
+            Boolean plain = plainGroups.contains(grp.groupNo);
+            shown++;
+            grp.groupNo = shown;
+            Integer part = 0;
+            for (LineItemWrapper w : grp.rows) {
+                part++;
+                w.groupNo = shown;
+                w.slNo    = plain ? String.valueOf(shown)
+                                  : String.valueOf(shown) + '.' + String.valueOf(part);
+            }
+        }
+
+        for (LineGroupWrapper grp : lineGroups) {
+            fillGroupTotals(grp);
+        }
+    }
+
+    // The SUB-TOTAL row spans Sl No. .. Qty, so the ONLY figure printed is the
+    // Total Amount: this line item's total including GST, i.e. the plain sum of
+    // the Total Amount cells above it. Adding the SUB-TOTALs therefore lands
+    // exactly on the Total row. Deepanjan (18th Aug 2026)
+    //
+    // The other three are still filled, weighted the same way, in case those
+    // columns are ever wanted back on the row - they stay consistent with each
+    // other (Unit Rate + GST Amount = Unit Amount = Total Amount).
+    private void fillGroupTotals(LineGroupWrapper g) {
+        Decimal sumUR = 0, sumGST = 0, sumUnit = 0, sumTotal = 0;
+        for (LineItemWrapper w : g.rows) {
+            Decimal q = (w.qtyRaw == null ? 1 : w.qtyRaw);
+            sumUR    += w.unitRateRaw.setScale(2, RoundingMode.HALF_UP) * q;
+            sumGST   += w.gstAmountRaw.setScale(2, RoundingMode.HALF_UP)  * q;
+            sumUnit  += w.unitAmountRaw.setScale(2, RoundingMode.HALF_UP) * q;
+            sumTotal += w.totalAmountRaw.setScale(2, RoundingMode.HALF_UP);
+        }
+        g.subTotalUnitRate = formatINR(sumUR);
+        g.subTotalGST      = formatINR(sumGST);
+        g.subTotalUnit     = formatINR(sumUnit);
+        g.subTotalAmount   = formatINR(sumTotal);
+    }
+
+    // One line item and its own SUB-TOTAL.
+    public class LineGroupWrapper {
+        public Integer groupNo                      { get; set; }
+        public List<LineItemWrapper> rows           { get; set; }
+        public Boolean showSubTotal                 { get; set; }
+        public String  subTotalUnitRate             { get; set; }
+        public String  subTotalGST                  { get; set; }
+        public String  subTotalUnit                 { get; set; }
+        public String  subTotalAmount               { get; set; }
+    }
+
     public class LineItemWrapper {
         public String  slNo           { get; set; }
+        // Which line item this row belongs to. Reetabrata (18th Aug 2026)
+        public Integer groupNo        { get; set; }
         public String  description    { get; set; }
         public String  unitRate       { get; set; }
         public String  gstPct         { get; set; }

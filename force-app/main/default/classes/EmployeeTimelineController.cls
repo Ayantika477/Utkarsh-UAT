@@ -11,6 +11,8 @@ public class EmployeeTimelineController {
         @AuraEnabled public Boolean isCheckout;
         @AuraEnabled public String visitType;
         @AuraEnabled public String customerType;
+        @AuraEnabled public String customerCategory;
+        @AuraEnabled public Datetime loggedAt;
         @AuraEnabled public Datetime loggedOutAt;
         @AuraEnabled public String mom;
         @AuraEnabled public String visitOutcome;
@@ -20,6 +22,7 @@ public class EmployeeTimelineController {
         @AuraEnabled public Boolean is100mOutside;
         @AuraEnabled public Decimal latitude;
         @AuraEnabled public Decimal longitude;
+        @AuraEnabled public String nodeDistance;
         @AuraEnabled public List<Map<String, String>> files;
     }
 
@@ -47,6 +50,8 @@ public class EmployeeTimelineController {
         @AuraEnabled public String accountName;
         @AuraEnabled public Id opportunityId;
         @AuraEnabled public String opportunityName;
+        @AuraEnabled public Boolean isCancelled;
+        @AuraEnabled public String cancelReason;
     }
 
     // ---------------- TIMELINE: GET ----------------
@@ -58,75 +63,51 @@ public class EmployeeTimelineController {
             return new List<TimelineItemDTO>();
         }
         if (limitSize == null || limitSize <= 0) {
-            limitSize = 20;
+            limitSize = 100;
         }
 
-        // All of today's punches for this employee/user (visible whether Day In or Day Out)
+        // Visits belong to the open Day In session, not calendar-today.
+        // If Day In started two days ago and Day Out has not happened, the board
+        // must still show those check-in/out cards (and new visits linked to that session).
         String idPrefix = String.valueOf(employeeId).substring(0, 3);
         String employeeIdPrefix = System.Label.Employee_Id;
-        Date todayVal = Date.today();
-        Datetime dayStart = Datetime.newInstance(todayVal, Time.newInstance(0, 0, 0, 0));
-        Datetime dayEnd = dayStart.addDays(1);
+        Boolean isUserId = (idPrefix == employeeIdPrefix);
+        Datetime sessionStart = resolveTimelineWindowStart(employeeId, isUserId);
+        Datetime sessionEnd = Datetime.newInstance(Date.today().addDays(1), Time.newInstance(0, 0, 0, 0));
 
         List<Punch_Record__c> punches;
-        if (idPrefix == employeeIdPrefix) { // User ID prefix
-            punches = [
-                SELECT Id
-                FROM Punch_Record__c
-                WHERE User__c = :employeeId
-                  AND Is_WFH_Request__c != true
-                  AND Is_WFO_Request__c != true
-                  AND Punch_Time__c >= :dayStart
-                  AND Punch_Time__c < :dayEnd
-            ];
+        if (isUserId) { // User ID prefix
+            punches = [SELECT Id FROM Punch_Record__c WHERE User__c = :employeeId AND Is_WFH_Request__c != true AND Is_WFO_Request__c != true AND Punch_Time__c >= :sessionStart AND Punch_Time__c < :sessionEnd];
         } else {
-            punches = [
-                SELECT Id
-                FROM Punch_Record__c
-                WHERE Employee__c = :employeeId
-                  AND Is_WFH_Request__c != true
-                  AND Is_WFO_Request__c != true
-                  AND Punch_Time__c >= :dayStart
-                  AND Punch_Time__c < :dayEnd
-            ];
+            punches = [SELECT Id FROM Punch_Record__c WHERE Employee__c = :employeeId AND Is_WFH_Request__c != true AND Is_WFO_Request__c != true AND Punch_Time__c >= :sessionStart AND Punch_Time__c < :sessionEnd];
         }
-        
-        if (punches.isEmpty()) {
-            return new List<TimelineItemDTO>();
-        }
+
         Set<Id> punchIds = new Set<Id>();
         for (Punch_Record__c p : punches) {
             punchIds.add(p.Id);
         }
 
-        // Task logs under today's punches (exclude pure schedule templates)
+        // Active mode punch (e.g. Market Visit from a prior calendar day) must be included
+        // even if Punch_Time falls outside a fallback "today" window.
+        if (isUserId) {
+            List<User_Punch_State__c> states = [SELECT Punch_In_Record__c FROM User_Punch_State__c WHERE User__c = :employeeId LIMIT 1];
+            if (!states.isEmpty() && states[0].Punch_In_Record__c != null) {
+                punchIds.add(states[0].Punch_In_Record__c);
+            }
+        }
+
+        if (punchIds.isEmpty()) {
+            return new List<TimelineItemDTO>();
+        }
+
+        // Task logs under this Day In session's punches (exclude pure schedule templates)
         List<Task_Log__c> logs = [
-            SELECT Id,
-                   Description__c,
-                   Reason_for_Visit__c,
-                   CreatedDate,
-                   IsCheckout__c,
-                   CreatedBy.Name,
-                   Client_Deatils__r.Name,
-                   Account__r.Name,
-                   Lead__r.Name,
-                   Opportunity__r.Name,
-                   Visit_Type__c,
-                   Customer_Type__c,
-                   Logged_Out_At__c,
-                   MOM__c,
-                   Visit_outcome__c,
-                   Next_Action__c,
-                   Next_Follow_Up_Date__c,
-                   Justification__c,
-                   is100mOutside__c,
-                   Latitude__c,
-                   Longitude__c
-            FROM Task_Log__c
-            WHERE Punch_Record__c IN :punchIds
-              AND Is_schedule__c = false
-            ORDER BY CreatedDate DESC
-            LIMIT :limitSize
+            SELECT Id, Description__c, Reason_for_Visit__c, CreatedDate, IsCheckout__c, CreatedBy.Name, Client_Deatils__r.Name,
+                   Account__r.Name, Lead__c, Lead__r.Name, Lead__r.Customer_Category__c, Opportunity__c, Opportunity__r.Name,
+                   Opportunity__r.Customer_Category__c, Visit_Type__c, Customer_Type__c, Logged_At__c, Logged_Out_At__c,
+                   MOM__c, Visit_outcome__c, Next_Action__c, Next_Follow_Up_Date__c, Justification__c, is100mOutside__c,
+                   Latitude__c, Longitude__c FROM Task_Log__c WHERE Punch_Record__c IN :punchIds AND Is_schedule__c = false
+            ORDER BY CreatedDate DESC LIMIT :limitSize
         ];
 
         // Collect Files/Attachments for timeline entries
@@ -241,6 +222,12 @@ public class EmployeeTimelineController {
 
             dto.visitType     = log.Visit_Type__c;
             dto.customerType  = log.Customer_Type__c;
+            if (log.Lead__c != null && log.Lead__r != null) {
+                dto.customerCategory = log.Lead__r.Customer_Category__c;
+            } else if (log.Opportunity__c != null && log.Opportunity__r != null) {
+                dto.customerCategory = log.Opportunity__r.Customer_Category__c;
+            }
+            dto.loggedAt      = log.Logged_At__c != null ? log.Logged_At__c : log.CreatedDate;
             dto.loggedOutAt   = log.Logged_Out_At__c;
             dto.mom           = log.MOM__c;
             dto.visitOutcome  = log.Visit_outcome__c;
@@ -254,38 +241,125 @@ public class EmployeeTimelineController {
             
             result.add(dto);
         }
+
+        assignActualTravelNodeDistances(result, punchIds);
         return result;
+    }
+
+    public static void assignActualTravelNodeDistances(List<TimelineItemDTO> items, Set<Id> punchIds) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+
+        List<Track_Location__c> tracks = new List<Track_Location__c>();
+        if (punchIds != null && !punchIds.isEmpty()) {
+            tracks = [SELECT Latitude__c, Longitude__c, CreatedDate, Recorded_At__c FROM Track_Location__c WHERE Punch_Record__c IN :punchIds ORDER BY Recorded_At__c ASC NULLS LAST, CreatedDate ASC LIMIT 2000];
+        }
+
+        List<FieldForceDashboardController.TravelPoint> trackPoints = FieldForceDashboardController.travelPointsFromTracks(tracks);
+
+        List<TimelineItemDTO> chronological = new List<TimelineItemDTO>(items);
+        for (Integer i = 0; i < chronological.size(); i++) {
+            for (Integer j = i + 1; j < chronological.size(); j++) {
+                Datetime ti = chronological[i].loggedAt != null ? chronological[i].loggedAt : chronological[i].createdTime;
+                Datetime tj = chronological[j].loggedAt != null ? chronological[j].loggedAt : chronological[j].createdTime;
+                if (ti != null && tj != null && ti > tj) {
+                    TimelineItemDTO tmp = chronological[i];
+                    chronological[i] = chronological[j];
+                    chronological[j] = tmp;
+                }
+            }
+        }
+
+        TimelineItemDTO prevItem = null;
+        Boolean isFirst = true;
+        for (TimelineItemDTO item : chronological) {
+            if (isFirst) {
+                item.nodeDistance = 'Start';
+                isFirst = false;
+            } else if (item.latitude != null && item.longitude != null
+                    && prevItem != null && prevItem.latitude != null && prevItem.longitude != null) {
+                Datetime startTime = prevItem.loggedAt != null ? prevItem.loggedAt : prevItem.createdTime;
+                Datetime endTime = item.loggedAt != null ? item.loggedAt : item.createdTime;
+                Decimal dist = FieldForceDashboardController.sumActualTravelKm(
+                    prevItem.latitude, prevItem.longitude, startTime,
+                    item.latitude, item.longitude, endTime,
+                    trackPoints
+                );
+                item.nodeDistance = FieldForceDashboardController.formatNodeKm(dist);
+            } else {
+                item.nodeDistance = '0 KM';
+            }
+
+            if (item.latitude != null && item.longitude != null) {
+                prevItem = item;
+            }
+        }
+    }
+
+    /**
+     * Start of the punch board window:
+     * - Open Day In (no later Day Out): from that Day In time, even if it is a prior calendar day
+     * - Day Out happened today: from that session's Day In (overnight shift still visible)
+     * - Otherwise: start of today
+     */
+    public static Datetime resolveTimelineWindowStart(Id recordId, Boolean isUserId) {
+        Datetime startOfToday = Datetime.newInstance(Date.today(), Time.newInstance(0, 0, 0, 0));
+
+        List<Punch_Record__c> shiftPunches;
+        if (isUserId) {
+            shiftPunches = [
+                SELECT Id, Action__c, Punch_Time__c FROM Punch_Record__c  WHERE User__c = :recordId
+                  AND Is_WFH_Request__c != true AND Is_WFO_Request__c != true AND Punch_Type__c = 'Day In / Out'
+                  AND Punch_Time__c != null ORDER BY Punch_Time__c DESC, Id DESC LIMIT 50
+            ];
+        } else {
+            shiftPunches = [
+                SELECT Id, Action__c, Punch_Time__c FROM Punch_Record__c WHERE Employee__c = :recordId AND Is_WFH_Request__c != true
+                  AND Is_WFO_Request__c != true AND Punch_Type__c = 'Day In / Out' AND Punch_Time__c != null
+                ORDER BY Punch_Time__c DESC, Id DESC LIMIT 50
+            ];
+        }
+
+        Punch_Record__c latestDayIn = null;
+        Punch_Record__c latestDayOut = null;
+        for (Punch_Record__c punch : shiftPunches) {
+            if (latestDayIn == null && punch.Action__c == 'IN') {
+                latestDayIn = punch;
+            }
+            if (latestDayOut == null && punch.Action__c == 'OUT') {
+                latestDayOut = punch;
+            }
+            if (latestDayIn != null && latestDayOut != null) {
+                break;
+            }
+        }
+
+        if (latestDayIn == null) {
+            return startOfToday;
+        }
+
+        Boolean sessionOpen = latestDayOut == null || latestDayOut.Punch_Time__c < latestDayIn.Punch_Time__c;
+        if (sessionOpen || latestDayOut.Punch_Time__c >= startOfToday) {
+            return latestDayIn.Punch_Time__c;
+        }
+        return startOfToday;
     }
 
     // ---------------- TIMELINE: ADD ----------------
 
     @AuraEnabled
     public static TimelineItemDTO addEmployeeTimelineItem(
-        Id employeeId,
-        String description,
-        Id clientId,
-        Decimal latitude,
-        Decimal longitude,
-        String visitType,
-        String customerType,
-        String reasonforVisit,
-        String leadFirstName,
-        String leadLastName,
-        String leadEmail,
-        String leadCompanyName,
-        String leadPhone,
-        Boolean isManual,
-        String selfieImageBase64,
-        Id leadId,
-        Id accountId,
-        Id opportunityId,
-        Id scheduledVisitId
+        Id employeeId, String description, Id clientId, Decimal latitude, Decimal longitude, String visitType,
+        String customerType, String reasonforVisit, String leadFirstName, String leadLastName, String leadEmail,
+        String leadCompanyName, String leadPhone, Boolean isManual, String selfieImageBase64,
+        Id leadId, Id accountId, Id opportunityId, Id scheduledVisitId
     ) {
         return addEmployeeTimelineItemWithCategory(
             employeeId, description, clientId, latitude, longitude, visitType, customerType,
             reasonforVisit, leadFirstName, leadLastName, leadEmail, leadCompanyName, leadPhone,
             isManual, selfieImageBase64, leadId, accountId, opportunityId, scheduledVisitId,
-            'Market Visit', null
+            'Market Visit', null, false
         );
     }
 
@@ -313,7 +387,7 @@ public class EmployeeTimelineController {
             employeeId, description, clientId, latitude, longitude, visitType, customerType,
             reasonforVisit, leadFirstName, leadLastName, leadEmail, leadCompanyName, leadPhone,
             isManual, selfieImageBase64, leadId, accountId, opportunityId, null,
-            'Market Visit', null
+            'Market Visit', null, false
         );
     }
 
@@ -339,7 +413,8 @@ public class EmployeeTimelineController {
         Id opportunityId,
         Id scheduledVisitId,
         String visitCategory,
-        String approvedRequestId
+        String approvedRequestId,
+        Boolean mapAddressToAccount
     ) {
         if (employeeId == null) {
             throw new AuraHandledException('Employee Id is required.');
@@ -502,7 +577,10 @@ public class EmployeeTimelineController {
 
         if (log.Account__c != null) {
             parentCheck = [
-                SELECT Id, ParentId, Location__Latitude__s, Name
+                SELECT Id, ParentId, Location__Latitude__s, Name,
+                       BillingStreet, BillingCity, BillingState,
+                       BillingPostalCode, BillingCountry, Zone__c,
+                       Street__c, City__c, State__c, Country__c, PIN__c
                 FROM Account
                 WHERE Id = :log.Account__c
                 LIMIT 1
@@ -538,19 +616,32 @@ public class EmployeeTimelineController {
         } else if (existingAddressBookId != null) {
             log.Address_Book__c = existingAddressBookId;
             List<Address_Book__c> existingAbs = [
-                SELECT Street__c, City__c, PIN__c
+                SELECT Street__c, City__c, State__c, Country__c, PIN__c, Zone__c, Primary_Address__c
                 FROM Address_Book__c
                 WHERE Id = :existingAddressBookId
                 LIMIT 1
             ];
-            if (!existingAbs.isEmpty() && String.isBlank(log.Address__c)) {
-                log.Address__c = composeAddressBookDisplay(existingAbs[0]);
+            if (!existingAbs.isEmpty()) {
+                if (String.isBlank(log.Address__c)) {
+                    log.Address__c = composeAddressBookDisplay(existingAbs[0]);
+                }
+                if (mapAddressToAccount == true) {
+                    stampAccountBillingFromAddressBook(parentCheck, existingAbs[0]);
+                }
             }
         } else if (newAddressBook != null) {
+            if (mapAddressToAccount == true && parentCheck != null
+                    && String.isBlank(parentCheck.Street__c)
+                    && String.isBlank(parentCheck.BillingStreet)) {
+                newAddressBook.Primary_Address__c = true;
+            }
             insert newAddressBook;
             log.Address_Book__c = newAddressBook.Id;
             if (String.isBlank(log.Address__c)) {
                 log.Address__c = composeAddressBookDisplay(newAddressBook);
+            }
+            if (mapAddressToAccount == true) {
+                stampAccountBillingFromAddressBook(parentCheck, newAddressBook);
             }
         }
 
@@ -576,10 +667,15 @@ public class EmployeeTimelineController {
             update ldToUpdate;
         }
 
-        // Associate Opportunity with Account in realtime if required
+        // Keep the Opportunity on the head Account. A Site is a child Account used
+        // only to tag the visit; writing it onto Opportunity.AccountId made the
+        // next visit treat that Site as the parent and offer another nested Site.
         if (log.Opportunity__c != null && log.Account__c != null) {
-            Opportunity oppToUpdate = new Opportunity(Id = log.Opportunity__c, AccountId = log.Account__c);
-            update oppToUpdate;
+            Id headAccountId = resolveHeadAccountId(parentCheck, log.Account__c);
+            if (headAccountId != null) {
+                Opportunity oppToUpdate = new Opportunity(Id = log.Opportunity__c, AccountId = headAccountId);
+                update oppToUpdate;
+            }
         }
 
         // Attach selfie image if provided
@@ -622,11 +718,7 @@ public class EmployeeTimelineController {
 
     // ---------------- NEARBY CLIENTS ----------------
     @AuraEnabled(cacheable=true)
-    public static List<ClientOptionDTO> getNearbyClients(
-        Decimal latitude,
-        Decimal longitude,
-        Integer limitSize
-    ) {
+    public static List<ClientOptionDTO> getNearbyClients(Decimal latitude, Decimal longitude, Integer limitSize) {
         if (latitude == null || longitude == null) {
             throw new AuraHandledException('Latitude and longitude are required.');
         }
@@ -790,11 +882,7 @@ public class EmployeeTimelineController {
     }
 
     // Insert item into targetList keeping it sorted by distanceKm ascending, max size = maxSize
-    private static void insertSortedClient(
-        List<ClientOptionDTO> targetList,
-        ClientOptionDTO item,
-        Integer maxSize
-    ) {
+    public static void insertSortedClient(List<ClientOptionDTO> targetList, ClientOptionDTO item, Integer maxSize) {
         if (item == null || item.distanceKm == null) {
             return;
         }
@@ -814,7 +902,7 @@ public class EmployeeTimelineController {
     }
 
 
-    private static void sortClientsByDistance(List<ClientOptionDTO> items) {
+    public static void sortClientsByDistance(List<ClientOptionDTO> items) {
     Integer n = items.size();
     for (Integer i = 0; i < n; i++) {
         Integer minIndex = i;
@@ -1011,7 +1099,8 @@ public class EmployeeTimelineController {
             }
         }
 
-        if (taskInfo[0].Latitude__c == null || taskInfo[0].Longitude__c == null) {
+        if (taskInfo[0].Latitude__c == null || taskInfo[0].Longitude__c == null
+                || latitude == null || longitude == null) {
             tv.is100mOutside = false;
         } else {
             Double distance = calculateDistanceKm(
@@ -1165,14 +1254,17 @@ public class EmployeeTimelineController {
         List<TaskLogDTO> dtos = new List<TaskLogDTO>();
         List<Task_Log__c> logs = [
             SELECT Id, Schedule_Date__c, Next_Action__c, Reason_for_Visit__c, Description__c,
-                   Visit_Type__c, Client_Deatils__r.Name, Account__r.Name, Lead__r.Name,
-                   Opportunity__r.Name, Opportunity__r.AccountId, Opportunity__r.Account.Name,
-                   Customer_Type__c, Lead__c, Account__c, Opportunity__c
+                   Visit_Type__c, Client_Deatils__r.Name, Account__r.Name, Account__r.ParentId,
+                   Account__r.Parent.Name, Lead__r.Name, Opportunity__r.Name,
+                   Opportunity__r.AccountId, Opportunity__r.Account.Name,
+                   Opportunity__r.Account.ParentId, Opportunity__r.Account.Parent.Name,
+                   Customer_Type__c, Lead__c, Account__c, Opportunity__c,
+                   Is_schedule__c, IsCancelled__c, Cancel_Reason__c
             FROM Task_Log__c
             WHERE (OwnerId = :userId OR CreatedById = :userId)
-              AND Is_schedule__c = true
+              AND (Is_schedule__c = true OR (IsCancelled__c = true AND Schedule_Date__c != null))
             ORDER BY Schedule_Date__c ASC, CreatedDate DESC
-            LIMIT 100
+            LIMIT 200
         ];
         for (Task_Log__c tl : logs) {
             TaskLogDTO dto = new TaskLogDTO();
@@ -1187,14 +1279,15 @@ public class EmployeeTimelineController {
             dto.leadName = tl.Lead__r != null ? tl.Lead__r.Name : null;
             dto.opportunityId = tl.Opportunity__c;
             dto.opportunityName = tl.Opportunity__r != null ? tl.Opportunity__r.Name : null;
+            dto.isCancelled = (tl.IsCancelled__c == true);
+            dto.cancelReason = tl.Cancel_Reason__c;
 
             // Visits scheduled from the Opportunity quick action only stamp
-            // Opportunity__c, so fall back to the opportunity's parent account.
-            dto.accountId = tl.Account__c;
-            dto.accountName = tl.Account__r != null ? tl.Account__r.Name : null;
-            if (dto.accountId == null && tl.Opportunity__r != null && tl.Opportunity__r.AccountId != null) {
-                dto.accountId = tl.Opportunity__r.AccountId;
-                dto.accountName = tl.Opportunity__r.Account != null ? tl.Opportunity__r.Account.Name : null;
+            // Opportunity__c, so fall back to the opportunity's head account.
+            // If Account__c or Opportunity.AccountId is a Site, walk up to Parent.
+            applyHeadAccount(dto, tl.Account__r);
+            if (dto.accountId == null && tl.Opportunity__r != null) {
+                applyHeadAccount(dto, tl.Opportunity__r.Account);
             }
 
             if (dto.opportunityId != null) {
@@ -1237,7 +1330,7 @@ public class EmployeeTimelineController {
     @AuraEnabled(cacheable=true)
     public static List<Opportunity> getOwnedOpportunities() {
         return [
-            SELECT Id, Name, AccountId, Account.Name, StageName
+            SELECT Id, Name, AccountId, Account.Name, Account.ParentId, Account.Parent.Name, StageName
             FROM Opportunity
             WHERE OwnerId = :UserInfo.getUserId()
             AND StageName IN ('Nurture', 'Negotiation')
@@ -1427,6 +1520,12 @@ public class EmployeeTimelineController {
         if (String.isBlank(momValue)) {
             throw new AuraHandledException('MOM is required');
         }
+        if (followUpDate == null) {
+            throw new AuraHandledException('Next Follow Up Date is required.');
+        }
+        if (followUpDate < Date.today()) {
+            throw new AuraHandledException('Next Follow Up Date cannot be a past date.');
+        }
 
         Savepoint sp = Database.setSavepoint();
         CheckoutResult res = new CheckoutResult();
@@ -1435,7 +1534,12 @@ public class EmployeeTimelineController {
         try {
             // 1. Query the Task_Log__c
             Task_Log__c tl = [
-                SELECT Id, Lead__c, Account__c, Opportunity__c, Reason_for_Visit__c, Customer_Type__c
+                SELECT Id, Lead__c, Account__c, Opportunity__c, Reason_for_Visit__c, Customer_Type__c,
+                       Lead__r.Customer_Category__c, Opportunity__r.Customer_Category__c,
+                       Latitude__c, Longitude__c, Address_Book__c,
+                       Address_Book__r.Street__c, Address_Book__r.City__c,
+                       Address_Book__r.State__c, Address_Book__r.Country__c,
+                       Address_Book__r.PIN__c, Address_Book__r.Zone__c
                 FROM Task_Log__c
                 WHERE Id = :taskId
                 LIMIT 1
@@ -1450,15 +1554,36 @@ public class EmployeeTimelineController {
             tl.MOM__c = momValue;
             tl.IsCheckout__c = true;
             tl.Logged_Out_At__c = System.now();
+            /* tl.Justification__c = justificationValue;
+            tl.is100mOutside__c = (justificationValue != null); */
+
             tl.Justification__c = justificationValue;
-            tl.is100mOutside__c = (justificationValue != null);
+
+            Boolean isOutside = false;
+
+            if (tl.Latitude__c != null &&
+                tl.Longitude__c != null &&
+                latitude != null &&
+                longitude != null) {
+
+                Decimal distanceKm = calculateDistanceKm(
+                    tl.Latitude__c,
+                    tl.Longitude__c,
+                    latitude,
+                    longitude
+                );
+
+                isOutside = distanceKm != null && distanceKm > 0.3;
+            }
+
+            tl.is100mOutside__c = isOutside;
 
             if (latitude != null) {
                 tl.Checked_Out_Latitude__c = latitude;
             }
             if (longitude != null) {
                 tl.Checked_Out_Longitude__c = longitude;
-            }
+            } 
 
             update tl;
 
@@ -1511,7 +1636,20 @@ public class EmployeeTimelineController {
                     c.Email = newContactEmail;
                     c.Phone = newContactPhone;
                     c.AccountId = activeAccountId;
-                    insert c;
+                    if (tl.Address_Book__c != null && tl.Address_Book__r != null) {
+                        applyAddressBookToContact(c, tl.Address_Book__r);
+                    }
+                    try {
+                        insert c;
+                    } catch (Exception contactEx) {
+                        c.Street__c = null;
+                        c.City__c = null;
+                        c.State__c = null;
+                        c.Country__c = null;
+                        c.PIN__c = null;
+                        c.Zone__c = null;
+                        insert c;
+                    }
                     finalContactId = c.Id;
                 }
             }
@@ -1532,16 +1670,43 @@ public class EmployeeTimelineController {
                 update accToUpdate;
             }
 
-            // Update Customer Category on associated record
+            // Keep Account address in sync with the visit Address Book (new Account / Create Lead / Create Opportunity).
+            if (activeAccountId != null) {
+                Address_Book__c visitAddress = tl.Address_Book__r;
+                if (visitAddress == null) {
+                    List<Address_Book__c> accountBooks = [
+                        SELECT Street__c, City__c, State__c, Country__c, PIN__c, Zone__c
+                        FROM Address_Book__c
+                        WHERE Account__c = :activeAccountId
+                        ORDER BY CreatedDate DESC
+                        LIMIT 1
+                    ];
+                    if (!accountBooks.isEmpty()) {
+                        visitAddress = accountBooks[0];
+                    }
+                }
+                if (visitAddress != null) {
+                    Account accForAddress = [
+                        SELECT Id, BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
+                               Street__c, City__c, State__c, Country__c, PIN__c, Zone__c
+                        FROM Account
+                        WHERE Id = :activeAccountId
+                        LIMIT 1
+                    ];
+                    stampAccountBillingFromAddressBook(accForAddress, visitAddress);
+                }
+            }
+
+            // Stamp Customer Category only when the related record does not already have one.
             if (String.isNotBlank(customerCategory)) {
-                if (tl.Lead__c != null) {
+                if (tl.Lead__c != null && String.isBlank(tl.Lead__r.Customer_Category__c)) {
                     try {
                         Lead ld = new Lead(Id = tl.Lead__c, Customer_Category__c = customerCategory);
                         update ld;
                     } catch (Exception ex) {
                         System.debug('Lead Customer_Category__c update failed: ' + ex.getMessage());
                     }
-                } else if (tl.Opportunity__c != null) {
+                } else if (tl.Opportunity__c != null && String.isBlank(tl.Opportunity__r.Customer_Category__c)) {
                     try {
                         Opportunity opp = new Opportunity(Id = tl.Opportunity__c);
                         opp.put('Customer_Category__c', customerCategory);
@@ -1549,7 +1714,7 @@ public class EmployeeTimelineController {
                     } catch (Exception ex) {
                         System.debug('Opp Customer_Category__c update failed: ' + ex.getMessage());
                     }
-                } else if (tl.Account__c != null) {
+                } else if (tl.Account__c != null && tl.Lead__c == null && tl.Opportunity__c == null) {
                     try {
                         Account acc = new Account(Id = tl.Account__c);
                         acc.put('Customer_Category__c', customerCategory);
@@ -1563,6 +1728,9 @@ public class EmployeeTimelineController {
             // Related Opportunity for follow-up Call/Event (visit Opp, or Opp created at checkout)
             Id relatedOpportunityId = tl.Opportunity__c;
             Id relatedLeadId = tl.Lead__c;
+
+            // -------------------------------------------
+            Boolean opportunityCreatedAtCheckout = false;
 
             // 7. Handle Post-Checkout Dispositions
             if (postDisposition == 'Mark Lead as Lost' && tl.Lead__c != null) {
@@ -1582,14 +1750,32 @@ public class EmployeeTimelineController {
                 res.redirectId = tl.Opportunity__c;
             }
             else if (postDisposition == 'Create Lead' && activeAccountId != null) {
-                Account activeAcc = [SELECT Name, Location__Latitude__s, Location__Longitude__s FROM Account WHERE Id = :activeAccountId LIMIT 1];
+                Account activeAcc = [
+                    SELECT Name, Phone, Email__c, Location__Latitude__s, Location__Longitude__s,
+                    BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry
+                    FROM Account
+                    WHERE Id = :activeAccountId
+                    LIMIT 1
+                ];
+                Contact poc = queryCheckoutContact(finalContactId);
+
                 Lead newLd = new Lead();
-                if (String.isNotBlank(remainingAccountContactName)) {
-                    newLd.LastName = remainingAccountContactName;
-                } else {
-                    newLd.LastName = 'Enquiry';
+                String leadFirstName = firstNonBlank(new List<String>{
+                    poc != null ? poc.FirstName : null,
+                    newContactFirstName
+                });
+                String leadLastName = firstNonBlank(new List<String>{
+                    poc != null ? poc.LastName : null,
+                    newContactLastName,
+                    remainingAccountContactName,
+                    'Enquiry'
+                });
+                if (String.isNotBlank(leadFirstName)) {
+                    newLd.FirstName = leadFirstName;
                 }
+                newLd.LastName = leadLastName;
                 newLd.Company = activeAcc.Name;
+                newLd.Company_Name__c = activeAcc.Name;
                 newLd.Account__c = activeAccountId;
                 newLd.Status = 'Prospect';
                 newLd.LeadSource = 'Offline Marketing';
@@ -1600,8 +1786,23 @@ public class EmployeeTimelineController {
                 }
                 newLd.UOM__c = 'Metric Ton';
                 newLd.Quantity__c = 1;
-                newLd.Phone = remainingAccountPhone;
-                newLd.Email = remainingAccountEmail;
+                newLd.Phone = firstNonBlank(new List<String>{
+                    poc != null ? poc.Phone : null,
+                    newContactPhone,
+                    poc != null ? poc.MobilePhone : null,
+                    remainingAccountPhone,
+                    activeAcc.Phone
+                });
+                newLd.Email = firstNonBlank(new List<String>{
+                    poc != null ? poc.Email : null,
+                    newContactEmail,
+                    remainingAccountEmail,
+                    activeAcc.Email__c
+                });
+                String salespersonDept = departmentNameForRunningUser(Lead.Department_Name__c);
+                if (String.isNotBlank(salespersonDept)) {
+                    newLd.Department_Name__c = salespersonDept;
+                }
 
                 if (activeAcc.Location__Latitude__s != null) {
                     newLd.Location__Latitude__s = activeAcc.Location__Latitude__s;
@@ -1609,30 +1810,208 @@ public class EmployeeTimelineController {
                 if (activeAcc.Location__Longitude__s != null) {
                     newLd.Location__Longitude__s = activeAcc.Location__Longitude__s;
                 }
-                insert newLd;
+
+                // lead address
+                newLd.Street = activeAcc.BillingStreet != null ? activeAcc.BillingStreet : null;
+                newLd.City = activeAcc.BillingCity != null ? activeAcc.BillingCity : null;
+                newLd.State = activeAcc.BillingState != null ? activeAcc.BillingState : null;
+                newLd.PostalCode = activeAcc.BillingPostalCode != null ? activeAcc.BillingPostalCode : null;
+                newLd.Country = activeAcc.BillingCountry != null ? activeAcc.BillingCountry : null;
+
+                if (tl.Address_Book__c != null && tl.Address_Book__r != null) {
+                    applyAddressBookToLead(newLd, tl.Address_Book__r);
+                }
+                try {
+                    insert newLd;
+                } catch (Exception leadEx) {
+                    newLd.Street__c = null;
+                    newLd.City__c = null;
+                    newLd.State__c = null;
+                    newLd.Country__c = null;
+                    newLd.PIN__c = null;
+                    newLd.Zone__c = null;
+                    insert newLd;
+                }
                 relatedLeadId = newLd.Id;
                 res.redirectId = newLd.Id;
+                // ---------------------------------------------------------
+                // For Create Lead, the Task_Log__c should be associated
+                // only with the newly created Lead, not the Account.
+                tl.Lead__c = newLd.Id;
+                tl.Account__c = null;
+                update tl;
             }
-            else if (postDisposition == 'Create Opportunity' && activeAccountId != null) {
+            /* else if (postDisposition == 'Create Opportunity' && activeAccountId != null) {
                 Account activeAcc = [SELECT Name FROM Account WHERE Id = :activeAccountId LIMIT 1];
                 Opportunity newOpp = new Opportunity();
                 newOpp.Name = activeAcc.Name + ' - Opp';
                 newOpp.AccountId = activeAccountId;
-                newOpp.StageName = 'Qualification';
+                newOpp.StageName = 'Nurture';
                 newOpp.CloseDate = Date.today().addDays(30);
                 if (String.isNotBlank(customerCategory)) {
                     try {
                         newOpp.put('Customer_Category__c', customerCategory);
                     } catch (Exception e) {}
                 }
+                String salespersonDept = departmentNameForRunningUser(Opportunity.Department_Name__c);
+                if (String.isNotBlank(salespersonDept)) {
+                    try {
+                        newOpp.put('Department_Name__c', salespersonDept);
+                    } catch (Exception e) {}
+                }
                 insert newOpp;
                 relatedOpportunityId = newOpp.Id;
                 res.redirectId = newOpp.Id;
+            } */
+            else if (postDisposition == 'Create Opportunity' && activeAccountId != null) {
+
+                Account activeAcc = [
+                    SELECT Name
+                    FROM Account
+                    WHERE Id = :activeAccountId
+                    LIMIT 1
+                ];
+
+                // Get department of the running user
+                String salespersonDept =
+                    departmentNameForRunningUser(Opportunity.Department_Name__c);
+
+                Opportunity newOpp = new Opportunity();
+
+                // Opportunity naming convention:
+                // {departmentName}-{accountName}
+                if (String.isNotBlank(salespersonDept)) {
+                    newOpp.Name = salespersonDept + '-' + activeAcc.Name;
+                } else {
+                    // Fallback in case department cannot be resolved
+                    newOpp.Name = activeAcc.Name;
+                }
+
+                newOpp.AccountId = activeAccountId;
+                newOpp.StageName = 'Nurture';
+                newOpp.CloseDate = Date.today().addDays(30);
+
+                if (String.isNotBlank(customerCategory)) {
+                    try {
+                        newOpp.put('Customer_Category__c', customerCategory);
+                    } catch (Exception e) {}
+                }
+
+                if (String.isNotBlank(salespersonDept)) {
+                    try {
+                        newOpp.put('Department_Name__c', salespersonDept);
+                    } catch (Exception e) {}
+                }
+
+                insert newOpp;
+                opportunityCreatedAtCheckout = true;
+
+                relatedOpportunityId = newOpp.Id;
+                res.redirectId = newOpp.Id;
+
+                // ---------------------------------------------------------
+                // For Create Opportunity, the Task_Log__c should be associated
+                // only with the newly created Opportunity, not the Account.
+                tl.Opportunity__c = newOpp.Id;
+                tl.Account__c = null;
+                update tl;
+
+                // ---------------------------------------------------------
+                // Add selected Contact to Opportunity Contact Roles
+                // ---------------------------------------------------------
+                if (finalContactId != null) {
+
+                    List<OpportunityContactRole> existingRoles = [
+                        SELECT Id
+                        FROM OpportunityContactRole
+                        WHERE OpportunityId = :newOpp.Id
+                        AND ContactId = :finalContactId
+                        LIMIT 1
+                    ];
+
+                    if (existingRoles.isEmpty()) {
+
+                        // Check whether this Opportunity already has a primary contact
+                        Integer primaryRoleCount = [
+                            SELECT COUNT()
+                            FROM OpportunityContactRole
+                            WHERE OpportunityId = :newOpp.Id
+                            AND IsPrimary = true
+                        ];
+
+                        OpportunityContactRole newRole = new OpportunityContactRole();
+
+                        newRole.OpportunityId = newOpp.Id;
+                        newRole.ContactId = finalContactId;
+                        newRole.Role = 'Contact';
+                        newRole.IsPrimary = (primaryRoleCount == 0);
+
+                        insert newRole;
+                    }
+                }
+            }
+
+
+            if (relatedOpportunityId != null
+                && finalContactId != null
+                && !opportunityCreatedAtCheckout) {
+
+                List<OpportunityContactRole> existingRoles = [
+                    SELECT Id
+                    FROM OpportunityContactRole
+                    WHERE OpportunityId = :relatedOpportunityId
+                    AND ContactId = :finalContactId
+                    LIMIT 1
+                ];
+
+                if (existingRoles.isEmpty()) {
+
+                    Integer primaryRoleCount = [
+                        SELECT COUNT()
+                        FROM OpportunityContactRole
+                        WHERE OpportunityId = :relatedOpportunityId
+                        AND IsPrimary = true
+                    ];
+
+                    OpportunityContactRole newRole = new OpportunityContactRole();
+
+                    newRole.OpportunityId = relatedOpportunityId;
+                    newRole.ContactId = finalContactId;
+                    newRole.Role = 'Contact';
+                    newRole.IsPrimary = (primaryRoleCount == 0);
+
+                    insert newRole;
+                }
             }
 
             // 8. Create Scheduled Visit (Task_Log__c) or Standard Call (Task) or Event if followUpDate is specified
             if (followUpDate != null) {
                 if (followUpType == 'Call') {
+                    if (relatedOpportunityId != null) {
+                        List<Task> existingCalls = [
+                            SELECT Id, Subject, Description, Status, Disposition__c
+                            FROM Task
+                            WHERE WhatId = :relatedOpportunityId
+                              AND (TaskSubtype = 'Call' OR Subject LIKE '%Call%')
+                              AND Status != 'Completed'
+                              AND IsClosed = false
+                        ];
+                        if (!existingCalls.isEmpty()) {
+                            String formattedDate = followUpDate.format();
+                            String appendMsg = 'Another call has been scheduled at the following date: ' + formattedDate;
+                            for (Task t : existingCalls) {
+                                t.Status = 'Completed';
+                                t.Disposition__c = 'Not Connected';
+                                if (String.isNotBlank(t.Description)) {
+                                    t.Description = t.Description + '\n' + appendMsg;
+                                } else {
+                                    t.Description = appendMsg;
+                                }
+                            }
+                            update existingCalls;
+                        }
+                    }
+
                     Task callTask = new Task();
                     callTask.Subject = 'Call';
                     callTask.TaskSubtype = 'Call';
@@ -1653,11 +2032,40 @@ public class EmployeeTimelineController {
                     }
                     insert callTask;
                 } else if (followUpType == 'Event') {
+                    if (relatedOpportunityId != null) {
+                        List<Event> existingEvents = [
+                            SELECT Id, Subject, Description, Disposition__c, Close_Date__c
+                            FROM Event
+                            WHERE WhatId = :relatedOpportunityId
+                              AND (Disposition__c = null OR Disposition__c NOT IN ('Completed', 'Not Completed'))
+                        ];
+                        if (!existingEvents.isEmpty()) {
+                            String formattedDate = followUpDate.format();
+                            String appendMsg = 'Another event has been scheduled at the following date: ' + formattedDate;
+                            for (Event ev : existingEvents) {
+                                ev.Disposition__c = 'Not Completed';
+                                ev.Close_Date__c = System.now();
+                                if (String.isNotBlank(ev.Description)) {
+                                    ev.Description = ev.Description + '\n' + appendMsg;
+                                } else {
+                                    ev.Description = appendMsg;
+                                }
+                            }
+                            update existingEvents;
+                        }
+                    }
+
                     Event evt = new Event();
                     evt.Subject = 'Meeting';
+                    evt.Type = 'Meeting';
                     evt.StartDateTime = Datetime.newInstance(followUpDate, Time.newInstance(10, 0, 0, 0));
                     evt.EndDateTime = Datetime.newInstance(followUpDate, Time.newInstance(11, 0, 0, 0));
+                    evt.ActivityDate = followUpDate;
+                    evt.DurationInMinutes = 60;
                     evt.Description = 'Follow up Event Details:\n' + momValue;
+                    evt.IsReminderSet = true;
+                    evt.ReminderDateTime = Datetime.newInstance(followUpDate, Time.newInstance(9, 45, 0, 0));
+                    evt.OwnerId = UserInfo.getUserId();
                     if (relatedOpportunityId != null) {
                         evt.WhatId = relatedOpportunityId;
                         if (finalContactId != null) {
@@ -1692,6 +2100,12 @@ public class EmployeeTimelineController {
                 }
             }
 
+            // 9. Alert the department HOD when check-out is outside the geofence.
+            // Runs last so it only fires once every save above has succeeded.
+            if (isOutside) {
+                notifyHodOfGeofenceBreach(tl.Id, tl.Latitude__c, tl.Longitude__c, latitude, longitude);
+            }
+
             return res;
         } catch (Exception e) {
             Database.rollback(sp);
@@ -1699,6 +2113,183 @@ public class EmployeeTimelineController {
             AuraHandledException ex = new AuraHandledException(userFriendlyMessage);
             ex.setMessage(userFriendlyMessage);
             throw ex;
+        }
+    }
+
+    // ---------------- GEOFENCE BREACH ALERT ----------------
+
+    @TestVisible private static final String GEOFENCE_NOTIFICATION_TYPE = 'Geofence_Breach_Alert';
+    @TestVisible private static final String GEOFENCE_EMAIL_TEMPLATE = 'Geofence_Breach_HOD_Alert';
+    @TestVisible private static final String HOD_PROFILE_NAME = 'Utkarsh HOD';
+    @TestVisible private static final String GEOFENCE_SENDER_EMAIL = 'noreply@utkarshindialimited.in';
+
+    /**
+     * Sends a custom notification and an email to the HOD(s) of the running
+     * user's department (User.Department) when a visit is checked out outside
+     * the geofence. Never throws: a failed alert must not fail the checkout.
+     */
+    @TestVisible
+    private static void notifyHodOfGeofenceBreach(
+        Id taskLogId,
+        Decimal checkInLatitude,
+        Decimal checkInLongitude,
+        Decimal checkOutLatitude,
+        Decimal checkOutLongitude
+    ) {
+        try {
+            if (taskLogId == null) {
+                return;
+            }
+
+            User currentUser = [
+                SELECT Id, Name, Department
+                FROM User
+                WHERE Id = :UserInfo.getUserId()
+                LIMIT 1
+            ];
+            if (String.isBlank(currentUser.Department)) {
+                return;
+            }
+
+            List<User> hods = [
+                SELECT Id, Name, Email
+                FROM User
+                WHERE Profile.Name = :HOD_PROFILE_NAME
+                  AND Department = :currentUser.Department
+                  AND IsActive = true
+                WITH SYSTEM_MODE
+            ];
+            if (hods.isEmpty()) {
+                return;
+            }
+
+            Task_Log__c log = [
+                SELECT Id, Name, Justification__c,
+                       Opportunity__r.Name, Account__r.Name, Lead__r.Name, Client_Deatils__r.Name
+                FROM Task_Log__c
+                WHERE Id = :taskLogId
+                LIMIT 1
+            ];
+
+            String customerName = 'Unknown Customer';
+            if (log.Opportunity__r != null) {
+                customerName = log.Opportunity__r.Name;
+            } else if (log.Account__r != null) {
+                customerName = log.Account__r.Name;
+            } else if (log.Lead__r != null) {
+                customerName = log.Lead__r.Name;
+            } else if (log.Client_Deatils__r != null) {
+                customerName = log.Client_Deatils__r.Name;
+            }
+
+            String distanceText = '';
+            if (checkInLatitude != null && checkInLongitude != null
+                    && checkOutLatitude != null && checkOutLongitude != null) {
+                Decimal distanceKm = calculateDistanceKm(
+                    checkInLatitude, checkInLongitude, checkOutLatitude, checkOutLongitude
+                );
+                distanceText = ' ' + distanceKm.setScale(2) + ' km';
+            }
+
+            String justification = String.isNotBlank(log.Justification__c)
+                ? log.Justification__c
+                : 'Not provided';
+
+            String title = 'Geofence Breach Alert';
+            String body = currentUser.Name + ' checked out of the visit with ' + customerName
+                + distanceText + ' away from the check-in location. Justification: ' + justification;
+
+            Set<String> recipientIds = new Set<String>();
+            for (User hod : hods) {
+                recipientIds.add(hod.Id);
+            }
+
+            // Custom notification (bell + mobile push)
+            try {
+                List<CustomNotificationType> types = [
+                    SELECT Id
+                    FROM CustomNotificationType
+                    WHERE DeveloperName = :GEOFENCE_NOTIFICATION_TYPE
+                    LIMIT 1
+                ];
+                if (!types.isEmpty()) {
+                    Messaging.CustomNotification notification = new Messaging.CustomNotification();
+                    notification.setTitle(title);
+                    notification.setBody(body);
+                    notification.setNotificationTypeId(types[0].Id);
+                    notification.setTargetId(log.Id);
+                    notification.send(recipientIds);
+                } else {
+                    System.debug('Custom notification type not found: ' + GEOFENCE_NOTIFICATION_TYPE);
+                }
+            } catch (Exception notifyEx) {
+                System.debug('Geofence custom notification failed: ' + notifyEx.getMessage());
+            }
+
+            // Email (Lightning email template, plain fallback if the template is missing)
+            try {
+                // Lightning templates built in the UI get a numeric suffix on
+                // their API name, so match on the prefix.
+                String templatePrefix = GEOFENCE_EMAIL_TEMPLATE + '%';
+                List<EmailTemplate> templates = [
+                    SELECT Id
+                    FROM EmailTemplate
+                    WHERE DeveloperName LIKE :templatePrefix
+                      AND IsActive = true
+                    ORDER BY CreatedDate DESC
+                    LIMIT 1
+                ];
+
+                List<OrgWideEmailAddress> owea = [
+                    SELECT Id
+                    FROM OrgWideEmailAddress
+                    WHERE Address = :GEOFENCE_SENDER_EMAIL
+                    LIMIT 1
+                ];
+                Id oweaId = owea.isEmpty() ? null : owea[0].Id;
+
+                List<Messaging.SingleEmailMessage> emails = new List<Messaging.SingleEmailMessage>();
+                for (User hod : hods) {
+                    String subject = title + ': ' + currentUser.Name;
+                    String htmlBody = body.escapeHtml4();
+                    String textBody = body;
+
+                    if (!templates.isEmpty()) {
+                        // A User recipient cannot take a WhatId, so render with the
+                        // Task Log as context first and send the rendered content.
+                        Messaging.SingleEmailMessage rendered =
+                            Messaging.renderStoredEmailTemplate(templates[0].Id, hod.Id, log.Id);
+                        subject = rendered.getSubject();
+                        htmlBody = rendered.getHtmlBody();
+                        textBody = rendered.getPlainTextBody();
+                    } else {
+                        System.debug('Email template not found: ' + GEOFENCE_EMAIL_TEMPLATE);
+                    }
+
+                    Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+                    mail.setTargetObjectId(hod.Id);
+                    mail.setSaveAsActivity(false);
+                    if (oweaId != null) {
+                        mail.setOrgWideEmailAddressId(oweaId);
+                    }
+                    mail.setSubject(subject);
+                    if (String.isNotBlank(htmlBody)) {
+                        mail.setHtmlBody(htmlBody);
+                    }
+                    if (String.isNotBlank(textBody)) {
+                        mail.setPlainTextBody(textBody);
+                    }
+                    emails.add(mail);
+                }
+
+                if (!emails.isEmpty()) {
+                    Messaging.sendEmail(emails, false);
+                }
+            } catch (Exception emailEx) {
+                System.debug('Geofence email failed: ' + emailEx.getMessage());
+            }
+        } catch (Exception e) {
+            System.debug('Geofence HOD alert failed: ' + e.getMessage());
         }
     }
 
@@ -1751,7 +2342,7 @@ public class EmployeeTimelineController {
         return customerType;
     }
 
-    private static String getCleanErrorMessage(String rawMessage) {
+    public static String getCleanErrorMessage(String rawMessage) {
         if (String.isBlank(rawMessage)) {
             return 'An unexpected error occurred.';
         }
@@ -1775,7 +2366,7 @@ public class EmployeeTimelineController {
     }
 
     @AuraEnabled
-    public static void rescheduleScheduledVisit(Id visitId, String reason, Date nextDate, String nextTime) {
+    public static void rescheduleScheduledVisit(Id visitId, String reason, Date nextDate) {
         try {
             if (visitId == null) {
                 throw new AuraHandledException('Visit ID is required.');
@@ -1787,8 +2378,9 @@ public class EmployeeTimelineController {
                 LIMIT 1
             ];
             tl.Schedule_Date__c = nextDate;
-            String timeStr = String.isNotBlank(nextTime) ? ' (Time: ' + nextTime + ')' : '';
-            tl.Reschedule_Reason__c = String.isNotBlank(reason) ? reason + timeStr : 'Rescheduled' + timeStr;
+            // String timeStr = String.isNotBlank(nextTime) ? ' (Time: ' + nextTime + ')' : '';
+            // tl.Reschedule_Reason__c = String.isNotBlank(reason) ? reason + timeStr : 'Rescheduled' + timeStr;
+            tl.Reschedule_Reason__c = String.isNotBlank(reason) ? reason + String.valueOf(nextDate) : 'Rescheduled' + String.valueOf(nextDate);
             tl.isRescheduled__c = true;
             update tl;
         } catch (Exception e) {
@@ -1797,13 +2389,13 @@ public class EmployeeTimelineController {
     }
 
     @AuraEnabled
-    public static void cancelScheduledVisit(Id visitId, String reason, Date nextDate, String nextTime) {
+    public static void cancelScheduledVisit(Id visitId, String reason, Date nextDate) {
         try {
             if (visitId == null) {
                 throw new AuraHandledException('Visit ID is required.');
             }
             Task_Log__c tl = [
-                SELECT Id, Is_schedule__c, Visit_Status__c, Reschedule_Reason__c 
+                SELECT Id, Is_schedule__c, Visit_Status__c, Reschedule_Reason__c, Cancel_Reason__c, IsCancelled__c 
                 FROM Task_Log__c 
                 WHERE Id = :visitId 
                 LIMIT 1
@@ -1812,15 +2404,17 @@ public class EmployeeTimelineController {
             tl.Visit_Status__c = 'Not Completed';
             
             // Format cancel detail
-            String cancelDetail = 'Cancelled: ' + (String.isNotBlank(reason) ? reason : 'No reason provided');
+            String cancelDetail = (String.isNotBlank(reason) ? reason : 'No reason provided');
             if (nextDate != null) {
                 cancelDetail += ' | Next proposed date: ' + nextDate.format();
             }
-            if (String.isNotBlank(nextTime)) {
+            /* if (String.isNotBlank(nextTime)) {
                 cancelDetail += ' ' + nextTime;
-            }
+            } */
             
-            tl.Reschedule_Reason__c = cancelDetail;
+            // tl.Reschedule_Reason__c = cancelDetail;
+            tl.Cancel_Reason__c = cancelDetail;
+            tl.IsCancelled__c = true;
             update tl;
         } catch (Exception e) {
             throw new AuraHandledException(getCleanErrorMessage(e.getMessage()));
@@ -1866,7 +2460,7 @@ public class EmployeeTimelineController {
     public static List<Opportunity> searchOpportunities(String searchKey) {
         if (String.isBlank(searchKey)) {
             return [
-                SELECT Id, Name, AccountId, Account.Name, StageName
+                SELECT Id, Name, AccountId, Account.Name, Account.ParentId, Account.Parent.Name, StageName
                 FROM Opportunity
                 WHERE OwnerId = :UserInfo.getUserId()
                   AND StageName IN ('Nurture', 'Negotiation')
@@ -1876,7 +2470,7 @@ public class EmployeeTimelineController {
         }
         String queryKey = '%' + searchKey + '%';
         return [
-            SELECT Id, Name, AccountId, Account.Name, StageName
+            SELECT Id, Name, AccountId, Account.Name, Account.ParentId, Account.Parent.Name, StageName
             FROM Opportunity
             WHERE OwnerId = :UserInfo.getUserId()
               AND StageName IN ('Nurture', 'Negotiation')
@@ -1943,7 +2537,7 @@ public class EmployeeTimelineController {
         return res;
     }
 
-    private static Address_Book__c buildAddressBookFromGeocode(
+    public static Address_Book__c buildAddressBookFromGeocode(
         Id accountId,
         Id opportunityId,
         Decimal latitude,
@@ -1983,6 +2577,238 @@ public class EmployeeTimelineController {
         }
 
         return ab;
+    }
+
+    /**
+     * Copy Address Book fields onto Account address fields when those Account fields are blank.
+     * Account page uses Street__c / City__c / State__c / Country__c / PIN__c / Zone__c.
+     */
+    public static void stampAccountBillingFromAddressBook(Account acc, Address_Book__c ab) {
+        if (acc == null || acc.Id == null || ab == null) {
+            return;
+        }
+
+        String country = matchPicklistValue(Account.Country__c, ab.Country__c);
+        String state = matchPicklistValue(Account.State__c, ab.State__c);
+        String zone = matchPicklistValue(Account.Zone__c, ab.Zone__c);
+
+        Account toUpdate = new Account(Id = acc.Id);
+        Boolean changed = false;
+
+        if (String.isBlank(acc.Street__c) && String.isNotBlank(ab.Street__c)) {
+            toUpdate.Street__c = ab.Street__c;
+            changed = true;
+        }
+        if (String.isBlank(acc.City__c) && String.isNotBlank(ab.City__c)) {
+            toUpdate.City__c = ab.City__c;
+            changed = true;
+        }
+        if (String.isBlank(acc.PIN__c) && String.isNotBlank(ab.PIN__c)) {
+            toUpdate.PIN__c = ab.PIN__c;
+            changed = true;
+        }
+        if (String.isBlank(acc.Country__c) && String.isNotBlank(country)) {
+            toUpdate.Country__c = country;
+            changed = true;
+        }
+        if (String.isBlank(acc.State__c) && String.isNotBlank(state)) {
+            toUpdate.State__c = state;
+            changed = true;
+        }
+        if (String.isBlank(acc.Zone__c) && String.isNotBlank(zone)) {
+            toUpdate.Zone__c = zone;
+            changed = true;
+        }
+        if (String.isBlank(acc.BillingStreet) && String.isNotBlank(ab.Street__c)) {
+            toUpdate.BillingStreet = ab.Street__c;
+            changed = true;
+        }
+        if (String.isBlank(acc.BillingCity) && String.isNotBlank(ab.City__c)) {
+            toUpdate.BillingCity = ab.City__c;
+            changed = true;
+        }
+        if (String.isBlank(acc.BillingPostalCode) && String.isNotBlank(ab.PIN__c)) {
+            toUpdate.BillingPostalCode = ab.PIN__c;
+            changed = true;
+        }
+
+        if (!changed) {
+            return;
+        }
+
+        try {
+            update toUpdate;
+        } catch (Exception e) {
+            try {
+                Account retry = new Account(Id = acc.Id);
+                if (String.isNotBlank(ab.Street__c)) {
+                    retry.Street__c = ab.Street__c;
+                    retry.BillingStreet = ab.Street__c;
+                }
+                if (String.isNotBlank(ab.City__c)) {
+                    retry.City__c = ab.City__c;
+                    retry.BillingCity = ab.City__c;
+                }
+                if (String.isNotBlank(ab.PIN__c)) {
+                    retry.PIN__c = ab.PIN__c;
+                    retry.BillingPostalCode = ab.PIN__c;
+                }
+                if (String.isNotBlank(zone)) {
+                    retry.Zone__c = zone;
+                }
+                update retry;
+            } catch (Exception retryEx) {
+                System.debug('Account address stamp from visit address failed: ' + retryEx.getMessage());
+            }
+        }
+    }
+
+    public static void applyAddressBookToContact(Contact c, Address_Book__c ab) {
+        if (c == null || ab == null) {
+            return;
+        }
+        if (String.isNotBlank(ab.Street__c)) {
+            c.Street__c = ab.Street__c;
+        }
+        if (String.isNotBlank(ab.City__c)) {
+            c.City__c = ab.City__c;
+        }
+        if (String.isNotBlank(ab.PIN__c)) {
+            c.PIN__c = ab.PIN__c;
+        }
+        String country = matchPicklistValue(Contact.Country__c, ab.Country__c);
+        if (String.isNotBlank(country)) {
+            c.Country__c = country;
+        }
+        String state = matchPicklistValue(Contact.State__c, ab.State__c);
+        if (String.isNotBlank(state)) {
+            c.State__c = state;
+        }
+        String zone = matchPicklistValue(Contact.Zone__c, ab.Zone__c);
+        if (String.isNotBlank(zone)) {
+            c.Zone__c = zone;
+        }
+    }
+
+    public static void applyAddressBookToLead(Lead ld, Address_Book__c ab) {
+        if (ld == null || ab == null) {
+            return;
+        }
+        if (String.isNotBlank(ab.Street__c)) {
+            ld.Street__c = ab.Street__c;
+        }
+        if (String.isNotBlank(ab.City__c)) {
+            ld.City__c = ab.City__c;
+        }
+        if (String.isNotBlank(ab.PIN__c)) {
+            ld.PIN__c = ab.PIN__c;
+        }
+        String country = matchPicklistValue(Lead.Country__c, ab.Country__c);
+        if (String.isNotBlank(country)) {
+            ld.Country__c = country;
+        }
+        String state = matchPicklistValue(Lead.State__c, ab.State__c);
+        if (String.isNotBlank(state)) {
+            ld.State__c = state;
+        }
+        String zone = matchPicklistValue(Lead.Zone__c, ab.Zone__c);
+        if (String.isNotBlank(zone)) {
+            ld.Zone__c = zone;
+        }
+    }
+
+    private static Contact queryCheckoutContact(Id contactId) {
+        if (contactId == null) {
+            return null;
+        }
+        List<Contact> contacts = [
+            SELECT FirstName, LastName, Phone, Email, MobilePhone
+            FROM Contact
+            WHERE Id = :contactId
+            LIMIT 1
+        ];
+        return contacts.isEmpty() ? null : contacts[0];
+    }
+
+    private static String firstNonBlank(List<String> values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (String.isNotBlank(value)) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    public static String departmentNameForRunningUser(Schema.SObjectField departmentField) {
+        User runningUser = [
+            SELECT Department, Departments__c
+            FROM User
+            WHERE Id = :UserInfo.getUserId()
+            LIMIT 1
+        ];
+        String matched = matchPicklistValue(departmentField, runningUser.Department);
+        if (String.isNotBlank(matched)) {
+            return matched;
+        }
+        matched = matchDepartmentLoosely(departmentField, runningUser.Department);
+        if (String.isNotBlank(matched)) {
+            return matched;
+        }
+        if (String.isNotBlank(runningUser.Departments__c)) {
+            for (String token : runningUser.Departments__c.split(';')) {
+                matched = matchDepartmentLoosely(departmentField, token);
+                if (String.isNotBlank(matched)) {
+                    return matched;
+                }
+            }
+        }
+        return null;
+    }
+
+    public static String matchDepartmentLoosely(Schema.SObjectField departmentField, String rawValue) {
+        if (String.isBlank(rawValue) || departmentField == null) {
+            return null;
+        }
+        String needle = rawValue.trim().toLowerCase().replace('_', ' ').replace('-', ' ');
+        String best = null;
+        Integer bestLen = 0;
+        for (Schema.PicklistEntry pe : departmentField.getDescribe().getPicklistValues()) {
+            if (!pe.isActive()) {
+                continue;
+            }
+            String valueNorm = pe.getValue().toLowerCase();
+            String labelNorm = pe.getLabel().toLowerCase();
+            Boolean hit = needle.contains(valueNorm) || valueNorm.contains(needle)
+                || needle.contains(labelNorm) || labelNorm.contains(needle);
+            if (hit && pe.getValue().length() > bestLen) {
+                best = pe.getValue();
+                bestLen = pe.getValue().length();
+            }
+        }
+        return best;
+    }
+
+    private static Id resolveHeadAccountId(Account acc, Id fallbackId) {
+        if (acc != null && acc.ParentId != null) {
+            return acc.ParentId;
+        }
+        return acc != null ? acc.Id : fallbackId;
+    }
+
+    private static void applyHeadAccount(TaskLogDTO dto, Account acc) {
+        if (dto == null || acc == null) {
+            return;
+        }
+        if (acc.ParentId != null) {
+            dto.accountId = acc.ParentId;
+            dto.accountName = acc.Parent != null ? acc.Parent.Name : acc.Name;
+        } else {
+            dto.accountId = acc.Id;
+            dto.accountName = acc.Name;
+        }
     }
 
     private static String composeAddressBookDisplay(Address_Book__c ab) {

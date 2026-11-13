@@ -102,10 +102,47 @@ public without sharing class OpportunityNurtureBudgetaryMatrixBatch implements D
       }
     }
 
-    if (!opportunitiesToUpdate.isEmpty()) {
-      update opportunitiesToUpdate;
-    }
+    EscalationMatrixEmailService.flushQueuedEmails();
+    EscalationMatrixEmailService.updateOpportunitiesAllowPartial(
+      confirmOpportunityUpdates(opportunitiesToUpdate)
+    );
   }
+
+  private static List<Opportunity> confirmOpportunityUpdates(
+    List<Opportunity> candidates
+  ) {
+    List<Opportunity> confirmed = new List<Opportunity>();
+    if (candidates == null || candidates.isEmpty()) {
+      return confirmed;
+    }
+    for (Opportunity candidate : candidates) {
+      if (candidate == null || candidate.Id == null) {
+        continue;
+      }
+      Opportunity filtered = new Opportunity(Id = candidate.Id);
+      Boolean changed = false;
+      if (candidate.NurtureEscalation48Sent__c == true &&
+        EscalationMatrixEmailService.wasSendSuccessful(candidate.Id, TEMPLATE_15D)) {
+        filtered.NurtureEscalation48Sent__c = true;
+        changed = true;
+      }
+      if (candidate.NurtureEscalation60Sent__c == true &&
+        EscalationMatrixEmailService.wasSendSuccessful(candidate.Id, TEMPLATE_21D)) {
+        filtered.NurtureEscalation60Sent__c = true;
+        changed = true;
+      }
+      if (candidate.NurtureEscalation72Sent__c == true &&
+        EscalationMatrixEmailService.wasSendSuccessful(candidate.Id, TEMPLATE_30D)) {
+        filtered.NurtureEscalation72Sent__c = true;
+        changed = true;
+      }
+      if (changed) {
+        confirmed.add(filtered);
+      }
+    }
+    return confirmed;
+  }
+
 
   public void finish(Database.BatchableContext context) {
   }

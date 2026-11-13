@@ -109,7 +109,57 @@
                                 </template>
                             </div>
                         </template>
-                        <template if:false={hasScheduledVisits}>
+
+                        <!-- Cancelled Visits Section -->
+                        <template if:true={hasCancelledVisits}>
+                            <div class="pt-cancelled-section">
+                                <div class="pt-cancelled-section-header">
+                                    <div class="pt-cancelled-section-title">
+                                        <lightning-icon icon-name="utility:clear" size="xx-small" class="pt-cancelled-header-icon"></lightning-icon>
+                                        <span>Cancelled Visits ({cancelledVisitsCount})</span>
+                                    </div>
+                                </div>
+                                <div class="pt-scheduled-list pt-cancelled-list">
+                                    <template for:each={filteredCancelledVisits} for:item="visit">
+                                        <div key={visit.id} class="pt-scheduled-item pt-cancelled-item animate-fade-in">
+                                            <div class="pt-scheduled-item-header">
+                                                <div style="display: flex; align-items: center; gap: 6px;">
+                                                    <span class="pt-visit-subject">{visit.displayPurpose}</span>
+                                                    <span class="pt-cancelled-pill">Cancelled</span>
+                                                </div>
+                                                <span class="pt-visit-date">
+                                                    <lightning-icon icon-name="utility:date_input" size="xx-small" class="slds-m-right_xx-small"></lightning-icon>
+                                                    {visit.formattedDate}
+                                                </span>
+                                            </div>
+                                            <div class="pt-scheduled-item-content">
+                                                <div class="pt-scheduled-item-details">
+                                                    <div class="pt-scheduled-client-row">
+                                                        <template if:true={visit.clientName}>
+                                                            <span class="pt-scheduled-client-name">
+                                                                <lightning-icon icon-name="utility:company" size="xx-small" class="slds-m-right_xx-small"></lightning-icon>
+                                                                {visit.clientName}
+                                                            </span>
+                                                        </template>
+                                                        <template if:true={visit.customerType}>
+                                                            <span class="pt-sub-badge slds-m-left_xx-small">{visit.customerType}</span>
+                                                        </template>
+                                                    </div>
+                                                    <template if:true={visit.description}>
+                                                        <p class="pt-visit-desc"><strong>Notes:</strong> {visit.description}</p>
+                                                    </template>
+                                                    <template if:true={visit.cancelReason}>
+                                                        <p class="pt-visit-desc pt-cancel-reason-desc"><strong>Reason:</strong> {visit.cancelReason}</p>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+
+                        <template if:false={hasAnyVisits}>
                             <div class="pt-scheduled-empty">
                                 <p>No scheduled visits found.</p>
                             </div>
@@ -144,6 +194,9 @@
                             </template>
                             <template if:true={item.isCheckout}>
                                 <div class="pt-dot-checkout"></div>
+                            </template>
+                            <template if:true={item.nodeDistance}>
+                                <span class="dot-distance-val">{item.nodeDistance}</span>
                             </template>
                             <div class="pt-line"></div>
                         </div>
@@ -185,6 +238,27 @@
                                     </template>
                                 </div>
 
+                                <div class="pt-visit-quick-meta">
+                                    <template if:true={item.checkInShort}>
+                                        <div class="pt-quick-chip">
+                                            <span class="pt-quick-lbl">In</span>
+                                            <span class="pt-quick-val">{item.checkInShort}</span>
+                                        </div>
+                                    </template>
+                                    <template if:true={item.checkOutShort}>
+                                        <div class="pt-quick-chip">
+                                            <span class="pt-quick-lbl">Out</span>
+                                            <span class="pt-quick-val">{item.checkOutShort}</span>
+                                        </div>
+                                    </template>
+                                    <template if:true={item.visitDuration}>
+                                        <div class="pt-quick-chip pt-quick-duration">
+                                            <span class="pt-quick-lbl">Duration</span>
+                                            <span class="pt-quick-val">{item.visitDuration}</span>
+                                        </div>
+                                    </template>
+                                </div>
+
                                 <!-- Reason for Visit -->
                                 <div class="pt-detail-row">
                                     <span class="pt-detail-label">Reason for Visit:</span>
@@ -204,6 +278,13 @@
                                                 <div class="pt-detail-row pt-checkout-time-row">
                                                     <span class="pt-detail-label">Checked Out At:</span>
                                                     <span class="pt-detail-value">{item.checkoutTime}</span>
+                                                </div>
+                                            </template>
+
+                                            <template if:true={item.visitDuration}>
+                                                <div class="pt-detail-row">
+                                                    <span class="pt-detail-label">Duration:</span>
+                                                    <span class="pt-detail-value">{item.visitDuration}</span>
                                                 </div>
                                             </template>
 
@@ -673,15 +754,25 @@
                                 value={customerName}
                                 read-only="true">
                             </lightning-input>
-                            <lightning-combobox
-                                name="customerCategory"
-                                label="Customer Category"
-                                value={customerCategory}
-                                placeholder="Select Customer Category"
-                                options={customerCategoryOptions}
-                                onchange={handleCustomerCategoryChange}
-                                required>
-                            </lightning-combobox>
+                            <template if:true={isCustomerCategoryLocked}>
+                                <lightning-input
+                                    type="text"
+                                    label="Customer Category"
+                                    value={customerCategory}
+                                    read-only="true">
+                                </lightning-input>
+                            </template>
+                            <template if:false={isCustomerCategoryLocked}>
+                                <lightning-combobox
+                                    name="customerCategory"
+                                    label="Customer Category"
+                                    value={customerCategory}
+                                    placeholder="Select Customer Category"
+                                    options={customerCategoryOptions}
+                                    onchange={handleCustomerCategoryChange}
+                                    required>
+                                </lightning-combobox>
+                            </template>
                         </div>
 
                         <div class="pt-field-group">
@@ -711,7 +802,9 @@
                                 type="date"
                                 label="Next Follow Up Date"
                                 value={followUpDate}
-                                onchange={handleFollowUpDateChange}>
+                                min={followUpDateMin}
+                                onchange={handleFollowUpDateChange}
+                                required>
                             </lightning-input>
                             <br>
                             <lightning-combobox
@@ -748,8 +841,16 @@
                             <lightning-input 
                                 type="file" 
                                 label="Upload File"
+                                accept=".pdf,.xls,.xlsx,.doc,.docx,.png,.jpg,.jpeg"
                                 onchange={handleFileChange}>
                             </lightning-input>
+                            <template if:true={hasCheckoutFile}>
+                                <div class="pt-file-attached">
+                                    <lightning-icon icon-name="utility:success" size="xx-small" variant="success"></lightning-icon>
+                                    <span class="pt-file-attached-name" title={checkoutFileName}>{checkoutFileName}</span>
+                                    <button type="button" class="pt-file-remove" onclick={clearCheckoutFile}>Remove</button>
+                                </div>
+                            </template>
                         </div>
 
                         <!-- POC / Contact Selection Section -->
@@ -844,7 +945,7 @@
 
         <!-- Reschedule / Cancel Modal -->
         <template if:true={showScheduleActionModal}>
-            <section class="pt-backdrop">
+            <section class="pt-backdrop pt-schedule-action-modal">
                 <div class="pt-modal animate-pop-in">
                     <div class="pt-modal-header">
                         <h2>{scheduleActionType} Scheduled Visit</h2>
@@ -890,14 +991,14 @@
                             </lightning-input>
                         </div>
 
-                        <div class="pt-field-group" style="margin-top: 10px;">
+                        <!-- <div class="pt-field-group" style="margin-top: 10px;">
                             <lightning-input
                                 type="time"
                                 label="Next Schedule Time"
                                 value={scheduleActionTime}
                                 onchange={handleScheduleActionTimeChange}>
                             </lightning-input>
-                        </div>
+                        </div> -->
                     </div>
 
                     <div class="pt-modal-footer">

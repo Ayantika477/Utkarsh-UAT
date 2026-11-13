@@ -58,6 +58,10 @@ global class TenderOppEscalationBatch implements Database.Batchable<SObject> {
 
         Map<String, List<String>> roleEmailMap = new Map<String, List<String>>();
 
+        // Email (lowercased) -> active User Id, filled from the two User queries below.
+        // Used to send to User Ids so the emails count as internal.
+        Map<String, Id> userIdByEmail = new Map<String, Id>();
+
         for (User u : [
             SELECT Id, Email, UserRole.Name
             FROM   User
@@ -70,6 +74,9 @@ global class TenderOppEscalationBatch implements Database.Batchable<SObject> {
                 roleEmailMap.put(rn, new List<String>());
             }
             roleEmailMap.get(rn).add(u.Email);
+            if (!userIdByEmail.containsKey(u.Email.toLowerCase())) {
+                userIdByEmail.put(u.Email.toLowerCase(), u.Id);
+            }
             System.debug('Role [' + rn + '] added email: ' + u.Email);
         }
 
@@ -84,6 +91,9 @@ global class TenderOppEscalationBatch implements Database.Batchable<SObject> {
             AND    Email != NULL
         ]) {
             ownerEmailMap.put(u.Id, u.Email);
+            if (!userIdByEmail.containsKey(u.Email.toLowerCase())) {
+                userIdByEmail.put(u.Email.toLowerCase(), u.Id);
+            }
             System.debug('Owner [' + u.Id + '] email: ' + u.Email);
         }
 
@@ -105,17 +115,20 @@ global class TenderOppEscalationBatch implements Database.Batchable<SObject> {
 
             if (daysSinceModified >= 15 && !opp.TenderEsc15Sent__c) {
                 System.debug('Queuing 15-day escalation for: ' + opp.Name);
-                buildAndQueueEmail(opp, 15, daysSinceModified, ownerEmailMap, roleEmailMap, pendingEmails, pendingEscalations);
+                // buildAndQueueEmail(opp, 15, daysSinceModified, ownerEmailMap, roleEmailMap, pendingEmails, pendingEscalations);
+                buildAndQueueEmail(opp, 15, daysSinceModified, ownerEmailMap, roleEmailMap, pendingEmails, pendingEscalations, userIdByEmail);
             }
 
             if (daysSinceModified >= 21 && !opp.TenderEsc21Sent__c) {
                 System.debug('Queuing 21-day escalation for: ' + opp.Name);
-                buildAndQueueEmail(opp, 21, daysSinceModified, ownerEmailMap, roleEmailMap, pendingEmails, pendingEscalations);
+                // buildAndQueueEmail(opp, 21, daysSinceModified, ownerEmailMap, roleEmailMap, pendingEmails, pendingEscalations);
+                buildAndQueueEmail(opp, 21, daysSinceModified, ownerEmailMap, roleEmailMap, pendingEmails, pendingEscalations, userIdByEmail);
             }
 
             if (daysSinceModified >= 30 && !opp.TenderEsc30Sent__c) {
                 System.debug('Queuing 30-day escalation for: ' + opp.Name);
-                buildAndQueueEmail(opp, 30, daysSinceModified, ownerEmailMap, roleEmailMap, pendingEmails, pendingEscalations);
+                // buildAndQueueEmail(opp, 30, daysSinceModified, ownerEmailMap, roleEmailMap, pendingEmails, pendingEscalations);
+                buildAndQueueEmail(opp, 30, daysSinceModified, ownerEmailMap, roleEmailMap, pendingEmails, pendingEscalations, userIdByEmail);
             }
         }
 
@@ -177,7 +190,9 @@ global class TenderOppEscalationBatch implements Database.Batchable<SObject> {
         Map<Id, String>                     ownerEmailMap,
         Map<String, List<String>>           roleEmailMap,
         List<Messaging.SingleEmailMessage>  pendingEmails,
-        List<PendingEscalation>             pendingEscalations
+        // List<PendingEscalation>             pendingEscalations
+        List<PendingEscalation>             pendingEscalations,
+        Map<String, Id>                     userIdByEmail
     ) {
         List<String> recipients = new List<String>();
         String       dept       = opp.Department_Name__c;
@@ -207,7 +222,7 @@ global class TenderOppEscalationBatch implements Database.Batchable<SObject> {
         List<String> finalRecipients  = new List<String>(uniqueRecipients);
 
         Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
-        mail.setToAddresses(finalRecipients);
+        // mail.setToAddresses(finalRecipients);
         mail.setSaveAsActivity(false);
 
         mail.setSubject('Tender Opportunity Escalation - ' + tier + ' Days No Activity - ' + opp.Name);
@@ -224,8 +239,35 @@ global class TenderOppEscalationBatch implements Database.Batchable<SObject> {
 
         mail.setPlainTextBody(body);
 
-        pendingEmails.add(mail);
-        pendingEscalations.add(new PendingEscalation(opp, tier));
+        // pendingEmails.add(mail);
+        // pendingEscalations.add(new PendingEscalation(opp, tier));
+
+        // setTargetObjectId takes a single User, so one copy per recipient. One
+        // PendingEscalation per message keeps results[i] aligned in execute().
+        Set<Id> addedUserIds = new Set<Id>();
+        for (String email : finalRecipients) {
+            Id userId = String.isBlank(email) ? null : userIdByEmail.get(email.toLowerCase());
+            if (userId == null) {
+                System.debug(
+                    'TenderOppEscalationBatch: no active User Id for recipient ' + email +
+                    ' on Opportunity ' + opp.Id + ' - email address fallback is disabled, email not sent.'
+                );
+                continue;
+            }
+            if (addedUserIds.contains(userId)) {
+                continue;
+            }
+            addedUserIds.add(userId);
+
+            Messaging.SingleEmailMessage userMail = new Messaging.SingleEmailMessage();
+            userMail.setTargetObjectId(userId);
+            userMail.setSaveAsActivity(false);
+            userMail.setSubject(mail.getSubject());
+            userMail.setPlainTextBody(mail.getPlainTextBody());
+
+            pendingEmails.add(userMail);
+            pendingEscalations.add(new PendingEscalation(opp, tier));
+        }
     }
 
     private static void addFromRoleMap(

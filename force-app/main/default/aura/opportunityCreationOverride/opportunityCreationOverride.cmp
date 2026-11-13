@@ -1,0 +1,8 @@
+<!--
+  Aura wrapper for the opportunityCreationScreen LWC, same pattern as
+  accountCreationOverride: usable as a New-button action override and as the
+  component created by the OpportunityCreationPage VF page via Lightning Out.
+-->
+<aura:component implements="lightning:actionOverride,force:hasSObjectName" access="global">
+    <c:opportunityCreationScreen />
+</aura:component>

@@ -1,3 +1,9 @@
+/**
+ * @description   Batch and Schedulable that sends emails for Opportunities stuck in
+ *                Negotiation.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_EmailNegotiationStageUpdateBatch implements Database.Batchable<SObject>, Schedulable {
   private static final Integer STALE_DAYS = 30;
   private static final Integer DEDUP_DAYS = 28;
@@ -55,6 +61,11 @@ public without sharing class BWM_EmailNegotiationStageUpdateBatch implements Dat
   }
 
   public void finish(Database.BatchableContext context) {
+    System.debug(
+      LoggingLevel.INFO,
+      'BWM_EmailNegotiationStageUpdateBatch finished. JobId=' +
+        (context == null ? 'null' : String.valueOf(context.getJobId()))
+    );
   }
 
   public void execute(SchedulableContext context) {

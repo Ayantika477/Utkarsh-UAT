@@ -1,4 +1,31 @@
+/**
+ * @description   Queueable job that processes email send requests with callouts via
+ *                BWM_EmailService.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_EmailQueueable implements Queueable, Database.AllowsCallouts {
+  // Each send uses several SOQL queries and one sendEmail call (limit 10 per transaction),
+  // so large requests lists are processed in groups and the rest is chained to a new job.
+  @TestVisible
+  private static final Integer MAX_REQUESTS_PER_JOB = 10;
+
+  // Minimum queries kept free for the next send and the final Email_Log__c insert;
+  // raised to the heaviest send seen in the job plus SOQL_SAFETY_MARGIN.
+  @TestVisible
+  private static final Integer SOQL_HEADROOM = 40;
+
+  private static final Integer SOQL_SAFETY_MARGIN = 15;
+
+  @TestVisible
+  private static Integer lastProcessedCount = 0;
+
+  @TestVisible
+  private static Integer lastDeferredCount = 0;
+
+  @TestVisible
+  private static Integer lastQueriesUsed = 0;
+
   private final List<BWM_EmailRequest> requests;
 
   public BWM_EmailQueueable(List<BWM_EmailRequest> requests) {
@@ -9,11 +36,24 @@ public without sharing class BWM_EmailQueueable implements Queueable, Database.A
 
   public void execute(QueueableContext context) {
     List<Email_Log__c> logsToInsert = new List<Email_Log__c>();
+    List<BWM_EmailRequest> deferredRequests = new List<BWM_EmailRequest>();
+    Integer processedCount = 0;
+    Integer maxQueriesPerSend = 0;
 
     for (BWM_EmailRequest requestItem : requests) {
       if (requestItem == null || requestItem.recordId == null) {
         continue;
       }
+
+      if (
+        !deferredRequests.isEmpty() ||
+        (processedCount > 0 && !hasCapacityForAnotherSend(processedCount, maxQueriesPerSend))
+      ) {
+        deferredRequests.add(requestItem);
+        continue;
+      }
+      processedCount++;
+      Integer queriesBeforeSend = Limits.getQueries();
 
       try {
         BWM_EmailService.SendResult sendResult;
@@ -55,8 +95,50 @@ public without sharing class BWM_EmailQueueable implements Queueable, Database.A
         }
         logsToInsert.add(failLog);
       }
+      maxQueriesPerSend = Math.max(
+        maxQueriesPerSend,
+        Limits.getQueries() - queriesBeforeSend
+      );
     }
 
     BWM_EmailLogService.insertLogs(logsToInsert);
+
+    lastProcessedCount = processedCount;
+    lastDeferredCount = deferredRequests.size();
+    lastQueriesUsed = Limits.getQueries();
+    System.debug(
+      'BWM_EmailQueueable processed ' + processedCount + ', deferred ' +
+        lastDeferredCount + ', SOQL used ' + lastQueriesUsed +
+        ', heaviest send ' + maxQueriesPerSend
+    );
+    enqueueDeferred(deferredRequests);
+  }
+
+  private static Boolean hasCapacityForAnotherSend(
+    Integer processedCount,
+    Integer maxQueriesPerSend
+  ) {
+    Integer queriesNeeded = Math.max(
+      SOQL_HEADROOM,
+      maxQueriesPerSend + SOQL_SAFETY_MARGIN
+    );
+    return processedCount < MAX_REQUESTS_PER_JOB &&
+      Limits.getQueries() + queriesNeeded < Limits.getLimitQueries() &&
+      Limits.getEmailInvocations() < Limits.getLimitEmailInvocations();
+  }
+
+  private static void enqueueDeferred(List<BWM_EmailRequest> deferredRequests) {
+    if (deferredRequests.isEmpty() || Test.isRunningTest()) {
+      return;
+    }
+    if (Limits.getQueueableJobs() >= Limits.getLimitQueueableJobs()) {
+      System.debug(
+        LoggingLevel.ERROR,
+        'BWM_EmailQueueable could not chain ' + deferredRequests.size() +
+          ' remaining email requests: queueable limit reached.'
+      );
+      return;
+    }
+    System.enqueueJob(new BWM_EmailQueueable(deferredRequests));
   }
 }

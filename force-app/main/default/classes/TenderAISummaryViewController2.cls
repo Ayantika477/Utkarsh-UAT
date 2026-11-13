@@ -330,7 +330,7 @@ private void buildRows(Map<String,Object> mergedValues){
     }
 }
 
-
+    @TestVisible
     private String formatValue(Object val) {
         if (val == null) return '';
         if (val instanceof List<Object>) {

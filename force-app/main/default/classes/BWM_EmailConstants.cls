@@ -1,3 +1,9 @@
+/**
+ * @description   Shared constants for email named credentials, statuses, and trigger
+ *                points.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public with sharing class BWM_EmailConstants {
   public static final String NAMED_CREDENTIAL = 'callout:Infobip_Email';
   public static final String SENDER_CENTRAL = 'Central';
@@ -68,6 +74,10 @@ public with sharing class BWM_EmailConstants {
   public static final String TRIGGER_LEAD_TASK_LOST_FUTURE_PROSPECTING = 'Email_Lead_Task_Lost_FutureProspect_Prospecting';
   public static final String TRIGGER_LEAD_TASK_LOST_PRICE_PROSPECTING = 'Email_Lead_Task_Lost_PriceOrExisting_Prospecting';
   public static final String TRIGGER_LEAD_TASK_LOST_NOT_RESPONDING_PROSPECTING = 'Email_Lead_Task_Lost_NotResponding_Prospecting';
+  public static final String TRIGGER_LEAD_DETAILS_NOT_RECEIVED_PROSPECTING =
+    'Email_Lead_Details_Not_Received_Prospecting';
+  public static final String TRIGGER_OPPORTUNITY_DETAILS_NOT_RECEIVED_NURTURE =
+    'Email_Opportunity_Details_Not_Received_Nurture';
   public static final String TRIGGER_OPPORTUNITY_QUALIFY_NURTURE = 'Email_Opportunity_Qualify_Nurture';
   public static final String TRIGGER_OPPORTUNITY_DEALER_ENQUIRY = 'Email_Opportunity_Dealer_Enquiry';
   public static final String TRIGGER_OPP_LOST_NOT_RESPONDING_NURTURE = 'Email_Opp_Lost_NotResponding_Nurture';
@@ -105,6 +115,8 @@ public with sharing class BWM_EmailConstants {
   public static final String PRODUCT_BRIEF_PLACEHOLDER = '{#product_brief#}';
   public static final String FIELD_PRODUCT_BRIEF = 'PRODUCT_BRIEF';
   public static final String TEMPLATE_DEALER_SALES_ASSIGN = 'Dealer_sales_assign';
+  public static final String TEMPLATE_NEGOTIATION_LOST_FUTURE_TENDER_DEPT = 'Negotiation_lost_future_tender_dept';
+  public static final String TEMPLATE_NEGOTIATION_LOST_FUTURE_TENDER_GEN = 'Negotiation_lost_future_tender_gen';
   public static final String PRODUCT_BRIEF_MERGE_TOKEN = '{{Product_Brief}}';
   public static final Integer EMAIL_ATTACHMENT_BINARY_LIMIT_BYTES = 3145728;
 
@@ -119,8 +131,9 @@ public with sharing class BWM_EmailConstants {
     'Steel Tubular Poles'
   };
 
-  // Tower / structure departments used by many _gen templates.
+  // Tower / structure departments used by many _gen templates (+ Enquiry).
   public static final Set<String> GEN_TOWER_DEPARTMENTS = new Set<String>{
+    DEPT_ENQUIRY,
     'Transmission & Telecom Tower',
     'Pre Engineering Building',
     'Railway Electrification Structure'
@@ -163,7 +176,10 @@ public with sharing class BWM_EmailConstants {
   };
 
   public static final Map<String, Set<String>> OPP_LOST_REASONS_BY_GROUP = new Map<String, Set<String>>{
-    OPP_LOST_GROUP_NOT_RESPONDING => new Set<String>{ 'Not responding' },
+    OPP_LOST_GROUP_NOT_RESPONDING => new Set<String>{
+      'Not responding',
+      'Not Responding'
+    },
     OPP_LOST_GROUP_OPERATIONAL => new Set<String>{
       'Min qty not met',
       'Minimum Quantity Not Met',

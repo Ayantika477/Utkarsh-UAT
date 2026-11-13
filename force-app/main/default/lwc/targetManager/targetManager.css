@@ -1,23 +1,530 @@
-/* Flex container to manage full height and push footer down */
+/* ==========================================================
+   TARGET MANAGER LWC - ENHANCED STYLING SYSTEM
+   ========================================================== */
+
+:host {
+    --brand-primary: #0176D3;
+    --brand-primary-hover: #014486;
+    --brand-bg-subtle: #f0f7fd;
+    --border-color-subtle: #e2e8f0;
+    --border-color-card: #e5e7eb;
+    --card-bg: #ffffff;
+    --page-bg: #f8fafc;
+    --text-primary: #1e293b;
+    --text-secondary: #64748b;
+    --text-muted: #94a3b8;
+    --success-bg: #ecfdf5;
+    --success-text: #065f46;
+    --success-border: #a7f3d0;
+    --success-dot: #10b981;
+    --warning-bg: #fffbeb;
+    --warning-text: #92400e;
+    --warning-border: #fde68a;
+    --warning-dot: #f59e0b;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --shadow-subtle: 0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03);
+    --shadow-card: 0 4px 6px -1px rgba(15, 23, 42, 0.04), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+    --shadow-hover: 0 10px 15px -3px rgba(15, 23, 42, 0.07), 0 4px 6px -4px rgba(15, 23, 42, 0.05);
+}
+
+/* Base Card Shell */
+.full-height-card {
+    display: block;
+    background-color: #ffffff;
+}
+
+/* ==========================================================
+   TARGETS TAB - DESKTOP & MOBILE STYLES
+   ========================================================== */
+
+/* Header Bar */
+.targets-header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color-subtle);
+    padding-bottom: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.targets-header-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.targets-header-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+}
+
+.targets-count-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--brand-bg-subtle);
+    color: var(--brand-primary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 9999px;
+    border: 1px solid #bfdbfe;
+}
+
+.targets-header-subtitle {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.btn-add-target {
+    --sds-c-button-brand-color-background: var(--brand-primary);
+    --sds-c-button-brand-color-background-hover: var(--brand-primary-hover);
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+}
+
+/* Targets View Wrapper */
+.targets-view-wrapper {
+    background-color: transparent;
+}
+
+/* ----------------------------------------------------------
+   DESKTOP CUSTOM TABLE (Visible > 768px)
+   ---------------------------------------------------------- */
+.custom-desktop-table-container {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-subtle);
+}
+
+.custom-desktop-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+}
+
+.custom-desktop-table thead {
+    background-color: #f8fafc;
+    border-bottom: 1px solid var(--border-color-subtle);
+}
+
+.custom-desktop-table th {
+    padding: 12px 18px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.custom-desktop-table td {
+    padding: 14px 18px;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--border-color-subtle);
+    font-size: 0.875rem;
+    color: var(--text-primary);
+}
+
+.custom-desktop-tr {
+    transition: background-color 0.15s ease;
+}
+
+.custom-desktop-tr:hover {
+    background-color: #f8fafc;
+}
+
+.custom-desktop-tr:last-child td {
+    border-bottom: none;
+}
+
+/* Target Name Cell */
+.target-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.target-icon-badge {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background-color: var(--brand-bg-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--brand-primary);
+    flex-shrink: 0;
+    border: 1px solid #bfdbfe;
+}
+
+.target-name-text {
+    font-weight: 600;
+    color: var(--text-primary);
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Module Chip */
+.module-chip {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: var(--radius-sm);
+    background-color: #f1f5f9;
+    color: #334155;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid #e2e8f0;
+}
+
+/* Assigned Cell */
+.assigned-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.assigned-names-text {
+    font-weight: 500;
+    color: var(--text-primary);
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.extra-count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #e2e8f0;
+    color: #475569;
+    font-size: 0.7rem;
+    font-weight: 700;
+    border-radius: 9999px;
+    padding: 2px 7px;
+    height: 20px;
+    min-width: 20px;
+}
+
+/* Created Cell */
+.created-cell {
+    display: flex;
+    flex-direction: column;
+}
+
+.created-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+}
+
+.created-date {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* Status Badges */
+.status-badge-active {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    background-color: var(--success-bg);
+    color: var(--success-text);
+    border: 1px solid var(--success-border);
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+.status-badge-draft {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    background-color: var(--warning-bg);
+    color: var(--warning-text);
+    border: 1px solid var(--warning-border);
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+.status-indicator-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: currentColor;
+}
+
+/* Action Buttons */
+.actions-button-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.action-btn {
+    border-radius: var(--radius-sm);
+    transition: transform 0.1s ease;
+}
+
+.action-btn-edit {
+    --sds-c-icon-color-foreground-default: #0176D3;
+}
+
+.action-btn-delete {
+    --sds-c-icon-color-foreground-default: #ea001e;
+}
+
+.custom-table-footer {
+    padding: 10px 18px;
+    background-color: #f8fafc;
+    border-top: 1px solid var(--border-color-subtle);
+    display: flex;
+    justify-content: flex-end;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+/* ----------------------------------------------------------
+   MOBILE CARDS VIEW (Hidden on Desktop, Visible <= 768px)
+   ---------------------------------------------------------- */
+.custom-mobile-cards-container {
+    display: none; /* Desktop default: hidden */
+}
+
+.empty-targets-state {
+    background-color: var(--card-bg);
+    border: 1px dashed var(--border-color-subtle);
+    border-radius: var(--radius-md);
+    padding: 3rem 1.5rem;
+    text-align: center;
+}
+
+.empty-targets-icon-wrapper {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background-color: var(--brand-bg-subtle);
+    color: var(--brand-primary);
+    margin-bottom: 1rem;
+}
+
+.empty-targets-title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.empty-targets-desc {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    max-width: 360px;
+    margin: 0 auto 1.25rem auto;
+}
+
+/* ==========================================================
+   OVERVIEW DASHBOARD STYLING
+   ========================================================== */
+
+.dashboard-wrapper {
+    background-color: #f1f5f9;
+    padding: 1.25rem;
+    min-height: 800px;
+}
+
+/* Overview Filter Bar */
+.overview-filter-bar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-end;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.filter-col {
+    display: flex;
+    flex-direction: column;
+}
+
+.filter-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.filter-target .filter-combobox {
+    width: 260px;
+}
+
+.filter-cycle .filter-combobox {
+    width: 160px;
+}
+
+/* Header Stats Card */
+.header-stats-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-subtle);
+    padding: 1.25rem;
+}
+
+.header-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1.25rem;
+    align-items: center;
+}
+
+.header-stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.stat-item-achievement {
+    align-items: center;
+    text-align: center;
+    border-right: 1px solid var(--border-color-subtle);
+    padding-right: 1rem;
+}
+
+.stat-ring-wrap {
+    margin: 4px 0;
+}
+
+.stat-achievement-number {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #F89B29;
+}
+
+.stat-target-name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.blue-badge {
+    display: inline-block;
+    background-color: var(--brand-bg-subtle);
+    color: var(--brand-primary);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    width: fit-content;
+    border: 1px solid #bfdbfe;
+    margin-top: 2px;
+}
+
+.stat-line {
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+}
+
+.stat-cycle-value {
+    font-size: 0.9375rem;
+    color: var(--brand-primary);
+    font-weight: 700;
+}
+
+.stat-freq-value {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Dashboard List and Performance Cards */
+.list-card, .perf-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-subtle);
+    height: 100%;
+}
+
+.dash-progress-track {
+    background-color: #ececea;
+    border-radius: 10px;
+    height: 8px;
+    width: 120px;
+    overflow: hidden;
+}
+
+.dash-progress-bar {
+    background-color: #F89B29;
+    height: 100%;
+    border-radius: 10px;
+}
+
+.avatar-initials {
+    background-color: #f1f5f9;
+    color: #475569;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border-radius: 50%;
+    height: 32px;
+    width: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-color-subtle);
+}
+
+/* ==========================================================
+   WIZARD LAYOUT & CONTROLS
+   ========================================================== */
+
 .wizard-layout-wrapper {
     display: flex;
     flex-direction: column;
-    min-height: 600px; /* Base height, will grow if needed */
+    min-height: 600px;
     height: 100%;
-    background-color: #f9f9fb;
+    background-color: #f8fafc;
 }
 
-/* Main content area expands to take up available empty space */
 .wizard-content {
     flex-grow: 1;
     display: flex;
     flex-direction: column;
 }
 
-/* Footer sticks to the bottom of the wrapper */
 .wizard-footer {
     background-color: #ffffff;
     flex-shrink: 0;
+    border-top: 1px solid var(--border-color-subtle);
 }
 
 /* Dual List Layout */
@@ -25,11 +532,11 @@
     flex-grow: 1;
     display: flex;
     width: 100%;
-    background-color: #f9f9fb;
+    background-color: #f8fafc;
 }
 
 .right-border-col {
-    border-right: 1px solid #e5e5e5;
+    border-right: 1px solid var(--border-color-subtle);
     padding-right: 1.5rem;
 }
 
@@ -37,45 +544,53 @@
     padding-left: 1.5rem;
 }
 
-/* Left Side: Available List Styling */
 .user-list {
-    height: calc(100% - 60px); /* Adjust based on search input height */
+    height: calc(100% - 60px);
     min-height: 350px;
     max-height: 500px;
 }
 
 .entity-card {
     background-color: #ffffff;
-    border-radius: 6px;
-    border: 1px solid #e5e5e5;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color-subtle);
     box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+    transition: border-color 0.15s ease;
+}
+
+.entity-card:hover {
+    border-color: #cbd5e1;
 }
 
 .select-btn {
-    --sds-c-button-text-color: #0176D3;
+    --sds-c-button-text-color: var(--brand-primary);
     font-weight: 600;
 }
 
-/* Right Side: Selected List Styling */
 .selected-list {
     height: calc(100% - 40px);
     min-height: 350px;
     max-height: 500px;
-    background-color: #f3f3f5; /* Slight gray background behind selected items */
-    padding: 0.5rem;
-    border-radius: 8px;
+    background-color: #f1f5f9;
+    padding: 0.75rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color-subtle);
 }
 
 .selected-card {
     background-color: #ffffff;
-    border-radius: 6px;
-    border: 1px solid #e5e5e5;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color-subtle);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 
-/* Action Buttons Custom Styling */
+/* Buttons */
 .icon-red {
     --sds-c-icon-color-foreground-default: #ea001e;
+}
+
+.icon-blue {
+    --sds-c-icon-color-foreground-default: #0176D3;
 }
 
 .btn-cancel button {
@@ -90,8 +605,8 @@
     border-radius: 20px;
     padding-left: 1.5rem;
     padding-right: 1.5rem;
-    color: #0176D3;
-    border-color: #0176D3;
+    color: var(--brand-primary);
+    border-color: var(--brand-primary);
 }
 
 .btn-next button {
@@ -100,16 +615,15 @@
     padding-right: 2rem;
 }
 
-/* Styling for the Select All button to match the screenshot */
 .custom-select-all button {
-    border: 1px solid #0176D3;
-    border-radius: 4px;
+    border: 1px solid var(--brand-primary);
+    border-radius: var(--radius-sm);
     padding: 2px 10px;
 }
 
-/* --- Step 3 Target Table Styling --- */
+/* Step 3 Target Table */
 .header-green {
-    color: #4CAF50;
+    color: #16a34a;
     font-size: 0.75rem;
     font-weight: 700;
 }
@@ -119,7 +633,6 @@
     margin: 0 auto;
 }
 
-/* Make Employee and Actions columns sticky when scrolling horizontally */
 .custom-target-table {
     border-collapse: separate;
     border-spacing: 0;
@@ -139,14 +652,14 @@
     box-shadow: -2px 0 4px -2px rgba(0,0,0,0.1);
 }
 
-/* --- Past Progress Bar Custom UI (Matching SS3) --- */
+/* Progress bar inside step 3 table */
 .progress-container {
     width: 80px;
     margin: 0 auto;
 }
 
 .progress-track {
-    background-color: #f3f3f3 !important;
+    background-color: #f1f5f9 !important;
     border-radius: 10px;
     height: 8px;
     width: 100%;
@@ -155,7 +668,7 @@
 }
 
 .progress-bar-green {
-    background-color: #4CAF50 !important;
+    background-color: #16a34a !important;
     height: 100%;
     border-radius: 10px;
 }
@@ -171,64 +684,6 @@
     color: #333;
 }
 
-/* --- Custom List View Styling --- */
-.custom-list-table th {
-    font-weight: 700;
-    color: #444;
-    background-color: #f9f9fb;
-}
-
-.custom-list-table td {
-    vertical-align: middle;
-    padding-top: 0.75rem;
-    padding-bottom: 0.75rem;
-}
-
-/* The circular gray badge for "+43" */
-.extra-count-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background-color: #f3f3f3;
-    color: #333;
-    font-size: 0.7rem;
-    font-weight: 700;
-    border-radius: 50%;
-    height: 24px;
-    width: 24px;
-    padding: 2px;
-}
-
-/* Status Badges */
-.status-badge-active {
-    background-color: #e8f5e9;
-    color: #2e7d32;
-    padding: 4px 12px;
-    border-radius: 4px;
-    font-weight: 600;
-    font-size: 0.8rem;
-}
-
-.status-badge-draft {
-    background-color: #fff3e0;
-    color: #e65100;
-    padding: 4px 12px;
-    border-radius: 4px;
-    font-weight: 600;
-    font-size: 0.8rem;
-}
-
-/* Colored Action Icons */
-.icon-blue {
-    --sds-c-icon-color-foreground-default: #0176D3;
-}
-
-
-/* ==========================================
-   BRUTE FORCE HOVER REMOVER FOR STEP 3
-========================================== */
-
-/* This completely disables the standard gray hover effect for rows in the step 3 table */
 .custom-target-table tbody tr:hover > td,
 .custom-target-table tbody tr:focus > td,
 .custom-target-table tbody tr.slds-has-focus > td,
@@ -236,15 +691,14 @@
     background-color: #ffffff !important;
     box-shadow: none !important;
 }
-/* ==========================================
-   WARNING BANNER STYLING
-========================================== */
+
+/* Warning Banner */
 .custom-warning-banner {
-    background-color: #ffecd6;
-    border: 1px solid #ffb74d;
-    border-radius: 4px;
-    padding: 8px 12px;
-    color: #000000;
+    background-color: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: var(--radius-sm);
+    padding: 8px 14px;
+    color: #9a3412;
     display: flex;
     align-items: center;
     font-size: 0.85rem;
@@ -256,226 +710,307 @@
 }
 
 .warning-icon {
-    --sds-c-icon-color-foreground-default: #e65100;
-}
-/* ==========================================
-   OVERVIEW DASHBOARD STYLING
-========================================== */
-
-.dashboard-wrapper {
-    background-color: #f3f3f5; /* Light grey background from screenshot */
-    padding: 1rem;
-    min-height: 800px;
-}
-
-.header-stats-card {
-    border-radius: 8px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-}
-
-.blue-badge {
-    background-color: #e3f2fd;
-    color: #1976d2;
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-
-/* Circular Progress overrides */
-.orange-ring {
-    stroke: #F89B29;
-}
-.orange-text {
-    color: #F89B29;
-}
-
-/* Dashboard Targets List Progress */
-.dash-progress-track {
-    background-color: #ececea;
-    border-radius: 10px;
-    height: 8px;
-    width: 120px;
-    overflow: hidden;
-}
-
-.dash-progress-bar {
-    background-color: #F89B29;
-    height: 100%;
-    border-radius: 10px;
-}
-
-.avatar-initials {
-    background-color: #f3f3f3;
-    color: #666;
-    font-size: 0.7rem;
-    font-weight: 700;
-    border-radius: 50%;
-    height: 30px;
-    width: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid #ddd;
-}
-
-.list-card, .perf-card {
-    border-radius: 8px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    height: 100%;
+    --sds-c-icon-color-foreground-default: #ea580c;
 }
 
 
 /* ==========================================================
-   ============   MOBILE RESPONSIVE OVERRIDES   =============
-   Everything below this line ONLY applies on small screens
-   (max-width: 768px). Desktop / Tablet-landscape / Laptop UI
-   is completely untouched and renders exactly as before.
+   MOBILE RESPONSIVE OVERRIDES (max-width: 768px)
+   Enhanced layout, generous spacing, and proper borders
    ========================================================== */
 @media screen and (max-width: 768px) {
 
-    /* ---------- General page padding ---------- */
+    /* ---------- General Page & Container Spacing ---------- */
     .dashboard-wrapper {
-        padding: 0.5rem;
+        padding: 0.75rem;
         min-height: auto;
     }
 
     /* ===================================================
-       OVERVIEW TAB
+       TARGETS TAB: MOBILE CARDS TRANSFORMATION
        =================================================== */
 
-    /* Target / Cycle selector row - stack vertically */
-    .dashboard-wrapper > .slds-grid.slds-grid_align-end {
+    .targets-header-bar {
         flex-direction: column;
         align-items: stretch;
-    }
-
-    .dashboard-wrapper > .slds-grid.slds-grid_align-end .slds-col {
-        width: 100% !important;
-    }
-
-    .dashboard-wrapper > .slds-grid.slds-grid_align-end .slds-col lightning-combobox {
-        width: 100% !important;
-    }
-
-    /* Header stats card - stack the 5 columns */
-    .header-stats-card .slds-grid {
-        flex-direction: column;
-    }
-
-    .header-stats-card .slds-col.slds-size_1-of-5 {
-        width: 100% !important;
+        gap: 0.875rem;
+        padding-bottom: 0.875rem;
         margin-bottom: 1rem;
-        text-align: left !important;
     }
 
-    .header-stats-card .slds-col.slds-size_1-of-5:last-child {
-        margin-bottom: 0;
+    .targets-header-info {
+        gap: 0.125rem;
     }
 
-    .header-stats-card .slds-col.slds-text-align_center {
-        text-align: center !important;
+    .targets-header-title {
+        font-size: 1.15rem;
     }
 
-    /* Targets list + Trend lines row - stack to full width */
+    .btn-add-target {
+        width: 100%;
+    }
+
+    .btn-add-target button {
+        width: 100%;
+        min-height: 42px;
+        font-size: 0.875rem;
+    }
+
+    /* Hide the wide desktop table */
+    .custom-desktop-table-container {
+        display: none !important;
+    }
+
+    /* Show the clean, touch-friendly mobile cards */
+    .custom-mobile-cards-container {
+        display: flex !important;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    /* Individual Target Mobile Card */
+    .mobile-target-card {
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color-card);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-card);
+        padding: 1.125rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.875rem;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .mobile-target-card:active {
+        border-color: #cbd5e1;
+    }
+
+    /* Card Header: Title & Status */
+    .mobile-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+        border-bottom: 1px solid var(--border-color-subtle);
+        padding-bottom: 0.75rem;
+    }
+
+    .mobile-card-title-group {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .mobile-target-icon-badge {
+        width: 28px;
+        height: 28px;
+        border-radius: var(--radius-sm);
+        background-color: var(--brand-bg-subtle);
+        color: var(--brand-primary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        border: 1px solid #bfdbfe;
+    }
+
+    .mobile-card-title {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* Card Body: Key-Value Rows with Spacing */
+    .mobile-card-body {
+        display: flex;
+        flex-direction: column;
+        gap: 0.625rem;
+    }
+
+    .mobile-info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.8125rem;
+        padding: 0.125rem 0;
+    }
+
+    .mobile-info-label {
+        color: var(--text-secondary);
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+    }
+
+    .mobile-info-value {
+        color: var(--text-primary);
+        text-align: right;
+        font-weight: 500;
+        max-width: 60%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .created-info {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+    }
+
+    .created-date-mobile {
+        font-size: 0.725rem;
+        color: var(--text-muted);
+    }
+
+    /* Card Footer: Touch-friendly Action Buttons */
+    .mobile-card-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.625rem;
+        border-top: 1px solid var(--border-color-subtle);
+        padding-top: 0.875rem;
+        margin-top: 0.25rem;
+    }
+
+    .mobile-action-btn button {
+        width: 100%;
+        min-height: 40px;
+        border-radius: var(--radius-sm);
+        font-size: 0.8125rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .mobile-edit-btn button {
+        color: var(--brand-primary);
+        border: 1px solid #bfdbfe;
+        background-color: #ffffff;
+    }
+
+    .mobile-edit-btn button:active {
+        background-color: var(--brand-bg-subtle);
+    }
+
+    .mobile-delete-btn button {
+        color: #ea001e;
+        border: 1px solid #fecaca;
+        background-color: #ffffff;
+    }
+
+    .mobile-delete-btn button:active {
+        background-color: #fef2f2;
+    }
+
+    .mobile-cards-footer {
+        padding: 0.75rem;
+        text-align: center;
+        font-size: 0.8125rem;
+        color: var(--text-secondary);
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color-subtle);
+        border-radius: var(--radius-md);
+    }
+
+    /* ===================================================
+       OVERVIEW TAB MOBILE ADJUSTMENTS
+       =================================================== */
+
+    /* Filter row */
+    .overview-filter-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.625rem;
+    }
+
+    .filter-col,
+    .filter-target .filter-combobox,
+    .filter-cycle .filter-combobox {
+        width: 100% !important;
+    }
+
+    /* Header stats card - responsive 2-column grid with clean borders */
+    .header-stats-card {
+        padding: 1rem;
+    }
+
+    .header-stats-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 0.875rem;
+    }
+
+    /* Achievement item spans full width at the top */
+    .header-stat-item.stat-item-achievement {
+        grid-column: span 2;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color-subtle);
+        padding-right: 0;
+        padding-bottom: 0.875rem;
+        margin-bottom: 0.25rem;
+    }
+
+    .header-stat-item.stat-item-target {
+        grid-column: span 2;
+        border-bottom: 1px solid var(--border-color-subtle);
+        padding-bottom: 0.75rem;
+    }
+
+    /* Dashboard columns stack vertically */
     .dashboard-wrapper > .slds-grid.slds-gutters_medium {
         flex-direction: column;
+        gap: 1rem;
     }
 
     .dashboard-wrapper > .slds-grid.slds-gutters_medium > .slds-col.slds-size_1-of-2 {
         width: 100% !important;
-        margin-bottom: 1rem;
+        margin-bottom: 0;
     }
 
-    /* Top / Bottom performers row - stack */
+    /* Performers stack */
     .slds-grid.slds-gutters_small {
         flex-direction: column;
+        gap: 0.875rem;
     }
 
     .slds-grid.slds-gutters_small > .slds-col.slds-size_1-of-2 {
         width: 100% !important;
-        margin-bottom: 1rem;
     }
 
-    /* Team Target vs Actual + Total Cycle Completion row - stack */
+    /* Target vs Actual & Total Completion stack */
     .dashboard-wrapper > .slds-grid.slds-m-top_medium {
         flex-direction: column;
+        gap: 1rem;
     }
 
     .dashboard-wrapper > .slds-grid.slds-m-top_medium > .slds-col.slds-size_2-of-3,
     .dashboard-wrapper > .slds-grid.slds-m-top_medium > .slds-col.slds-size_1-of-3 {
         width: 100% !important;
-        margin-bottom: 1rem;
     }
 
-    /* Charts - allow them to shrink with the container */
-    .trend-chart,
-    .bar-chart,
-    .doughnut-chart {
-        max-width: 100%;
-    }
-
-    /* Targets list rows - allow wrapping & truncation room */
     .list-card ul.slds-scrollable_y li.slds-grid {
         flex-wrap: wrap;
+        gap: 0.25rem;
     }
 
     .list-card ul.slds-scrollable_y li.slds-grid > .slds-col.slds-size_1-of-2 {
         width: 100% !important;
     }
 
-    .list-card ul.slds-scrollable_y li.slds-grid > .slds-col.slds-size_1-of-2:first-child {
-        margin-bottom: 0.5rem;
-    }
-
-    .list-card ul.slds-scrollable_y li .slds-truncate {
-        max-width: 60vw !important;
-    }
-
     .dash-progress-track {
-        width: 90px;
+        width: 100px;
     }
 
     /* ===================================================
-       TARGETS TAB - LIST VIEW (existing targets table)
-       =================================================== */
-
-    /* Header row: title + Add Target button stack */
-    .slds-grid.slds-grid_align-spread.slds-p-bottom_medium.slds-p-horizontal_medium {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .slds-grid.slds-grid_align-spread.slds-p-bottom_medium.slds-p-horizontal_medium > div {
-        margin-bottom: 0.5rem;
-    }
-
-    .slds-grid.slds-grid_align-spread.slds-p-bottom_medium.slds-p-horizontal_medium lightning-button {
-        width: 100%;
-    }
-
-    /* Make the targets table horizontally scrollable on mobile */
-    .custom-list-table {
-        display: block;
-        width: 100%;
-        overflow-x: auto;
-        white-space: nowrap;
-    }
-
-    .custom-list-table thead,
-    .custom-list-table tbody,
-    .custom-list-table tr {
-        display: table;
-        width: 100%;
-        table-layout: fixed;
-    }
-
-    .custom-list-table .slds-truncate {
-        max-width: 140px;
-    }
-
-    /* ===================================================
-       TARGET WIZARD - shared layout
+       WIZARD STEPS MOBILE ADJUSTMENTS
        =================================================== */
 
     .wizard-layout-wrapper {
@@ -483,55 +1018,14 @@
     }
 
     .wizard-content.slds-p-around_large {
-        padding: 0.75rem !important;
+        padding: 0.875rem !important;
     }
-
-    /* Progress indicator path - shrink labels so it fits */
-    lightning-progress-indicator {
-        font-size: 0.75rem;
-    }
-
-    /* Footer buttons - stack and go full width */
-    .wizard-footer.slds-grid_align-end {
-        flex-wrap: wrap;
-        justify-content: stretch;
-        gap: 0.5rem;
-    }
-
-    .wizard-footer .btn-cancel,
-    .wizard-footer .btn-previous,
-    .wizard-footer .btn-next {
-        flex: 1 1 100%;
-        margin-right: 0 !important;
-    }
-
-    .wizard-footer .btn-cancel button,
-    .wizard-footer .btn-previous button,
-    .wizard-footer .btn-next button {
-        width: 100%;
-    }
-
-    /* When there are 2-3 buttons, let them sit side by side on slightly wider phones */
-    @media screen and (min-width: 481px) {
-        .wizard-footer .btn-cancel,
-        .wizard-footer .btn-previous,
-        .wizard-footer .btn-next {
-            flex: 1 1 auto;
-        }
-    }
-
-    /* ===================================================
-       STEP 1 - Create Target form
-       =================================================== */
 
     .wizard-content .slds-grid.slds-wrap.slds-gutters_large > .slds-col.slds-size_1-of-2 {
         width: 100% !important;
     }
 
-    /* ===================================================
-       STEP 2 - Dual list (Employees / Selected)
-       =================================================== */
-
+    /* Dual List */
     .custom-dual-list {
         flex-direction: column;
     }
@@ -543,10 +1037,10 @@
 
     .right-border-col {
         border-right: none;
-        border-bottom: 1px solid #e5e5e5;
+        border-bottom: 1px solid var(--border-color-subtle);
         padding-right: 0;
-        padding-bottom: 1rem;
-        margin-bottom: 1rem;
+        padding-bottom: 1.25rem;
+        margin-bottom: 1.25rem;
     }
 
     .left-pad-col {
@@ -555,60 +1049,44 @@
 
     .user-list,
     .selected-list {
-        max-height: 300px;
-        min-height: 200px;
+        max-height: 280px;
+        min-height: 180px;
     }
 
-    .entity-card,
-    .selected-card {
-        flex-wrap: wrap;
+    /* Wizard footer buttons full-width */
+    .wizard-footer {
+        padding: 0.875rem !important;
     }
 
-    .entity-card .select-btn,
-    .selected-card .slds-grid_vertical-align-center {
-        margin-top: 0.5rem;
+    .wizard-footer.slds-grid_align-end {
+        flex-direction: column-reverse;
+        gap: 0.625rem;
     }
 
-    /* ===================================================
-       STEP 3 - Assign Target table
-       =================================================== */
-
-    .custom-warning-banner.inline-banner {
+    .wizard-footer .btn-cancel,
+    .wizard-footer .btn-previous,
+    .wizard-footer .btn-next {
         width: 100%;
-        font-size: 0.75rem;
+        margin-right: 0 !important;
     }
 
-    /* Allow horizontal scroll on the assign-target table container */
-    .slds-scrollable_x.slds-box.slds-theme_default.slds-size_1-of-1 {
-        max-height: 60vh !important;
+    .wizard-footer .btn-cancel button,
+    .wizard-footer .btn-previous button,
+    .wizard-footer .btn-next button {
+        width: 100%;
+        min-height: 42px;
     }
 
+    /* Step 3 Table horizontal scroll */
     .custom-target-table th,
     .custom-target-table td {
         font-size: 0.75rem;
         padding: 0.5rem !important;
     }
 
-    .custom-target-table .sticky-col-left {
-        min-width: 160px !important;
-    }
-
-    /* Unfreeze the Employee and Actions columns on mobile so the table
-       scrolls normally without sticky/frozen columns */
     .custom-target-table .sticky-col-left,
     .custom-target-table .sticky-col-right {
         position: static !important;
-        left: auto !important;
-        right: auto !important;
-        z-index: auto !important;
         box-shadow: none !important;
-    }
-
-    .target-input {
-        width: 80px;
-    }
-
-    .progress-container {
-        width: 60px;
     }
 }

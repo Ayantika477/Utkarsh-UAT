@@ -144,8 +144,15 @@ get tenderUserCommentList() {
     }
 
     handleSubmit() {
+        const notesInput = this.template.querySelector('lightning-textarea');
+
+    if (!notesInput.checkValidity()) {
+        notesInput.reportValidity();
+        return;
+    }
         this.save();
     }
+
 
     loadProjectOwners() {
     getProjectOwners({ tenderId: this.recordId, userListChoice:this.userListchoice })
@@ -227,10 +234,10 @@ get tenderUserCommentList() {
                     label: 'Reject and Close',
                     value: 'CLOSE_TENDER'
                 },
-                {
+                /*{
                     label: 'Update Account Details',
                     value: 'UPDATE_ACCOUNT'
-                }
+                }*/
             ];
         }
 

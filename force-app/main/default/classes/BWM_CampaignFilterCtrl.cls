@@ -52,11 +52,31 @@ public with sharing class BWM_CampaignFilterCtrl {
         return getPicklistOptions(Contact.State__c);
     }
 
+    @AuraEnabled(cacheable=true)
+    public static List<PicklistOption> getLeadDepartmentOptions() {
+        return getPicklistOptions(Lead.Department_Name__c);
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static List<PicklistOption> getOpportunityDepartmentOptions() {
+        return getPicklistOptions(Opportunity.Department_Name__c);
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static List<PicklistOption> getAccountDepartmentOptions() {
+        return getPicklistOptions(Account.Department_Name__c);
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static List<PicklistOption> getOfflineCampaignDepartmentOptions() {
+        return getPicklistOptions(Offline_Campaign__c.Department__c);
+    }
+
     @AuraEnabled
     public static List<Lead> searchLeads(
         String searchTerm,
         List<String> stages,
-        String departmentFilter,
+        List<String> departments,
         String campaignFilter,
         List<String> lostReasons,
         Date fromDate,
@@ -67,9 +87,6 @@ public with sharing class BWM_CampaignFilterCtrl {
     ) {
         String namePattern = String.isNotBlank(searchTerm)
             ? '%' + searchTerm.trim() + '%'
-            : null;
-        String departmentPattern = String.isNotBlank(departmentFilter)
-            ? '%' + departmentFilter.trim() + '%'
             : null;
         String campaignPattern = String.isNotBlank(campaignFilter)
             ? '%' + campaignFilter.trim() + '%'
@@ -87,7 +104,7 @@ public with sharing class BWM_CampaignFilterCtrl {
 
         String soql =
             'SELECT Id, Name, Status, Email, Phone, Department_Name__c, Lost_Reason__c, Campaign_Name__c, CreatedDate' +
-            ' FROM Lead WHERE Id != null AND Status != \'Qualified\'';
+            ' FROM Lead WHERE Id != null';
 
         if (namePattern != null) {
             soql += ' AND Name LIKE :namePattern';
@@ -95,8 +112,8 @@ public with sharing class BWM_CampaignFilterCtrl {
         if (stages != null && !stages.isEmpty()) {
             soql += ' AND Status IN :stages';
         }
-        if (departmentPattern != null) {
-            soql += ' AND Department_Name__c LIKE :departmentPattern';
+        if (departments != null && !departments.isEmpty()) {
+            soql += ' AND Department_Name__c IN :departments';
         }
         if (campaignPattern != null) {
             soql += ' AND Campaign_Name__c LIKE :campaignPattern';
@@ -129,7 +146,7 @@ public with sharing class BWM_CampaignFilterCtrl {
         String searchTerm,
         String dealerAccountFilter,
         List<String> stages,
-        String departmentFilter,
+        List<String> departments,
         List<String> lostReasons,
         Date fromDate,
         Date toDate,
@@ -142,9 +159,6 @@ public with sharing class BWM_CampaignFilterCtrl {
             : null;
         String dealerPattern = String.isNotBlank(dealerAccountFilter)
             ? '%' + dealerAccountFilter.trim() + '%'
-            : null;
-        String departmentPattern = String.isNotBlank(departmentFilter)
-            ? '%' + departmentFilter.trim() + '%'
             : null;
         Datetime toDateTime = toDate == null
             ? null
@@ -171,8 +185,8 @@ public with sharing class BWM_CampaignFilterCtrl {
         if (stages != null && !stages.isEmpty()) {
             soql += ' AND StageName IN :stages';
         }
-        if (departmentPattern != null) {
-            soql += ' AND Department_Name__c LIKE :departmentPattern';
+        if (departments != null && !departments.isEmpty()) {
+            soql += ' AND Department_Name__c IN :departments';
         }
         if (lostReasons != null && !lostReasons.isEmpty()) {
             soql += ' AND Lost_Reason__c IN :lostReasons';
@@ -202,7 +216,7 @@ public with sharing class BWM_CampaignFilterCtrl {
         String searchTerm,
         String phoneFilter,
         String emailFilter,
-        String departmentFilter,
+        List<String> departments,
         String countryFilter,
         List<String> states
     ) {
@@ -214,9 +228,6 @@ public with sharing class BWM_CampaignFilterCtrl {
             : null;
         String emailPattern = String.isNotBlank(emailFilter)
             ? '%' + emailFilter.trim() + '%'
-            : null;
-        String departmentPattern = String.isNotBlank(departmentFilter)
-            ? '%' + departmentFilter.trim() + '%'
             : null;
 
         String soql =
@@ -230,8 +241,8 @@ public with sharing class BWM_CampaignFilterCtrl {
         if (emailPattern != null) {
             soql += ' AND Email__c LIKE :emailPattern';
         }
-        if (departmentPattern != null) {
-            soql += ' AND Department_Name__c LIKE :departmentPattern';
+        if (departments != null && !departments.isEmpty()) {
+            soql += ' AND Department_Name__c IN :departments';
         }
         if (String.isNotBlank(countryFilter)) {
             soql += ' AND Country__c = :countryFilter';
@@ -280,6 +291,115 @@ public with sharing class BWM_CampaignFilterCtrl {
         }
         soql += ' ORDER BY CreatedDate DESC LIMIT 5000';
         return Database.query(soql);
+    }
+
+    @AuraEnabled
+    public static List<Offline_Campaign__c> searchOfflineCampaigns(
+        String searchTerm,
+        String phoneFilter,
+        String emailFilter,
+        List<String> departments,
+        String groupListFilter
+    ) {
+        return queryOfflineCampaigns(
+            searchTerm,
+            phoneFilter,
+            emailFilter,
+            departments,
+            groupListFilter,
+            false
+        );
+    }
+
+    /**
+     * @description Same as searchOfflineCampaigns; when exactGroupList is true the
+     *              Group / List value must match exactly (picked from suggestions).
+     */
+    @AuraEnabled
+    public static List<Offline_Campaign__c> searchOfflineCampaignsByGroupMatch(
+        String searchTerm,
+        String phoneFilter,
+        String emailFilter,
+        List<String> departments,
+        String groupListFilter,
+        Boolean exactGroupList
+    ) {
+        return queryOfflineCampaigns(
+            searchTerm,
+            phoneFilter,
+            emailFilter,
+            departments,
+            groupListFilter,
+            exactGroupList == true
+        );
+    }
+
+    private static List<Offline_Campaign__c> queryOfflineCampaigns(
+        String searchTerm,
+        String phoneFilter,
+        String emailFilter,
+        List<String> departments,
+        String groupListFilter,
+        Boolean exactGroupList
+    ) {
+        String namePattern = String.isNotBlank(searchTerm)
+            ? '%' + searchTerm.trim() + '%'
+            : null;
+        String phonePattern = String.isNotBlank(phoneFilter)
+            ? '%' + phoneFilter.trim() + '%'
+            : null;
+        String emailPattern = String.isNotBlank(emailFilter)
+            ? '%' + emailFilter.trim() + '%'
+            : null;
+        String groupListValue = String.isNotBlank(groupListFilter)
+            ? groupListFilter.trim()
+            : null;
+        String groupListPattern = groupListValue != null && !exactGroupList
+            ? '%' + groupListValue + '%'
+            : null;
+
+        String soql =
+            'SELECT Id, Name, Phone__c, Email__c, Department__c, Group_List__c, Active__c, CreatedDate' +
+            ' FROM Offline_Campaign__c WHERE Active__c = true';
+        if (namePattern != null) {
+            soql += ' AND Name LIKE :namePattern';
+        }
+        if (phonePattern != null) {
+            soql += ' AND Phone__c LIKE :phonePattern';
+        }
+        if (emailPattern != null) {
+            soql += ' AND Email__c LIKE :emailPattern';
+        }
+        if (departments != null && !departments.isEmpty()) {
+            soql += ' AND Department__c IN :departments';
+        }
+        if (groupListPattern != null) {
+            soql += ' AND Group_List__c LIKE :groupListPattern';
+        } else if (groupListValue != null) {
+            soql += ' AND Group_List__c = :groupListValue';
+        }
+        soql += ' ORDER BY CreatedDate DESC LIMIT 5000';
+        return Database.query(soql);
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static List<String> searchOfflineCampaignGroupLists(String groupListTerm) {
+        List<String> groupNames = new List<String>();
+        if (String.isBlank(groupListTerm)) {
+            return groupNames;
+        }
+        String groupListPattern = '%' + groupListTerm.trim() + '%';
+        for (AggregateResult row : [
+            SELECT Group_List__c groupName
+            FROM Offline_Campaign__c
+            WHERE Active__c = true AND Group_List__c LIKE :groupListPattern
+            GROUP BY Group_List__c
+            ORDER BY Group_List__c
+            LIMIT 50
+        ]) {
+            groupNames.add((String) row.get('groupName'));
+        }
+        return groupNames;
     }
 
     private static List<DealerOpportunityManagementController.OpportunityListItem> buildOpportunityListItems(

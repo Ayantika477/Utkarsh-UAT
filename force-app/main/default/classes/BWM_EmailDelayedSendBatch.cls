@@ -1,4 +1,25 @@
+/**
+ * @description   Batch and Schedulable that processes pending
+ *                BWM_Email_Scheduled_Send__c delayed emails.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_EmailDelayedSendBatch implements Database.Batchable<SObject>, Schedulable {
+  // Each row is a separate send (one sendEmail call, several queries), so a chunk stops
+  // before the transaction limits; unprocessed rows stay Pending for the next run.
+  @TestVisible
+  private static final Integer BATCH_SIZE = 10;
+
+  private static final Integer SOQL_HEADROOM = 40;
+  private static final Integer SOQL_SAFETY_MARGIN = 15;
+  private static final Integer CALLOUT_HEADROOM = 5;
+
+  @TestVisible
+  private static Integer lastProcessedCount = 0;
+
+  @TestVisible
+  private static Integer lastLeftPendingCount = 0;
+
   public Database.QueryLocator start(Database.BatchableContext context) {
     return Database.getQueryLocator(
       [
@@ -18,13 +39,29 @@ public without sharing class BWM_EmailDelayedSendBatch implements Database.Batch
     );
   }
 
+  /**
+   * @description Processes a batch of pending scheduled email rows; collects logs and updates for bulk DML outside the loop.
+   * @param context Batchable context from the platform.
+   * @param scope Pending BWM_Email_Scheduled_Send__c records due for send.
+   */
   public void execute(
     Database.BatchableContext context,
     List<BWM_Email_Scheduled_Send__c> scope
   ) {
     List<BWM_Email_Scheduled_Send__c> updates = new List<BWM_Email_Scheduled_Send__c>();
+    List<Email_Log__c> logsToInsert = new List<Email_Log__c>();
+    Integer processedCount = 0;
+    Integer leftPendingCount = 0;
+    Integer maxQueriesPerSend = 0;
 
     for (BWM_Email_Scheduled_Send__c scheduled : scope) {
+      if (processedCount > 0 && !hasCapacityForAnotherSend(maxQueriesPerSend)) {
+        leftPendingCount++;
+        continue;
+      }
+      processedCount++;
+      Integer queriesBeforeSend = Limits.getQueries();
+
       try {
         Id recordId = resolveRecordId(scheduled);
         if (recordId == null) {
@@ -52,24 +89,58 @@ public without sharing class BWM_EmailDelayedSendBatch implements Database.Batch
           scheduled.Error_Message__c = sendResult.skipReason;
         }
         updates.add(scheduled);
-        BWM_EmailLogService.insertLogs(sendResult.logs);
+        if (sendResult.logs != null && !sendResult.logs.isEmpty()) {
+          logsToInsert.addAll(sendResult.logs);
+        }
       } catch (Exception ex) {
         scheduled.Status__c = BWM_EmailConstants.SCHEDULE_STATUS_FAILED;
         scheduled.Error_Message__c = ex.getMessage();
         updates.add(scheduled);
       }
+      maxQueriesPerSend = Math.max(
+        maxQueriesPerSend,
+        Limits.getQueries() - queriesBeforeSend
+      );
     }
 
+    lastProcessedCount = processedCount;
+    lastLeftPendingCount = leftPendingCount;
+    if (leftPendingCount > 0) {
+      System.debug(
+        LoggingLevel.WARN,
+        'BWM_EmailDelayedSendBatch left ' + leftPendingCount +
+          ' rows Pending for the next run (transaction limits).'
+      );
+    }
+
+    if (!logsToInsert.isEmpty()) {
+      BWM_EmailLogService.insertLogs(logsToInsert);
+    }
     if (!updates.isEmpty()) {
       update updates;
     }
   }
 
   public void finish(Database.BatchableContext context) {
+    System.debug(
+      LoggingLevel.INFO,
+      'BWM_EmailDelayedSendBatch finished. JobId=' +
+        (context == null ? 'null' : String.valueOf(context.getJobId()))
+    );
   }
 
   public void execute(SchedulableContext context) {
-    Database.executeBatch(new BWM_EmailDelayedSendBatch(), 50);
+    Database.executeBatch(new BWM_EmailDelayedSendBatch(), BATCH_SIZE);
+  }
+
+  private static Boolean hasCapacityForAnotherSend(Integer maxQueriesPerSend) {
+    Integer queriesNeeded = Math.max(
+      SOQL_HEADROOM,
+      maxQueriesPerSend + SOQL_SAFETY_MARGIN
+    );
+    return Limits.getEmailInvocations() < Limits.getLimitEmailInvocations() &&
+      Limits.getQueries() + queriesNeeded < Limits.getLimitQueries() &&
+      Limits.getCallouts() + CALLOUT_HEADROOM < Limits.getLimitCallouts();
   }
 
   private static Id resolveRecordId(BWM_Email_Scheduled_Send__c scheduled) {

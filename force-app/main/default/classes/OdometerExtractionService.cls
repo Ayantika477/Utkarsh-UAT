@@ -9,8 +9,13 @@ public class OdometerExtractionService {
     public static Decimal extractOdometerReading(String base64Image) {
         try {
             // Clean the base64 string (remove data URL prefix if present)
-            String cleanBase64 = base64Image.contains(',')
+            /*String cleanBase64 = base64Image.contains(',')
                 ? base64Image.split(',')[1]
+                : base64Image;*/
+
+            Integer commaIndex = base64Image.indexOf(',');
+            String cleanBase64 = commaIndex >= 0
+                ? base64Image.substring(commaIndex + 1)
                 : base64Image;
 
             // Step 1: Store image as ContentVersion so Prompt Builder can access it as a real file

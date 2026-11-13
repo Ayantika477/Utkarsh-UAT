@@ -9,6 +9,8 @@ import getTenderInfo from '@salesforce/apex/TenderAcceptanceController.getTender
 import updateTenderChoice from '@salesforce/apex/TenderAcceptanceController.updateTenderChoice';
 import getTenderUserChoices from '@salesforce/apex/TenderAcceptanceController.getTenderUserChoices';
 import getAddressBookDetails from '@salesforce/apex/TenderHODController.getAddressBookDetails';
+import getProjectOwners from '@salesforce/apex/TenderHODController.getProjectOwners';
+import acceptParticipationDirect from '@salesforce/apex/TenderHODController.acceptParticipationDirect';
 
 import HOD_COMMENTS from '@salesforce/schema/Tender__c.HOD_Comments__c';
 import TENDER_STAGE from '@salesforce/schema/Tender__c.Tender_Stage__c';
@@ -52,6 +54,28 @@ export default class TenderAcceptanceAction extends LightningElement {
     { label: 'Pincode', fieldName: 'PIN__c' }
 ];
 addressBookData = [];
+
+projectOwnerOptions = [];
+selectedProjectOwnerId;
+
+@wire(getProjectOwners, { tenderId: '$recordId', userListChoice: 'tender' })
+wiredProjectOwners({ data, error }) {
+    if (data) {
+        this.projectOwnerOptions = data.map(o => ({ label: o.label, value: o.value }));
+        console.log(JSON.stringify(data))
+    } else if (error) {
+        this.showToast('Error', this.reduceError(error), 'error');
+    }
+}
+
+handleProjectOwnerChange(event) {
+    this.selectedProjectOwnerId = event.detail.value;
+}
+
+get isResendScenario() {
+    console.log(this.hodChoice);
+    return this.hodChoice === HOD_TRIGGER_VALUE || this.hodChoice === 'Update Account Details';
+}
 
 @wire(getAddressBookDetails, { tenderId: '$recordId' })
 wiredAddressBook({ data, error }) {
@@ -192,15 +216,59 @@ tender;
     this.submitChoice(value);
 }
 
-    handleAcceptSubmit() {
+handleAcceptSubmit() {
     if (!this.authorityId) {
         this.showModal = true;
+        return;
+    }
+    const notesInput = this.template.querySelector('lightning-textarea');
+    if (!notesInput.checkValidity()) {
+        notesInput.reportValidity();
+        return;
+    }
+
+    if (this.isResendScenario && !this.selectedProjectOwnerId) {
+        this.showToast('Missing info', 'Please select a Project Owner.', 'warning');
         return;
     }
 
     this.showModal = false;
 
-    this.submitChoice(this.pendingChoice,this.acceptNotes);
+    if (this.isResendScenario) {
+        this.submitDirectAccept();
+    } else {
+        this.submitChoice(this.pendingChoice, this.acceptNotes);
+    }
+}
+
+submitDirectAccept() {
+    this.isProcessing = true;
+
+    acceptParticipationDirect({
+        tenderId: this.recordId,
+        projectOwnerId: this.selectedProjectOwnerId,
+        notes: this.acceptNotes
+    })
+        .then(() => {
+            this.showToast('Success', 'Accepted and Opportunity created.', 'success');
+            this.showAcceptSection = false;
+            this.pendingChoice = null;
+            this.acceptNotes = '';
+            this.selectedProjectOwnerId = null;
+            return refreshApex(this.wiredTenderResult);
+        })
+        .then(() => {
+            this.dispatchEvent(new CloseActionScreenEvent());
+            setTimeout(() => {
+                window.location.href = '/' + this.recordId;
+            }, 500);
+        })
+        .catch((error) => {
+            this.showToast('Error', this.reduceError(error), 'error');
+        })
+        .finally(() => {
+            this.isProcessing = false;
+        });
 }
 
     handleCancelModal() {

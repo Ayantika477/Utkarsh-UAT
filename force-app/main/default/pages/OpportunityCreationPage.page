@@ -1,0 +1,13 @@
+<apex:page showHeader="false" sidebar="false" standardStylesheets="false">
+    <apex:includeLightning />
+    <div id="opportunityCreationLex"></div>
+    <script>
+        $Lightning.use("c:opportunityCreationOutApp", function () {
+            $Lightning.createComponent(
+                "c:opportunityCreationOverride",
+                {},
+                "opportunityCreationLex"
+            );
+        });
+    </script>
+</apex:page>

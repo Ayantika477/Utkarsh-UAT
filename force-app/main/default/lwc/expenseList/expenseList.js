@@ -3,7 +3,7 @@ import { NavigationMixin } from 'lightning/navigation';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import { refreshApex } from '@salesforce/apex';
 import getMyExpenses from '@salesforce/apex/ExpenseController.getMyExpenses';
-import deleteExpense from '@salesforce/apex/ExpenseController.deleteExpense';
+//import deleteExpense from '@salesforce/apex/ExpenseController.deleteExpense';
 
 const COLUMNS = [
     {
@@ -232,7 +232,7 @@ export default class ExpenseList extends NavigationMixin(LightningElement) {
         }
 
         try {
-            await deleteExpense({ expenseId: recordId });
+            // await deleteExpense({ expenseId: recordId });
             this.showToast('Success', 'Expense deleted successfully', 'success');
             // Refresh the data
             return refreshApex(this.wiredExpensesResult);

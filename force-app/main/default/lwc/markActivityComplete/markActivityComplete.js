@@ -25,6 +25,8 @@ export default class MarkActivityComplete extends LightningElement {
 
     ctx = {};
     dispositionOptions = [];
+    parentId;   // reactive copies for the assignable-users wire
+    parentType;
 
     disposition = '';
     remarks = '';
@@ -49,6 +51,8 @@ export default class MarkActivityComplete extends LightningElement {
     wiredContext({ data, error }) {
         if (data) {
             this.ctx = data;
+            this.parentId = data.parentId;
+            this.parentType = data.parentType;
             this.dispositionOptions = (data.dispositions || []).map((o) => ({
                 label: o.label,
                 value: o.value
@@ -58,7 +62,11 @@ export default class MarkActivityComplete extends LightningElement {
         }
     }
 
-    @wire(getAssignableUsers)
+    // getAssignableUsers(Id activityId) now takes the Task/Event Id and resolves the
+    // Opportunity - and its department - server side. The wire passed nothing, which is the
+    // mirror image of the old bug: activityId arrived null, departmentForActivity returned
+    // null, and the picker fell back to the running user alone. Deepanjan (17th August 2026)
+    @wire(getAssignableUsers, { activityId: '$recordId' })
     wiredUsers({ data, error }) {
         if (data) {
             this.assignableUsers = data;
@@ -132,6 +140,10 @@ export default class MarkActivityComplete extends LightningElement {
         if (!this.event.start) return false;
         return new Date(this.event.start).getTime() < Date.now();
     }
+    get pastVisitError() {
+        // 'YYYY-MM-DD' strings compare correctly as dates.
+        return this.visit.scheduleDate && this.visit.scheduleDate < this.todayDate;
+    }
 
     get futureDateError() {
         if (!this.showActualDates) return false;
@@ -182,7 +194,8 @@ export default class MarkActivityComplete extends LightningElement {
     }
     get visitInvalid() {
         return !this.visit.visitType || !this.visit.reason || !this.visit.scheduleDate
-            || (this.hasAssignees && !this.visit.assignedTo);
+            || (this.hasAssignees && !this.visit.assignedTo)
+            || this.pastVisitError;
     }
 
     // ---------- close-step handlers ----------
@@ -218,7 +231,7 @@ export default class MarkActivityComplete extends LightningElement {
             this.saving = false;
             this.view = 'menu';
         } catch (err) {
-            this.fail(err);
+            this.fail(err, 'continue');
         }
     }
 
@@ -269,7 +282,7 @@ export default class MarkActivityComplete extends LightningElement {
                 excludeId: this.recordId
             });
             await this.afterCreate('Call created');
-        } catch (err) { this.fail(err); }
+        } catch (err) { this.fail(err, 'create the Call'); }
     }
 
     async saveEvent() {
@@ -287,7 +300,7 @@ export default class MarkActivityComplete extends LightningElement {
                 excludeId: this.recordId
             });
             await this.afterCreate('Event created');
-        } catch (err) { this.fail(err); }
+        } catch (err) { this.fail(err, 'create the Event'); }
     }
 
     async saveVisit() {
@@ -304,7 +317,7 @@ export default class MarkActivityComplete extends LightningElement {
                 excludeId: this.recordId
             });
             await this.afterCreate('Visit created');
-        } catch (err) { this.fail(err); }
+        } catch (err) { this.fail(err, 'create the Visit'); }
     }
 
     // After a follow-up is created: refresh open status (excluding the current
@@ -320,7 +333,9 @@ export default class MarkActivityComplete extends LightningElement {
             });
             this.applyFlags(flags);
         } catch (err) {
-            // ignore - fall through
+            // The follow-up is already saved, so this must not look like a failed save -
+            // but it must not be silent either. Deepanjan (13th August 2026)
+            this.toast('Saved, but the open-activity check failed', this.msgOf(err), 'warning');
         }
         if (this.mustCreate) {
             this.saving = false;
@@ -332,11 +347,12 @@ export default class MarkActivityComplete extends LightningElement {
     }
 
     // Done (only shown when the invariant already holds).
-    // Done without creating a follow-up: exit WITHOUT completing/updating the
-    // current activity. (Creating a Call/Event auto-completes and closes, so Done
-    // is only reached when no activity was created.)
-    doneAndClose() {
-        this.fireClose();
+    // Done: complete the current activity, then exit. Only shown when the
+    // Opportunity already has another open Call/Event (canClose), so completing
+    // the current one keeps the "at least one open Call/Event" rule satisfied.
+    async doneAndClose() {
+        this.saving = true;
+        await this.finalizeClose();
     }
 
     async finalizeClose() {
@@ -345,7 +361,7 @@ export default class MarkActivityComplete extends LightningElement {
             this.saving = false;
             this.fireClose();
         } catch (err) {
-            this.fail(err);
+            this.fail(err, 'mark the activity complete');
         }
     }
 
@@ -364,12 +380,47 @@ export default class MarkActivityComplete extends LightningElement {
         this.dispatchEvent(new CloseActionScreenEvent());
     }
 
-    fail(err) {
+    /* step names the action that failed, so a toast after a successful create no longer
+       reads as if the create itself failed. Deepanjan (13th August 2026) */
+    fail(err, step) {
         this.saving = false;
-        this.toast('Error', this.msgOf(err), 'error');
+        this.toast(step ? ('Could not ' + step) : 'Error', this.msgOf(err), 'error');
     }
+    /* Salesforce does not put every error in body.message. An AuraHandledException does,
+       but a DML failure, a validation rule, a required field and a wire/signature error all
+       land somewhere else - body.pageErrors, body.fieldErrors, body.output.*, or body itself
+       as an ARRAY. Reading only body.message is why a real failure showed as the useless
+       'Unexpected error' while the record had already been created.
+       Deepanjan (13th August 2026) */
     msgOf(err) {
-        return err && err.body && err.body.message ? err.body.message : 'Unexpected error';
+        if (!err) return 'Unexpected error';
+        if (typeof err === 'string') return err;
+
+        // keep the raw object in the console - the toast is a summary, this is the evidence
+        console.error('markActivityComplete error:', JSON.stringify(err));
+
+        const parts = [];
+        const push = (m) => { if (m && parts.indexOf(m) === -1) parts.push(m); };
+        const fieldErrs = (map) => Object.keys(map || {}).forEach((f) =>
+            (map[f] || []).forEach((e) => push(e && ((e.fieldLabel || f) + ': ' + e.message))));
+
+        const body = err.body || err.Body;
+
+        if (Array.isArray(body)) {
+            body.forEach((e) => push(e && e.message));
+        } else if (body) {
+            push(body.message);
+            (body.pageErrors || []).forEach((e) => push(e && e.message));
+            fieldErrs(body.fieldErrors);
+            (body.duplicateResults || []).forEach((e) => push(e && e.message));
+            const out = body.output || {};
+            (out.errors || []).forEach((e) => push(e && e.message));
+            fieldErrs(out.fieldErrors);
+        }
+        push(err.message);
+        push(err.statusText);
+
+        return parts.length ? parts.join(' | ') : 'Unexpected error';
     }
     toast(title, message, variant) {
         this.dispatchEvent(new ShowToastEvent({ title, message, variant }));

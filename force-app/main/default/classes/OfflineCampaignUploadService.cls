@@ -1,3 +1,9 @@
+/**
+ * @description   Parses uploaded Excel/CSV JSON, validates rows, and inserts Offline
+ *                Campaign records with partial success support.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public with sharing class OfflineCampaignUploadService {
   public static final Set<String> DEPARTMENT_VALUES = new Set<String>{
     'High Mast & Polygonal',
@@ -42,6 +48,10 @@ public with sharing class OfflineCampaignUploadService {
     @AuraEnabled public String value;
   }
 
+  /**
+   * @description Returns sorted department picklist options allowed for offline campaign uploads.
+   * @return List of PicklistOption values from DEPARTMENT_VALUES.
+   */
   public static List<PicklistOption> getDepartmentOptions() {
     List<PicklistOption> options = new List<PicklistOption>();
     for (String value : new List<String>(DEPARTMENT_VALUES)) {
@@ -54,6 +64,11 @@ public with sharing class OfflineCampaignUploadService {
     return options;
   }
 
+  /**
+   * @description Deserializes uploaded offline campaign row JSON into UploadRow DTOs.
+   * @param rowsJson JSON array of upload rows from the LWC.
+   * @return List of UploadRow values ready for validation and insert.
+   */
   public static List<UploadRow> parseUploadRows(String rowsJson) {
     if (String.isBlank(rowsJson)) {
       throw new AuraHandledException('No rows were provided for insert.');
@@ -65,10 +80,27 @@ public with sharing class OfflineCampaignUploadService {
     }
   }
 
+  /**
+   * @description Validates upload rows and inserts Offline_Campaign__c records with partial-success support.
+   * @param rows UploadRow DTOs to validate and insert.
+   * @return InsertSummary with per-row results and aggregated error summary.
+   */
   public static InsertSummary insertRows(List<UploadRow> rows) {
+    return insertRows(rows, null);
+  }
+
+  /**
+   * @description Validates upload rows and inserts Offline_Campaign__c records with partial-success support.
+   * @param rows UploadRow DTOs to validate and insert.
+   * @param groupList Group or list name applied to every inserted record.
+   * @return InsertSummary with per-row results and aggregated error summary.
+   */
+  public static InsertSummary insertRows(List<UploadRow> rows, String groupList) {
     if (rows == null || rows.isEmpty()) {
       throw new AuraHandledException('No rows were provided for insert.');
     }
+
+    String normalizedGroupList = normalizeGroupList(groupList);
 
     InsertSummary summary = new InsertSummary();
     summary.totalCount = rows.size();
@@ -90,7 +122,7 @@ public with sharing class OfflineCampaignUploadService {
         continue;
       }
 
-      recordsToInsert.add(buildRecord(row));
+      recordsToInsert.add(buildRecord(row, normalizedGroupList));
       indexToRow.put(recordsToInsert.size() - 1, row);
     }
 
@@ -119,6 +151,11 @@ public with sharing class OfflineCampaignUploadService {
     return summary;
   }
 
+  /**
+   * @description Validates a single upload row for required name and optional email/phone/department formats.
+   * @param row Upload row to validate; may be null.
+   * @return RowResult indicating success or concatenated validation errors.
+   */
   @TestVisible
   static RowResult validateRow(UploadRow row) {
     RowResult result = new RowResult();
@@ -159,17 +196,46 @@ public with sharing class OfflineCampaignUploadService {
     return result;
   }
 
+  /**
+   * @description Maps a validated UploadRow into an Offline_Campaign__c record marked Active.
+   * @param row Validated upload row source values.
+   * @return Offline_Campaign__c ready for Database.insert.
+   */
   @TestVisible
   static Offline_Campaign__c buildRecord(UploadRow row) {
+    return buildRecord(row, null);
+  }
+
+  @TestVisible
+  static Offline_Campaign__c buildRecord(UploadRow row, String groupList) {
     Offline_Campaign__c record = new Offline_Campaign__c();
     record.Name = row.recordName.trim();
     record.Email__c = String.isBlank(row.email) ? null : row.email.trim();
     record.Phone__c = String.isBlank(row.phone) ? null : row.phone.trim();
     record.Department__c = String.isBlank(row.department) ? null : row.department.trim();
+    record.Group_List__c = String.isBlank(groupList) ? null : groupList.trim();
     record.Active__c = true;
     return record;
   }
 
+  @TestVisible
+  static String normalizeGroupList(String groupList) {
+    if (String.isBlank(groupList)) {
+      throw new AuraHandledException('Group / List is required.');
+    }
+
+    String normalizedGroupList = groupList.trim();
+    if (normalizedGroupList.length() > 255) {
+      throw new AuraHandledException('Group / List cannot exceed 255 characters.');
+    }
+    return normalizedGroupList;
+  }
+
+  /**
+   * @description Returns true when the phone has at least 10 digits after stripping non-digits.
+   * @param phone Candidate phone string.
+   * @return True if the phone format is acceptable.
+   */
   @TestVisible
   static Boolean isValidPhone(String phone) {
     if (String.isBlank(phone)) {
@@ -179,6 +245,11 @@ public with sharing class OfflineCampaignUploadService {
     return digitsOnly.length() >= 10;
   }
 
+  /**
+   * @description Returns true when the email matches a basic regex pattern.
+   * @param email Candidate email string.
+   * @return True if the email format is acceptable.
+   */
   @TestVisible
   static Boolean isValidEmail(String email) {
     if (String.isBlank(email)) {
@@ -190,6 +261,11 @@ public with sharing class OfflineCampaignUploadService {
     );
   }
 
+  /**
+   * @description Formats Database.Error entries into a space-joined field-labeled message string.
+   * @param errors SaveResult error list from a failed insert.
+   * @return Human-readable error string for the row result.
+   */
   @TestVisible
   static String formatSaveErrors(List<Database.Error> errors) {
     List<String> messages = new List<String>();
@@ -200,6 +276,11 @@ public with sharing class OfflineCampaignUploadService {
     return String.join(messages, ' ');
   }
 
+  /**
+   * @description Maps the first API field name from a Database.Error to a user-facing label.
+   * @param fields Field API names from Database.Error.getFields().
+   * @return Friendly field label, or Record when no field is present.
+   */
   private static String mapFieldToLabel(List<String> fields) {
     if (fields == null || fields.isEmpty()) {
       return 'Record';
@@ -220,9 +301,17 @@ public with sharing class OfflineCampaignUploadService {
     if (fieldName == 'Active__c') {
       return 'Active';
     }
+    if (fieldName == 'Group_List__c') {
+      return 'Group / List';
+    }
     return fieldName;
   }
 
+  /**
+   * @description Adds a unique trimmed error string to the insert summary list.
+   * @param summary Mutable list of unique error summary strings.
+   * @param errors Error text to add when non-blank and not already present.
+   */
   private static void addErrorSummary(List<String> summary, String errors) {
     if (String.isBlank(errors)) {
       return;
@@ -234,6 +323,12 @@ public with sharing class OfflineCampaignUploadService {
   }
 
   private class PicklistOptionComparator implements Comparator<PicklistOption> {
+    /**
+     * @description Compares picklist options by label for ascending sort order.
+     * @param left Left PicklistOption operand.
+     * @param right Right PicklistOption operand.
+     * @return Negative, zero, or positive comparison result.
+     */
     public Integer compare(PicklistOption left, PicklistOption right) {
       if (left == null && right == null) {
         return 0;

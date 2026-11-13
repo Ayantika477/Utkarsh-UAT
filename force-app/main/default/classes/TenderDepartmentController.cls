@@ -369,16 +369,18 @@ public with sharing class TenderDepartmentController {
         // Normalize selected department
         String selectedDepartment = department.trim().toLowerCase();
 
-        List<User> users = [
-            SELECT Id,
-                   Name,
-                   Department
-            FROM User
-            WHERE IsActive = true
-            AND TenderUser__c = true
-            WITH SYSTEM_MODE
-            ORDER BY Name
-        ];
+     List<User> users = [
+    SELECT Id,
+           Name,
+           Department,
+           Profile.Name
+    FROM User
+    WHERE IsActive = true
+    AND Tender_Access_User__c = true
+    AND Profile.Name IN ('Utkarsh Sales', 'Utkarsh Tender')
+    WITH SYSTEM_MODE
+    ORDER BY Name
+];
 
         for (User u : users) {
 
@@ -434,23 +436,23 @@ public with sharing class TenderDepartmentController {
         Id ownerId
     ){
 
-        if(tenderId == null){
-            throw new AuraHandledException(
-                'Tender Id is missing.'
-            );
-        }
+         if(tenderId == null){
+        AuraHandledException ex = new AuraHandledException('Tender Id is missing.');
+        ex.setMessage('Tender Id is missing.');
+        throw ex;
+    }
 
-        if(String.isBlank(department)){
-            throw new AuraHandledException(
-                'Please select Department.'
-            );
-        }
+       if(String.isBlank(department)){
+        AuraHandledException ex = new AuraHandledException('Please select Department.');
+        ex.setMessage('Please select Department.');
+        throw ex;
+    }
 
-        if(ownerId == null){
-            throw new AuraHandledException(
-                'Please select Owner.'
-            );
-        }
+          if(ownerId == null){
+        AuraHandledException ex = new AuraHandledException('Please select Owner.');
+        ex.setMessage('Please select Owner.');
+        throw ex;
+    }
 
         Tender__c tender = [
             SELECT Id,
@@ -474,7 +476,9 @@ public with sharing class TenderDepartmentController {
         if(!sr.isSuccess()){
 
             Database.Error err = sr.getErrors()[0];
-            throw new AuraHandledException(err.getMessage());
+            AuraHandledException ex = new AuraHandledException(err.getMessage());
+        ex.setMessage(err.getMessage());  
+        throw ex;
         }
 
         // Tender updated successfully - cascade the owner change
@@ -497,14 +501,14 @@ public with sharing class TenderDepartmentController {
         reassignBidders(tenderId, newOwnerId, errors);
         reassignBidderContactDetails(tenderId, newOwnerId, errors);
         reassignTenderAiSummaryJson(tenderId, newOwnerId, errors);
-        reassignTenderDocomentDetails(tenderId, newOwnerId, errors);
 
-        if (!errors.isEmpty()) {
-            throw new AuraHandledException(
-                'Tender owner was updated, but some related records ' +
-                'could not be reassigned: ' + String.join(errors, ' | ')
-            );
-        }
+      if (!errors.isEmpty()) {
+    String msg = 'Tender owner was updated, but some related records ' +
+                 'could not be reassigned: ' + String.join(errors, ' | ');
+    AuraHandledException ex = new AuraHandledException(msg);
+    ex.setMessage(msg);
+    throw ex;
+}
     }
 
     // Reassigns Owner on all Bidders__c records linked to this Tender.
@@ -583,32 +587,6 @@ public with sharing class TenderDepartmentController {
             AccessLevel.SYSTEM_MODE
         );
         collectErrors(results, 'Tender Ai Summary Json', errors);
-    }
-
-    // Reassigns Owner on all Tender_Docoment_Details__c records linked to this Tender.
-    private static void reassignTenderDocomentDetails(Id tenderId, Id newOwnerId, List<String> errors) {
-
-        List<Tender_Docoment_Details__c> docs = [
-            SELECT Id, OwnerId
-            FROM Tender_Docoment_Details__c
-            WHERE Tender__c = :tenderId
-            WITH SYSTEM_MODE
-        ];
-
-        if (docs.isEmpty()) {
-            return;
-        }
-
-        for (Tender_Docoment_Details__c d : docs) {
-            d.OwnerId = newOwnerId;
-        }
-
-        List<Database.SaveResult> results = Database.update(
-            docs,
-            new Database.DMLOptions(),
-            AccessLevel.SYSTEM_MODE
-        );
-        collectErrors(results, 'Tender Docoment Details', errors);
     }
 
     // Collects error messages from a DML result list, prefixed with a label

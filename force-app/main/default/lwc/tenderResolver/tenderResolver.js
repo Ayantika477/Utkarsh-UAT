@@ -367,6 +367,23 @@ export default class TenderResolver extends LightningElement {
             return { isValid: false, errorMessage: 'Account: Select one of the matched duplicate accounts.' };
         }
 
+        const hasFullManualAddress = 
+            (this.addressStreet || '').trim() && 
+            (this.addressCity || '').trim() && 
+            (this.addressState || '').trim() && 
+            (this.addressCountry || '').trim() && 
+            (this.addressPincode || '').trim();
+
+        if (this.selectedAccountId) {
+            if (!this.selectedAddressBookId && !hasFullManualAddress) {
+                return { isValid: false, errorMessage: 'Address: Please select an Address Book or fill in all Address fields.' };
+            }
+        } else {
+            if (!hasFullManualAddress) {
+                return { isValid: false, errorMessage: 'Address: Please fill in all Address fields for the new account.' };
+            }
+        }
+
         // 2. Validate Contact if enabled
         if (this.includeContact) {
             if (this.isExistingContactMode && !this.selectedContactId) {
@@ -394,6 +411,27 @@ export default class TenderResolver extends LightningElement {
         if (this.isDuplicateMode && !this.selectedAccountId) {
             this.showToast('Error', 'Please select a duplicate account.', 'error');
             return;
+        }
+
+        const hasFullManualAddress = 
+            (this.addressStreet || '').trim() && 
+            (this.addressCity || '').trim() && 
+            (this.addressState || '').trim() && 
+            (this.addressCountry || '').trim() && 
+            (this.addressPincode || '').trim();
+
+        if (this.selectedAccountId) {
+            // Existing Account Scenario
+            if (!this.selectedAddressBookId && !hasFullManualAddress) {
+                this.showToast('Error', 'Please select an Address Book or fill in all Address Details (Street, City, State, Country, Pincode).', 'error');
+                return;
+            }
+        } else {
+            // New Account Scenario
+            if (!hasFullManualAddress) {
+                this.showToast('Error', 'Please fill in all Address Details (Street, City, State, Country, Pincode) for the new account.', 'error');
+                return;
+            }
         }
 
         // 2. Validate Contact (if enabled)

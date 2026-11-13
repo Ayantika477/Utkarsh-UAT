@@ -96,7 +96,7 @@ public without sharing class BWM_EmailPayloadBuilder {
     SObject record,
     BWM_Email_Template_Mapping__mdt mapping
   ) {
-    if (isDealerSalesAssignMapping(mapping)) {
+    if (shouldSkipProductBriefBodyInjection(mapping)) {
       return;
     }
 
@@ -124,18 +124,45 @@ public without sharing class BWM_EmailPayloadBuilder {
     }
   }
 
-  private static Boolean isDealerSalesAssignMapping(
+  private static Boolean shouldSkipProductBriefBodyInjection(
     BWM_Email_Template_Mapping__mdt mapping
+  ) {
+    return isTemplateMapping(
+      mapping,
+      BWM_EmailConstants.TEMPLATE_DEALER_SALES_ASSIGN
+    ) ||
+      isTemplateMapping(
+        mapping,
+        BWM_EmailConstants.TEMPLATE_NEGOTIATION_LOST_FUTURE_TENDER_DEPT
+      ) ||
+      isTemplateMapping(
+        mapping,
+        BWM_EmailConstants.TEMPLATE_NEGOTIATION_LOST_FUTURE_TENDER_GEN
+      );
+  }
+
+  private static Boolean isTemplateMapping(
+    BWM_Email_Template_Mapping__mdt mapping,
+    String templateName
   ) {
     if (mapping == null || String.isBlank(mapping.Template_Name__c)) {
       return false;
     }
-    return mapping.Template_Name__c.trim()
-        .toLowerCase()
-        .replace(' ', '_') ==
-      BWM_EmailConstants.TEMPLATE_DEALER_SALES_ASSIGN.trim()
-        .toLowerCase()
-        .replace(' ', '_');
+    return normalizeTemplateName(mapping.Template_Name__c) ==
+      normalizeTemplateName(templateName);
+  }
+
+  private static String normalizeTemplateName(String templateName) {
+    return templateName == null
+      ? ''
+      : templateName.trim().toLowerCase().replace(' ', '_');
+  }
+
+  @TestVisible
+  private static Boolean isDealerSalesAssignMapping(
+    BWM_Email_Template_Mapping__mdt mapping
+  ) {
+    return isTemplateMapping(mapping, BWM_EmailConstants.TEMPLATE_DEALER_SALES_ASSIGN);
   }
 
   public static String mergeTemplate(String template, List<String> params) {

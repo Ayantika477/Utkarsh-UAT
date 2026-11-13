@@ -5,6 +5,44 @@
  * @date          2026-08-06
  */
 public without sharing class BWM_MessagePayloadBuilder {
+  /**
+   * @description SMS variable values for a campaign send, using the auto-journey mapping.
+   */
+  public static Map<String, Object> smsMappingsForCampaign(
+    BWM_Template_Mapping__mdt mapping,
+    SObject record
+  ) {
+    if (mapping == null || record == null) {
+      return new Map<String, Object>();
+    }
+    List<String> params = BWM_FieldValueResolver.resolveParamsForRecord(record, mapping);
+    params = BWM_CampaignJourneyParamService.applyMessagingContactParamFixes(
+      record,
+      params,
+      mapping
+    );
+    return resolveSmsVariableMappings(mapping, record, params);
+  }
+
+  /**
+   * @description RCS body values for a campaign send, using the auto-journey mapping.
+   */
+  public static Map<String, Object> rcsBodyForCampaign(
+    BWM_Messaging_Settings__mdt settings,
+    BWM_Template_Mapping__mdt mapping,
+    SObject record
+  ) {
+    if (mapping == null || record == null) {
+      return new Map<String, Object>();
+    }
+    Map<String, Object> node = buildRcsJourneyNode(settings, mapping, record, false);
+    Map<String, Object> data = (Map<String, Object>) node.get('data');
+    Object bodyData = data == null ? null : data.get('bodyData');
+    return bodyData instanceof Map<String, Object>
+      ? (Map<String, Object>) bodyData
+      : new Map<String, Object>();
+  }
+
   public static String buildJourneyPayloadForRecord(
     BWM_Messaging_Settings__mdt settings,
     BWM_Template_Mapping__mdt mapping,
@@ -54,6 +92,8 @@ public without sharing class BWM_MessagePayloadBuilder {
       params,
       mapping
     );
+    // RCS and SMS keep the auto-journey values. Campaign blank-fill applies to WhatsApp only.
+    List<String> messagingParams = params;
     if (forCampaignSend == true) {
       params = BWM_CampaignJourneyParamService.fillBlankSecondaryContactParams(
         record,
@@ -83,7 +123,7 @@ public without sharing class BWM_MessagePayloadBuilder {
           settings,
           mapping,
           record,
-          forCampaignSend == true
+          false
         )
       );
       nodeIndex++;
@@ -95,7 +135,7 @@ public without sharing class BWM_MessagePayloadBuilder {
         buildSmsJourneyNode(
           mapping,
           record,
-          params
+          messagingParams
         )
       );
     }
@@ -247,6 +287,7 @@ public without sharing class BWM_MessagePayloadBuilder {
         mapping
       );
     }
+    blankStringMap(bodyData);
 
     return new Map<String, Object>{
       'templateType' => 'RCSMESSAGE',
@@ -280,6 +321,12 @@ public without sharing class BWM_MessagePayloadBuilder {
     };
   }
 
+  /**
+   * @description Builds SMS journey variableMappings from journey JSON tokens,
+   *              falling back to template Param fields only when compatible.
+   *              Phone tokens (e.g. Lead.Owner.Phone) resolve Owner Mobile/Phone;
+   *              blank becomes a space — never Param1 Owner.Name via index alignment.
+   */
   private static Map<String, Object> resolveSmsVariableMappings(
     BWM_Template_Mapping__mdt mapping,
     SObject record,
@@ -287,6 +334,11 @@ public without sharing class BWM_MessagePayloadBuilder {
   ) {
     Map<String, Object> templateMappings = BWM_JourneyDefinitionService.getSmsVariableMappingsTemplate(
       mapping.Journey_Name__c
+    );
+    Map<String, Object> paramFallbackMappings = buildSmsVariableMappingsFromParams(
+      mapping,
+      record,
+      params
     );
 
     if (!templateMappings.isEmpty()) {
@@ -297,33 +349,150 @@ public without sharing class BWM_MessagePayloadBuilder {
       );
       Map<String, Object> variableMappings = new Map<String, Object>();
       for (String key : resolvedMappings.keySet()) {
-        Object rawValue = resolvedMappings.get(key);
-        String value = rawValue == null ? '' : String.valueOf(rawValue).trim();
-        if (String.isNotBlank(value)) {
-          variableMappings.put(key, value);
+        String value = nullToEmptyTrim(resolvedMappings.get(key));
+        String token = nullToEmptyTrim(templateMappings.get(key));
+        if (
+          isSmsPhoneMappingToken(token) ||
+          isOwnerPhoneIndexToken(mapping, token, key)
+        ) {
+          value = BWM_FieldValueResolver.resolveSmsOwnerPhoneSlot(record, value);
+          value = finalizeSmsJourneyOwnerPhoneValue(value);
+        } else if (String.isBlank(value) && paramFallbackMappings.containsKey(key)) {
+          value = nullToEmptyTrim(paramFallbackMappings.get(key));
         }
+        variableMappings.put(key, blankChannelSlot(value));
       }
       if (!variableMappings.isEmpty()) {
         return variableMappings;
       }
     }
 
-    return buildSmsVariableMappingsFromParams(mapping, params);
+    return paramFallbackMappings;
+  }
+
+  /**
+   * @description True when the journey SMS token is an owner/contact phone field.
+   */
+  private static Boolean isSmsPhoneMappingToken(String token) {
+    if (String.isBlank(token)) {
+      return false;
+    }
+    String normalized = token.trim().toLowerCase();
+    return normalized.contains('phone') ||
+      normalized.contains('mobile') ||
+      normalized.contains('contact_no');
   }
 
   private static Map<String, Object> buildSmsVariableMappingsFromParams(
     BWM_Template_Mapping__mdt mapping,
+    SObject record,
     List<String> params
   ) {
     Map<String, Object> variableMappings = new Map<String, Object>();
+    if (params == null || params.isEmpty()) {
+      return variableMappings;
+    }
+
+    // Prospect_not_resp-style SMS: one slot = Owner.Phone, but Param1 is Owner.Name
+    // for WhatsApp and RCS_SMS_Param_Limit__c = 1 would otherwise send the name.
+    if (
+      mapping != null &&
+      mapping.RCS_SMS_Param_Limit__c == 1 &&
+      isOwnerNameFieldPath(mapping.Param1_Field__c) &&
+      isOwnerPhoneFieldPath(mapping.Param2_Field__c) &&
+      params.size() >= 2
+    ) {
+      variableMappings.put(
+        '1',
+        finalizeSmsJourneyOwnerPhoneValue(
+          BWM_FieldValueResolver.resolveSmsOwnerPhoneSlot(
+            record,
+            nullToEmptyTrim(params[1])
+          )
+        )
+      );
+      return variableMappings;
+    }
+
     List<String> smsParams = paramsForSms(mapping, params);
     for (Integer index = 0; index < smsParams.size(); index++) {
-      if (String.isBlank(smsParams[index])) {
-        continue;
+      String fieldPath = smsParamFieldPath(mapping, index);
+      String value = nullToEmptyTrim(smsParams[index]);
+      if (isOwnerPhoneFieldPath(fieldPath) || isSmsPhoneMappingToken(fieldPath)) {
+        value = finalizeSmsJourneyOwnerPhoneValue(
+          BWM_FieldValueResolver.resolveSmsOwnerPhoneSlot(record, value)
+        );
       }
-      variableMappings.put(String.valueOf(index + 1), smsParams[index].trim());
+      variableMappings.put(String.valueOf(index + 1), blankChannelSlot(value));
     }
     return variableMappings;
+  }
+
+  private static Boolean isOwnerPhoneIndexToken(
+    BWM_Template_Mapping__mdt mapping,
+    String token,
+    String key
+  ) {
+    String indexToken = String.isNotBlank(token) ? token : key;
+    if (
+      String.isBlank(indexToken) ||
+      !Pattern.matches('^([1-9]|1[0-9]|20)$', indexToken.trim())
+    ) {
+      return false;
+    }
+    return mapping != null &&
+      mapping.RCS_SMS_Param_Limit__c == 1 &&
+      isOwnerNameFieldPath(mapping.Param1_Field__c) &&
+      isOwnerPhoneFieldPath(mapping.Param2_Field__c);
+  }
+
+  private static String smsParamFieldPath(
+    BWM_Template_Mapping__mdt mapping,
+    Integer zeroBasedIndex
+  ) {
+    if (mapping == null || zeroBasedIndex == null || zeroBasedIndex < 0) {
+      return '';
+    }
+    if (zeroBasedIndex == 0) {
+      return mapping.Param1_Field__c;
+    }
+    if (zeroBasedIndex == 1) {
+      return mapping.Param2_Field__c;
+    }
+    if (zeroBasedIndex == 2) {
+      return mapping.Param3_Field__c;
+    }
+    if (zeroBasedIndex == 3) {
+      return mapping.Param4_Field__c;
+    }
+    if (zeroBasedIndex == 4) {
+      return mapping.Param5_Field__c;
+    }
+    if (zeroBasedIndex == 5) {
+      return mapping.Param6_Field__c;
+    }
+    if (zeroBasedIndex == 6) {
+      return mapping.Param7_Field__c;
+    }
+    if (zeroBasedIndex == 7) {
+      return mapping.Param8_Field__c;
+    }
+    return '';
+  }
+
+  private static Boolean isOwnerPhoneFieldPath(String fieldPath) {
+    return fieldPath == 'Owner.Phone' || fieldPath == 'Owner.MobilePhone';
+  }
+
+  private static Boolean isOwnerNameFieldPath(String fieldPath) {
+    return fieldPath == 'Owner.Name';
+  }
+
+  private static String nullToEmptyTrim(Object rawValue) {
+    if (rawValue == null) {
+      return '';
+    }
+    return String.valueOf(rawValue).trim();
   }
 
   private static List<Object> buildIndexedVariables(List<String> params) {
@@ -343,6 +512,127 @@ public without sharing class BWM_MessagePayloadBuilder {
     }
     return variables;
   }
+
+  /**
+   * @description Owner-phone SMS slots: owner Mobile/Phone digits only. A single
+   *              space when empty so Bluewave does not keep the template sample
+   *              (e.g. Lead.Owner.Phone). Never CRM or other fallback numbers.
+   */
+  private static String finalizeSmsJourneyOwnerPhoneValue(String value) {
+    return blankChannelSlot(value);
+  }
+
+  /**
+   * @description Empty merge values and leftover field tokens (Lead.Owner.Phone)
+   *              become a single space so Bluewave does not keep the template sample.
+   */
+  public static String blankChannelSlot(String value) {
+    if (String.isBlank(value) || isUnresolvedMergeToken(value)) {
+      return ' ';
+    }
+    return value.trim();
+  }
+
+  /**
+   * @description Replaces blank SMS and RCS merge values on a resolved journey
+   *              document. WhatsApp nodes are left unchanged.
+   */
+  public static Map<String, Object> blankMissingSmsAndRcsValues(
+    Map<String, Object> payload
+  ) {
+    if (payload == null) {
+      return payload;
+    }
+    Map<String, Object> journeyPayload = (Map<String, Object>) payload.get(
+      'journeypayload'
+    );
+    if (journeyPayload == null) {
+      return payload;
+    }
+    Map<String, Object> nodes = (Map<String, Object>) journeyPayload.get('nodes');
+    if (nodes == null) {
+      return payload;
+    }
+    for (String nodeKey : nodes.keySet()) {
+      Map<String, Object> node = (Map<String, Object>) nodes.get(nodeKey);
+      if (node == null) {
+        continue;
+      }
+      String templateType = (String) node.get('templateType');
+      Map<String, Object> data = (Map<String, Object>) node.get('data');
+      if (data == null) {
+        continue;
+      }
+      if (templateType == 'SMS') {
+        blankStringMap(data.get('variableMappings'));
+      } else if (templateType == 'RCSMESSAGE') {
+        blankStringMap(data.get('bodyData'));
+      }
+    }
+    return payload;
+  }
+
+  private static void blankStringMap(Object rawMap) {
+    if (!(rawMap instanceof Map<String, Object>)) {
+      return;
+    }
+    Map<String, Object> values = (Map<String, Object>) rawMap;
+    for (String key : values.keySet()) {
+      Object rawValue = values.get(key);
+      if (rawValue != null && !(rawValue instanceof String)) {
+        continue;
+      }
+      values.put(key, blankChannelSlot(rawValue == null ? '' : (String) rawValue));
+    }
+  }
+
+  private static Boolean isUnresolvedMergeToken(String value) {
+    if (String.isBlank(value)) {
+      return false;
+    }
+    return MERGE_TOKENS.contains(value.trim().toLowerCase());
+  }
+
+  private static final Set<String> MERGE_TOKENS = new Set<String>{
+    'lead.owner',
+    'lead.owner.name',
+    'lead.owner.phone',
+    'lead.owner.email',
+    'lead_owner',
+    'lead_owner_name',
+    'lead_owner_phone',
+    'lead_owner_email',
+    'owner.name',
+    'owner.phone',
+    'owner.email',
+    'owner.mobilephone',
+    'opportunity.owner',
+    'opportunity.owner.name',
+    'opportunity.owner.phone',
+    'opportunity.owner.email',
+    'opportunity.owner.number',
+    'opportunity_owner',
+    'opportunity_owner_name',
+    'opportunity_owner_phone',
+    'opportunity_owner_number',
+    'opportunity_owner_email',
+    'department.name',
+    'department.crm.name',
+    'department.crm.phone',
+    'department.crm.email',
+    'department.crm.number',
+    'department.crm.call',
+    'department_name_1',
+    'department_name_2',
+    'department_name_3',
+    'department_crm_name',
+    'department_crm_phone',
+    'department_crm_email',
+    'department_crm_number',
+    'product_brief',
+    'rudra_number',
+    'bhagyashree_number'
+  };
 
   /**
    * WhatsApp/Bluewave leave literal {{n}} when value is empty. A single space
@@ -558,7 +848,7 @@ public without sharing class BWM_MessagePayloadBuilder {
     Map<String, Object> whatsAppData,
     BWM_Template_Mapping__mdt mapping
   ) {
-    if (whatsAppData == null || BWM_CampaignJourneyParamService.isDualCorporateSupportPhoneTemplate(mapping)) {
+    if (whatsAppData == null || BWM_CampaignJourneyParamService.isDualCorporateSupportPhoneTemplate(mapping) || BWM_CampaignJourneyParamService.isDealerSalesAssignTemplate(mapping) || BWM_CampaignJourneyParamService.isProspectEnqDeptOwnerContactTemplate(mapping)) {
       return;
     }
 
@@ -758,6 +1048,316 @@ public without sharing class BWM_MessagePayloadBuilder {
     }
 
     return fileName + extension;
+  }
+
+  /**
+   * @description Builds a direct WhatsApp campaign payload (channel WhatsApp + templatepayload)
+   *              for Send WhatsApp Campaign — not Journey.
+   */
+  public static String buildCampaignDirectWhatsAppPayload(
+    BWM_Messaging_Settings__mdt settings,
+    BWM_Template_Mapping__mdt mapping,
+    String whatsAppTemplateName,
+    Map<String, Object> templateMeta,
+    SObject record,
+    String phoneNumber
+  ) {
+    Integer variableCount = countCampaignBodyVariables(templateMeta);
+    List<String> params = resolveCampaignDirectParams(
+      mapping,
+      templateMeta,
+      record,
+      variableCount
+    );
+
+    List<Object> components = new List<Object>();
+    Map<String, Object> headerComponent = buildCampaignDirectHeaderComponent(
+      settings,
+      mapping,
+      templateMeta,
+      record
+    );
+    if (headerComponent != null) {
+      components.add(headerComponent);
+    }
+    if (!params.isEmpty()) {
+      components.add(buildCampaignDirectBodyComponent(params));
+    }
+
+    String callbackData = String.valueOf(record.Id);
+    Map<String, Object> dataContent = new Map<String, Object>{
+      'templatepayload' => new Map<String, Object>{
+        'messaging_product' => 'whatsapp',
+        'recipient_type' => 'individual',
+        'type' => 'template',
+        'template' => new Map<String, Object>{
+          'name' => whatsAppTemplateName,
+          'language' => new Map<String, Object>{
+            'code' => resolveCampaignTemplateLanguage(templateMeta)
+          },
+          'components' => components
+        }
+      },
+      'biz_opaque_callback_data' => callbackData
+    };
+    applyCampaignDirectWebhookSettings(dataContent, settings);
+
+    Map<String, Object> payload = new Map<String, Object>{
+      'channel' => BWM_MessagingConstants.CHANNEL_WHATSAPP,
+      'to' => new List<String>{ phoneNumber },
+      'content' => new Map<String, Object>{ 'data' => dataContent }
+    };
+
+    if (String.isNotBlank(settings.WhatsApp_From__c)) {
+      payload.put('from', settings.WhatsApp_From__c.trim());
+    }
+
+    return JSON.serialize(payload);
+  }
+
+  private static List<String> resolveCampaignDirectParams(
+    BWM_Template_Mapping__mdt mapping,
+    Map<String, Object> templateMeta,
+    SObject record,
+    Integer variableCount
+  ) {
+    if (variableCount <= 0) {
+      return new List<String>();
+    }
+
+    List<String> params;
+    if (mapping != null) {
+      params = BWM_FieldValueResolver.resolveParamsForRecord(record, mapping);
+      params = BWM_CampaignJourneyParamService.applyCampaignContactParamFixes(
+        record,
+        params,
+        mapping
+      );
+    } else {
+      params = buildDefaultCampaignDirectParams(record, variableCount);
+      return params;
+    }
+
+    return trimCampaignParamsToCount(params, variableCount);
+  }
+
+  private static List<String> buildDefaultCampaignDirectParams(
+    SObject record,
+    Integer variableCount
+  ) {
+    String companyName = BWM_FieldValueResolver.resolveRecord(record, 'Company');
+    if (String.isBlank(companyName)) {
+      companyName = BWM_FieldValueResolver.resolveRecord(record, 'Company_Name__c');
+    }
+    if (String.isBlank(companyName)) {
+      companyName = BWM_FieldValueResolver.resolveRecord(record, 'Account.Name');
+    }
+
+    List<String> defaults = new List<String>{
+      BWM_FieldValueResolver.resolveRecord(record, 'Name'),
+      companyName,
+      BWM_FieldValueResolver.resolveRecord(record, 'Product_Category__c'),
+      BWM_FieldValueResolver.resolveDepartmentName(record),
+      BWM_FieldValueResolver.resolveRecord(record, 'Owner.Name'),
+      BWM_FieldValueResolver.resolveRecord(record, 'Owner.Phone'),
+      BWM_FieldValueResolver.resolveRecord(record, 'Owner.Email'),
+      companyName
+    };
+
+    List<String> params = new List<String>();
+    for (Integer index = 0; index < variableCount; index++) {
+      String value = index < defaults.size() ? defaults[index] : '';
+      params.add(String.isNotBlank(value) ? value.trim() : 'NA');
+    }
+    return params;
+  }
+
+  private static List<String> trimCampaignParamsToCount(
+    List<String> params,
+    Integer variableCount
+  ) {
+    List<String> trimmed = new List<String>();
+    for (Integer index = 0; index < variableCount; index++) {
+      String value = index < params.size() ? params[index] : '';
+      trimmed.add(String.isNotBlank(value) ? value.trim() : 'NA');
+    }
+    return trimmed;
+  }
+
+  private static Map<String, Object> buildCampaignDirectHeaderComponent(
+    BWM_Messaging_Settings__mdt settings,
+    BWM_Template_Mapping__mdt mapping,
+    Map<String, Object> templateMeta,
+    SObject record
+  ) {
+    if (mapping != null && mapping.Include_Brochure_Header__c == true) {
+      String brochureUrl = resolveDocumentHeaderValue(settings, mapping, record);
+      if (String.isNotBlank(brochureUrl)) {
+        return new Map<String, Object>{
+          'type' => 'header',
+          'parameters' => new List<Object>{
+            new Map<String, Object>{
+              'type' => 'document',
+              'document' => new Map<String, Object>{ 'link' => brochureUrl }
+            }
+          }
+        };
+      }
+    }
+
+    Map<String, Object> content = getCampaignTemplateContent(templateMeta);
+    Map<String, Object> header = content == null
+      ? null
+      : (Map<String, Object>) content.get('header');
+    if (header == null) {
+      return null;
+    }
+
+    String headerType = String.valueOf(header.get('type'));
+    if (headerType == 'DOCUMENT') {
+      String brochureMode = mapping == null
+        ? BWM_MessagingConstants.BROCHURE_ATTACH_DEPARTMENT
+        : mapping.Brochure_Attachment_Mode__c;
+      if (
+        String.isBlank(brochureMode) ||
+        brochureMode == BWM_MessagingConstants.BROCHURE_ATTACH_NONE
+      ) {
+        brochureMode = BWM_MessagingConstants.BROCHURE_ATTACH_DEPARTMENT;
+      }
+      String brochureUrl = BWM_BrochureService.resolveBrochureUrlForSend(
+        settings,
+        record,
+        brochureMode
+      );
+      if (String.isBlank(brochureUrl)) {
+        return null;
+      }
+      return new Map<String, Object>{
+        'type' => 'header',
+        'parameters' => new List<Object>{
+          new Map<String, Object>{
+            'type' => 'document',
+            'document' => new Map<String, Object>{ 'link' => brochureUrl }
+          }
+        }
+      };
+    }
+
+    if (headerType == 'TEXT') {
+      String headerText = header.containsKey('text')
+        ? String.valueOf(header.get('text'))
+        : BWM_FieldValueResolver.resolveDepartmentName(record);
+      return new Map<String, Object>{
+        'type' => 'header',
+        'parameters' => new List<Object>{
+          new Map<String, Object>{
+            'type' => 'text',
+            'text' => String.isNotBlank(headerText) ? headerText.trim() : 'NA'
+          }
+        }
+      };
+    }
+
+    return null;
+  }
+
+  private static Map<String, Object> buildCampaignDirectBodyComponent(
+    List<String> params
+  ) {
+    List<Object> parameters = new List<Object>();
+    for (String value : params) {
+      parameters.add(
+        new Map<String, Object>{
+          'type' => 'text',
+          'text' => String.isBlank(value) ? ' ' : value.trim()
+        }
+      );
+    }
+
+    return new Map<String, Object>{
+      'type' => 'body',
+      'parameters' => parameters
+    };
+  }
+
+  private static void applyCampaignDirectWebhookSettings(
+    Map<String, Object> dataContent,
+    BWM_Messaging_Settings__mdt settings
+  ) {
+    if (settings == null || String.isBlank(settings.Webhook_Callback_URL__c)) {
+      return;
+    }
+
+    String webhookUrl = settings.Webhook_Callback_URL__c.trim();
+    dataContent.put('webhookUrl', webhookUrl);
+    dataContent.put('callbackUrl', webhookUrl);
+  }
+
+  private static String resolveCampaignTemplateLanguage(
+    Map<String, Object> templateMeta
+  ) {
+    if (templateMeta != null && templateMeta.containsKey('language')) {
+      String templateLanguage = String.valueOf(templateMeta.get('language'));
+      if (String.isNotBlank(templateLanguage)) {
+        return templateLanguage.trim();
+      }
+    }
+    return 'en';
+  }
+
+  private static Integer countCampaignBodyVariables(Map<String, Object> templateMeta) {
+    Map<String, Object> content = getCampaignTemplateContent(templateMeta);
+    if (content != null && content.containsKey('body')) {
+      Integer fromBody = countCampaignVariablesInText(String.valueOf(content.get('body')));
+      if (fromBody > 0) {
+        return fromBody;
+      }
+    }
+
+    if (templateMeta != null && templateMeta.get('components') instanceof List<Object>) {
+      for (Object componentObject : (List<Object>) templateMeta.get('components')) {
+        if (!(componentObject instanceof Map<String, Object>)) {
+          continue;
+        }
+        Map<String, Object> componentMap = (Map<String, Object>) componentObject;
+        if (String.valueOf(componentMap.get('type')).toUpperCase() != 'BODY') {
+          continue;
+        }
+        Integer fromComponent = countCampaignVariablesInText(
+          String.valueOf(componentMap.get('text'))
+        );
+        if (fromComponent > 0) {
+          return fromComponent;
+        }
+      }
+    }
+
+    return 0;
+  }
+
+  private static Integer countCampaignVariablesInText(String body) {
+    if (String.isBlank(body)) {
+      return 0;
+    }
+
+    Integer maxIndex = 0;
+    Matcher matcher = Pattern.compile('\\{\\{(\\d+)\\}\\}').matcher(body);
+    while (matcher.find()) {
+      Integer currentIndex = Integer.valueOf(matcher.group(1));
+      if (currentIndex > maxIndex) {
+        maxIndex = currentIndex;
+      }
+    }
+    return maxIndex;
+  }
+
+  private static Map<String, Object> getCampaignTemplateContent(
+    Map<String, Object> templateMeta
+  ) {
+    if (templateMeta == null || !templateMeta.containsKey('content')) {
+      return null;
+    }
+    return (Map<String, Object>) templateMeta.get('content');
   }
 
   public static String buildWhatsAppPayload(

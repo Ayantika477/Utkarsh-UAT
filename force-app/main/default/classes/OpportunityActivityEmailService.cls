@@ -41,9 +41,10 @@ public inherited sharing class OpportunityActivityEmailService {
         Messaging.SingleEmailMessage mail =
             new Messaging.SingleEmailMessage();
 
-        mail.setToAddresses(
-            new List<String>(recipients)
-        );
+        // Not used: buildEmails sends to User Ids and copies only the subject/body.
+        // mail.setToAddresses(
+        //     new List<String>(recipients)
+        // );
 
         mail.setSubject(
 
@@ -104,6 +105,74 @@ public inherited sharing class OpportunityActivityEmailService {
         );
 
         return mail;
+    }
+
+    /**
+     * -------------------------------------------------------------------------
+     * Sends to User Ids so the email counts as internal (not against the daily
+     * external email limit). setTargetObjectId takes a single User, so one copy
+     * of the escalation email is built per recipient. userIdByEmail maps
+     * lowercased email → active User Id. Addresses without an active User are
+     * skipped (email address fallback disabled).
+     * -------------------------------------------------------------------------
+     */
+    public static List<Messaging.SingleEmailMessage> buildEmails(
+
+        Opportunity opp,
+
+        Set<String> recipients,
+
+        Integer escalationLevel,
+
+        String activityType,
+
+        Map<String,Id> userIdByEmail
+
+    ){
+
+        List<Messaging.SingleEmailMessage> messages =
+            new List<Messaging.SingleEmailMessage>();
+
+        Messaging.SingleEmailMessage template =
+            buildEmail(opp, recipients, escalationLevel, activityType);
+
+        if(template == null){
+            return messages;
+        }
+
+        Set<Id> addedUserIds = new Set<Id>();
+
+        for(String email : recipients){
+
+            Id userId = (String.isBlank(email) || userIdByEmail == null)
+                ? null
+                : userIdByEmail.get(email.trim().toLowerCase());
+
+            if(userId == null){
+                System.debug(
+                    'OpportunityActivityEmailService: no active User Id for recipient ' + email +
+                    ' - email address fallback is disabled, email not sent.'
+                );
+                continue;
+            }
+
+            if(addedUserIds.contains(userId)){
+                continue;
+            }
+            addedUserIds.add(userId);
+
+            Messaging.SingleEmailMessage mail =
+                new Messaging.SingleEmailMessage();
+
+            mail.setTargetObjectId(userId);
+            mail.setSaveAsActivity(false);
+            mail.setSubject(template.getSubject());
+            mail.setPlainTextBody(template.getPlainTextBody());
+
+            messages.add(mail);
+        }
+
+        return messages;
     }
 
 }

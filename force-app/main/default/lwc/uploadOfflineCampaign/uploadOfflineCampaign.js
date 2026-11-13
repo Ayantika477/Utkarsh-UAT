@@ -1,3 +1,8 @@
+/**
+ * @description Upload Offline Campaign LWC — Excel/CSV upload UI to create Offline Campaign rows in bulk.
+ * @author      Anshita Chanda
+ * @date        2026-08-06
+ */
 import { LightningElement, track, wire } from 'lwc';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import getDepartmentOptions from '@salesforce/apex/OfflineCampaignUploadController.getDepartmentOptions';
@@ -16,11 +21,21 @@ export default class UploadOfflineCampaign extends LightningElement {
   isLoading = false;
   hasUploadedFile = false;
   uploadedFileName;
+  groupList = '';
 
+  /**
+   * Builds datatable columns when the upload component connects.
+   * @returns {void} Nothing.
+   */
   connectedCallback() {
     this.buildColumns();
   }
 
+  /**
+   * Wire handler that loads department picklist options for upload.
+   * @param {Object} {data, error} Wire result with data or error.
+   * @returns {void} Nothing.
+   */
   @wire(getDepartmentOptions)
   wiredDepartmentOptions({ data, error }) {
     if (data) {
@@ -31,6 +46,10 @@ export default class UploadOfflineCampaign extends LightningElement {
     }
   }
 
+  /**
+   * Builds editable datatable column definitions including department picklist.
+   * @returns {void} Nothing.
+   */
   buildColumns() {
     this.columns = [
       { label: 'Name', fieldName: 'recordName', type: 'text', editable: true },
@@ -67,14 +86,73 @@ export default class UploadOfflineCampaign extends LightningElement {
     return this.rows && this.rows.length > 0;
   }
 
+  /**
+   * Whether the insert button should be disabled.
+   * @returns {boolean} True when loading or there are no rows.
+   */
   get disableInsert() {
-    return this.isLoading || !this.hasRows;
+    return this.isLoading || !this.hasRows || !(this.groupList || '').trim();
   }
 
   get showSummary() {
     return this.insertSummary != null;
   }
 
+  /**
+   * @description Comma-separated department values customers must copy into the CSV.
+   * @returns {string} Department names, or a short fallback while options load.
+   */
+  get departmentNames() {
+    const names = (this.departmentOptions || [])
+      .map((option) => option.value)
+      .filter((value) => value);
+    return names.length ? names.join(', ') : 'loading department list';
+  }
+
+  /**
+   * Downloads a CSV template with the columns this upload accepts and one sample row.
+   * @returns {void} Nothing.
+   */
+  handleDownloadFormat() {
+    const sampleDepartment = this.csvEscape(
+      (this.departmentOptions &&
+        this.departmentOptions[0] &&
+        this.departmentOptions[0].value) ||
+        'Enquiry'
+    );
+    const csv = [
+      'Name,Email,Phone,Department',
+      `Sample Customer,sample.customer@example.com,9876543210,${sampleDepartment}`
+    ].join('\r\n');
+    const link = document.createElement('a');
+    link.href =
+      'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF' + csv);
+    link.download = 'Offline_Campaign_Upload_Format.csv';
+    link.click();
+  }
+
+  /**
+   * @description Quotes a CSV value when it contains a comma, quote, or line break.
+   * @param {string} value Cell value.
+   * @returns {string} CSV-safe value.
+   */
+  csvEscape(value) {
+    const text = value == null ? '' : String(value);
+    if (/[",\r\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
+  handleGroupListChange(event) {
+    this.groupList = event.detail.value ?? '';
+  }
+
+  /**
+   * Reads an uploaded CSV/Excel text file and populates validated preview rows.
+   * @param {Event} event File input change event.
+   * @returns {void} Nothing.
+   */
   handleFileChange(event) {
     const file = event.target.files && event.target.files[0];
     if (!file) {
@@ -115,6 +193,11 @@ export default class UploadOfflineCampaign extends LightningElement {
     reader.readAsText(file);
   }
 
+  /**
+   * Consolidates inline draft cell edits from the datatable.
+   * @param {Event} event Datatable cell change event.
+   * @returns {void} Nothing.
+   */
   handleCellChange(event) {
     this.draftValues = this.consolidateDraftChanges(
       this.draftValues,
@@ -122,6 +205,11 @@ export default class UploadOfflineCampaign extends LightningElement {
     );
   }
 
+  /**
+   * Applies draft edits to rows and shows a saved toast.
+   * @param {Event} event Datatable save event.
+   * @returns {void} Nothing.
+   */
   handleSaveEdits(event) {
     const applied = this.applyDraftChanges(
       event?.detail?.draftValues,
@@ -132,6 +220,11 @@ export default class UploadOfflineCampaign extends LightningElement {
     }
   }
 
+  /**
+   * Merges one or more draft-value lists into the current rows and revalidates.
+   * @param {Array} draftLists One or more draft value arrays.
+   * @returns {boolean} True if any draft changes were applied.
+   */
   applyDraftChanges(...draftLists) {
     const changes = this.consolidateDraftChanges(...draftLists);
     if (!changes.length) {
@@ -166,6 +259,11 @@ export default class UploadOfflineCampaign extends LightningElement {
     return true;
   }
 
+  /**
+   * Merges multiple draft-value lists by rowKey into a single change list.
+   * @param {Array} draftLists One or more draft value arrays.
+   * @returns {Array} Consolidated draft changes.
+   */
   consolidateDraftChanges(...draftLists) {
     const draftByKey = new Map();
     for (const draftList of draftLists) {
@@ -183,16 +281,34 @@ export default class UploadOfflineCampaign extends LightningElement {
     return Array.from(draftByKey.values());
   }
 
+  /**
+   * Clears pending draft edits without applying them.
+   * @returns {void} Nothing.
+   */
   handleCancelEdits() {
     this.draftValues = [];
   }
 
+  /**
+   * Validates rows and inserts Offline Campaign records via Apex.
+   * @returns {Promise<void>} Resolves when insert completes.
+   */
   async handleInsert() {
     this.isLoading = true;
     this.insertSummary = null;
     this.errorSummary = [];
 
     try {
+      const groupList = (this.groupList || '').trim();
+      if (!groupList) {
+        this.showToast(
+          'Group / List required',
+          'Enter the group or list name before inserting records.',
+          'error'
+        );
+        return;
+      }
+
       const validatedRows = this.rows.map((row) => this.applyValidation(row));
       const rowsWithErrors = validatedRows.filter((row) => row.errors);
       if (rowsWithErrors.length) {
@@ -215,7 +331,8 @@ export default class UploadOfflineCampaign extends LightningElement {
       }));
 
       const summary = await insertOfflineCampaignRows({
-        rowsJson: JSON.stringify(payload)
+        rowsJson: JSON.stringify(payload),
+        groupList
       });
       this.insertSummary = summary;
       this.errorSummary = (Array.isArray(summary.errorSummary)
@@ -251,6 +368,10 @@ export default class UploadOfflineCampaign extends LightningElement {
     }
   }
 
+  /**
+   * Clears uploaded rows, summary, and the file input.
+   * @returns {void} Nothing.
+   */
   handleReset() {
     this.rows = [];
     this.draftValues = [];
@@ -258,12 +379,18 @@ export default class UploadOfflineCampaign extends LightningElement {
     this.errorSummary = [];
     this.hasUploadedFile = false;
     this.uploadedFileName = null;
+    this.groupList = '';
     const fileInput = this.template.querySelector('input[type="file"]');
     if (fileInput) {
       fileInput.value = null;
     }
   }
 
+  /**
+   * Parses CSV text into Offline Campaign row objects.
+   * @param {string} content Raw CSV file contents.
+   * @returns {Array} Parsed row objects.
+   */
   parseCsv(content) {
     const normalizedContent = content.replace(/^\uFEFF/, '');
     const lines = normalizedContent
@@ -313,6 +440,11 @@ export default class UploadOfflineCampaign extends LightningElement {
     return parsedRows;
   }
 
+  /**
+   * Parses a single CSV line, respecting quoted commas.
+   * @param {string} line One CSV line.
+   * @returns {Array<string>} Field values for the line.
+   */
   parseCsvLine(line) {
     const values = [];
     let current = '';
@@ -338,6 +470,12 @@ export default class UploadOfflineCampaign extends LightningElement {
     return values;
   }
 
+  /**
+   * Safely reads a trimmed CSV field by column index.
+   * @param {Array<string>} values Parsed line values.
+   * @param {number} index Column index, or -1 if missing.
+   * @returns {string} Trimmed field value or empty string.
+   */
   getCsvValue(values, index) {
     if (index === -1 || index >= values.length) {
       return '';
@@ -345,6 +483,11 @@ export default class UploadOfflineCampaign extends LightningElement {
     return (values[index] || '').trim();
   }
 
+  /**
+   * Normalizes a phone string to a trimmed value or null.
+   * @param {string} value Raw phone input.
+   * @returns {string|null} Trimmed phone or null.
+   */
   parsePhone(value) {
     if (!value) {
       return null;
@@ -353,6 +496,11 @@ export default class UploadOfflineCampaign extends LightningElement {
     return trimmed ? trimmed : null;
   }
 
+  /**
+   * Parses Active column values (true/yes/1/y) into a boolean.
+   * @param {string} value Raw active column value.
+   * @returns {boolean} True when the value indicates active.
+   */
   parseActive(value) {
     if (!value) {
       return false;
@@ -361,6 +509,11 @@ export default class UploadOfflineCampaign extends LightningElement {
     return ['true', 'yes', '1', 'y'].includes(normalized);
   }
 
+  /**
+   * Validates and normalizes a single upload row, attaching error text.
+   * @param {Object} row Row to validate.
+   * @returns {Object} Validated row with errors string.
+   */
   applyValidation(row) {
     const errors = [];
     const departmentValues = new Set(
@@ -405,6 +558,13 @@ export default class UploadOfflineCampaign extends LightningElement {
     };
   }
 
+  /**
+   * Dispatches a Lightning toast notification.
+   * @param {string} title Toast title.
+   * @param {string} message Toast message body.
+   * @param {string} variant Toast variant (success, error, warning, info).
+   * @returns {void} Nothing.
+   */
   showToast(title, message, variant) {
     this.dispatchEvent(
       new ShowToastEvent({
@@ -415,6 +575,11 @@ export default class UploadOfflineCampaign extends LightningElement {
     );
   }
 
+  /**
+   * Normalizes an Apex or Lightning error into a readable string.
+   * @param {Object} error Error object from Apex or wire.
+   * @returns {string} Human-readable error message.
+   */
   normalizeError(error) {
     if (!error) {
       return 'Unknown error';

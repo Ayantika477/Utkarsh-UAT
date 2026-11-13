@@ -159,6 +159,32 @@ implements Database.Batchable<SObject>{
                 roleNames
             );
 
+        /*
+         * Email → active User Id, from the owners and role users loaded above
+         * (both queried with IsActive = true). Used to send to User Ids.
+         */
+        Map<String,Id> userIdByEmail =
+            new Map<String,Id>();
+
+        List<User> knownUsers =
+            new List<User>(ownerMap.values());
+
+        for(List<User> usersInRole : roleUsers.values()){
+            knownUsers.addAll(usersInRole);
+        }
+
+        for(User usr : knownUsers){
+            if(
+                String.isNotBlank(usr.Email) &&
+                !userIdByEmail.containsKey(usr.Email.toLowerCase())
+            ){
+                userIdByEmail.put(
+                    usr.Email.toLowerCase(),
+                    usr.Id
+                );
+            }
+        }
+
         System.debug(
             LoggingLevel.INFO,
             'Owner Count : ' +
@@ -252,37 +278,75 @@ implements Database.Batchable<SObject>{
 
                 );
 
-                Messaging.SingleEmailMessage mail =
+                // Messaging.SingleEmailMessage mail =
+                //
+                //     OpportunityActivityEmailService.buildEmail(
+                //
+                //         opp,
+                //
+                //         recipients,
+                //
+                //         120,
+                //
+                //         'Task'
+                //
+                //     );
+                //
+                // if(mail != null){
+                //
+                //     emailMessages.add(
+                //         mail
+                //     );
+                //
+                //     pendingEscalations.add(
+                //
+                //         new PendingEscalation(
+                //
+                //             opp,
+                //
+                //             120
+                //
+                //         )
+                //
+                //     );
+                List<Messaging.SingleEmailMessage> mails =
 
-                    OpportunityActivityEmailService.buildEmail(
+                    OpportunityActivityEmailService.buildEmails(
 
                         opp,
-                    
+
                         recipients,
-                    
+
                         120,
-                    
-                        'Task'
-                    
-                    );
 
-                if(mail != null){
+                        'Task',
 
-                    emailMessages.add(
-                        mail
-                    );
-
-                    pendingEscalations.add(
-
-                        new PendingEscalation(
-
-                            opp,
-
-                            120
-
-                        )
+                        userIdByEmail
 
                     );
+
+                if(!mails.isEmpty()){
+
+                    // One PendingEscalation per message keeps results[i] aligned.
+                    for(Messaging.SingleEmailMessage mail : mails){
+
+                        emailMessages.add(
+                            mail
+                        );
+
+                        pendingEscalations.add(
+
+                            new PendingEscalation(
+
+                                opp,
+
+                                120
+
+                            )
+
+                        );
+
+                    }
 
                     System.debug(
                         LoggingLevel.INFO,
@@ -334,37 +398,75 @@ implements Database.Batchable<SObject>{
 
                 );
 
-                Messaging.SingleEmailMessage mail =
+                // Messaging.SingleEmailMessage mail =
+                //
+                //     OpportunityActivityEmailService.buildEmail(
+                //
+                //             opp,
+                //
+                //             recipients,
+                //
+                //             96,
+                //
+                //             'Task'
+                //
+                //         );
+                //
+                // if(mail != null){
+                //
+                //     emailMessages.add(
+                //         mail
+                //     );
+                //
+                //     pendingEscalations.add(
+                //
+                //         new PendingEscalation(
+                //
+                //             opp,
+                //
+                //             96
+                //
+                //         )
+                //
+                //     );
+                List<Messaging.SingleEmailMessage> mails =
 
-                    OpportunityActivityEmailService.buildEmail(
+                    OpportunityActivityEmailService.buildEmails(
 
-                            opp,
-                        
-                            recipients,
-                        
-                            96,
-                        
-                            'Task'
-                        
+                        opp,
+
+                        recipients,
+
+                        96,
+
+                        'Task',
+
+                        userIdByEmail
+
+                    );
+
+                if(!mails.isEmpty()){
+
+                    // One PendingEscalation per message keeps results[i] aligned.
+                    for(Messaging.SingleEmailMessage mail : mails){
+
+                        emailMessages.add(
+                            mail
                         );
 
-                if(mail != null){
+                        pendingEscalations.add(
 
-                    emailMessages.add(
-                        mail
-                    );
+                            new PendingEscalation(
 
-                    pendingEscalations.add(
+                                opp,
 
-                        new PendingEscalation(
+                                96
 
-                            opp,
+                            )
 
-                            96
+                        );
 
-                        )
-
-                    );
+                    }
 
                     System.debug(
                         LoggingLevel.INFO,
@@ -402,37 +504,75 @@ implements Database.Batchable<SObject>{
 
                 );
 
-                Messaging.SingleEmailMessage mail =
+                // Messaging.SingleEmailMessage mail =
+                //
+                //     OpportunityActivityEmailService.buildEmail(
+                //
+                //         opp,
+                //
+                //         recipients,
+                //
+                //         72,
+                //
+                //         'Task'
+                //
+                //     );
+                //
+                // if(mail != null){
+                //
+                //     emailMessages.add(
+                //         mail
+                //     );
+                //
+                //     pendingEscalations.add(
+                //
+                //         new PendingEscalation(
+                //
+                //             opp,
+                //
+                //             72
+                //
+                //         )
+                //
+                //     );
+                List<Messaging.SingleEmailMessage> mails =
 
-                    OpportunityActivityEmailService.buildEmail(
-                    
+                    OpportunityActivityEmailService.buildEmails(
+
                         opp,
-                    
+
                         recipients,
-                    
+
                         72,
-                    
-                        'Task'
-                    
-                    );
 
-                if(mail != null){
+                        'Task',
 
-                    emailMessages.add(
-                        mail
-                    );
-
-                    pendingEscalations.add(
-
-                        new PendingEscalation(
-
-                            opp,
-
-                            72
-
-                        )
+                        userIdByEmail
 
                     );
+
+                if(!mails.isEmpty()){
+
+                    // One PendingEscalation per message keeps results[i] aligned.
+                    for(Messaging.SingleEmailMessage mail : mails){
+
+                        emailMessages.add(
+                            mail
+                        );
+
+                        pendingEscalations.add(
+
+                            new PendingEscalation(
+
+                                opp,
+
+                                72
+
+                            )
+
+                        );
+
+                    }
 
                     System.debug(
                         LoggingLevel.INFO,

@@ -1,4 +1,13 @@
+/**
+ * @description   Resolves BWM_Email_Template_Mapping__mdt for Lead/Opportunity email
+ *                trigger points.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_EmailTemplateResolver {
+  private static Map<String, List<BWM_Email_Template_Mapping__mdt>> mappingsByTriggerPoint =
+    new Map<String, List<BWM_Email_Template_Mapping__mdt>>();
+
   public class ResolveResult {
     public BWM_Email_Template_Mapping__mdt mapping;
     public Boolean shouldSend = false;
@@ -108,7 +117,11 @@ public without sharing class BWM_EmailTemplateResolver {
   private static List<BWM_Email_Template_Mapping__mdt> queryAllMappings(
     String triggerPoint
   ) {
-    return [
+    if (mappingsByTriggerPoint.containsKey(triggerPoint)) {
+      return mappingsByTriggerPoint.get(triggerPoint);
+    }
+
+    List<BWM_Email_Template_Mapping__mdt> mappings = [
       SELECT
         Trigger_Point__c,
         Object_Type__c,
@@ -138,6 +151,8 @@ public without sharing class BWM_EmailTemplateResolver {
       WHERE Is_Active__c = TRUE AND Trigger_Point__c = :triggerPoint
       ORDER BY Priority__c ASC NULLS LAST
     ];
+    mappingsByTriggerPoint.put(triggerPoint, mappings);
+    return mappings;
   }
 
   private static BWM_Email_Template_Mapping__mdt queryMappingForTriggerPoint(
@@ -191,6 +206,14 @@ public without sharing class BWM_EmailTemplateResolver {
     ) {
       return 'Lead stage must be Prospecting.';
     }
+    if (
+      triggerPoint ==
+      BWM_EmailConstants.TRIGGER_LEAD_DETAILS_NOT_RECEIVED_PROSPECTING &&
+      leadRecord.Status != BWM_EmailConstants.STAGE_PROSPECT &&
+      leadRecord.Status != BWM_EmailConstants.STAGE_PROSPECTING
+    ) {
+      return 'Lead stage must be Prospect or Prospecting for details-not-received email.';
+    }
     if (triggerPoint.contains('Prospect') && !triggerPoint.contains('Prospecting')) {
       if (
         triggerPoint.contains('Lost') &&
@@ -236,6 +259,13 @@ public without sharing class BWM_EmailTemplateResolver {
       if (opportunityRecord.StageName != BWM_EmailConstants.STAGE_NURTURE) {
         return 'Opportunity stage must be Nurture.';
       }
+    }
+    if (
+      triggerPoint ==
+      BWM_EmailConstants.TRIGGER_OPPORTUNITY_DETAILS_NOT_RECEIVED_NURTURE &&
+      opportunityRecord.StageName != BWM_EmailConstants.STAGE_NURTURE
+    ) {
+      return 'Opportunity stage must be Nurture for details-not-received email.';
     }
     if (triggerPoint == BWM_EmailConstants.TRIGGER_OPPORTUNITY_DEALER_ENQUIRY) {
       if (
@@ -446,6 +476,11 @@ public without sharing class BWM_EmailTemplateResolver {
     if (shouldPreferGeneralTemplate(record, departmentName)) {
       for (BWM_Email_Template_Mapping__mdt mapping : mappings) {
         if (isProductDeptMapping(mapping)) {
+          continue;
+        }
+        if (
+          mapping.Department_Mode__c == BWM_EmailConstants.DEPT_MODE_ENQUIRY_ONLY
+        ) {
           continue;
         }
         if (

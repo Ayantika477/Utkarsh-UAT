@@ -52,8 +52,57 @@ public without sharing class OpportunityQuotationPendingMatrixBatch implements D
       opportunitiesWithQuotes.add(quoteRecord.OpportunityId);
     }
 
-    List<Opportunity> opportunitiesToUpdate = new List<Opportunity>();
+    for (Opportunity opportunityRecord : scope) {
+      if (opportunitiesWithQuotes.contains(opportunityRecord.Id)) {
+        continue;
+      }
 
+      Datetime anchorDate = opportunityRecord.Nurture_Stage_Entry_Date__c != null
+        ? opportunityRecord.Nurture_Stage_Entry_Date__c
+        : opportunityRecord.CreatedDate;
+      Long hoursDiff = EscalationMatrixEmailService.hoursSince(anchorDate);
+
+      if (hoursDiff < 48) {
+        continue;
+      }
+
+      if (
+        !opportunityRecord.Nurture_Escalation_48_Sent__c &&
+        hoursDiff >= 48
+      ) {
+        EscalationMatrixEmailService.sendOpportunityEmail(
+          opportunityRecord,
+          TEMPLATE_48H,
+          EscalationMatrixEmailService.RecipientGroup.OWNER_AND_CRM
+        );
+      }
+
+      if (
+        !opportunityRecord.Nurture_Escalation_60_Sent__c &&
+        hoursDiff >= 60
+      ) {
+        EscalationMatrixEmailService.sendOpportunityEmail(
+          opportunityRecord,
+          TEMPLATE_60H,
+          EscalationMatrixEmailService.RecipientGroup.HOD_AND_CRM_HEAD
+        );
+      }
+
+      if (
+        !opportunityRecord.Nurture_Escalation_72_Sent__c &&
+        hoursDiff >= 72
+      ) {
+        EscalationMatrixEmailService.sendOpportunityEmail(
+          opportunityRecord,
+          TEMPLATE_72H,
+          EscalationMatrixEmailService.RecipientGroup.ED_SIR
+        );
+      }
+    }
+
+    EscalationMatrixEmailService.flushQueuedEmails();
+
+    List<Opportunity> opportunitiesToUpdate = new List<Opportunity>();
     for (Opportunity opportunityRecord : scope) {
       if (opportunitiesWithQuotes.contains(opportunityRecord.Id)) {
         continue;
@@ -74,11 +123,7 @@ public without sharing class OpportunityQuotationPendingMatrixBatch implements D
       if (
         !opportunityRecord.Nurture_Escalation_48_Sent__c &&
         hoursDiff >= 48 &&
-        EscalationMatrixEmailService.sendOpportunityEmail(
-          opportunityRecord,
-          TEMPLATE_48H,
-          EscalationMatrixEmailService.RecipientGroup.OWNER_AND_CRM
-        )
+        EscalationMatrixEmailService.wasSendSuccessful(opportunityRecord.Id, TEMPLATE_48H)
       ) {
         updateRecord.Nurture_Escalation_48_Sent__c = true;
         changed = true;
@@ -87,11 +132,7 @@ public without sharing class OpportunityQuotationPendingMatrixBatch implements D
       if (
         !opportunityRecord.Nurture_Escalation_60_Sent__c &&
         hoursDiff >= 60 &&
-        EscalationMatrixEmailService.sendOpportunityEmail(
-          opportunityRecord,
-          TEMPLATE_60H,
-          EscalationMatrixEmailService.RecipientGroup.HOD_AND_CRM_HEAD
-        )
+        EscalationMatrixEmailService.wasSendSuccessful(opportunityRecord.Id, TEMPLATE_60H)
       ) {
         updateRecord.Nurture_Escalation_60_Sent__c = true;
         changed = true;
@@ -100,11 +141,7 @@ public without sharing class OpportunityQuotationPendingMatrixBatch implements D
       if (
         !opportunityRecord.Nurture_Escalation_72_Sent__c &&
         hoursDiff >= 72 &&
-        EscalationMatrixEmailService.sendOpportunityEmail(
-          opportunityRecord,
-          TEMPLATE_72H,
-          EscalationMatrixEmailService.RecipientGroup.ED_SIR
-        )
+        EscalationMatrixEmailService.wasSendSuccessful(opportunityRecord.Id, TEMPLATE_72H)
       ) {
         updateRecord.Nurture_Escalation_72_Sent__c = true;
         changed = true;
@@ -115,9 +152,7 @@ public without sharing class OpportunityQuotationPendingMatrixBatch implements D
       }
     }
 
-    if (!opportunitiesToUpdate.isEmpty()) {
-      update opportunitiesToUpdate;
-    }
+    EscalationMatrixEmailService.updateOpportunitiesAllowPartial(opportunitiesToUpdate);
   }
 
   public void finish(Database.BatchableContext context) {

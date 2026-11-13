@@ -224,15 +224,19 @@ public without sharing class AddressBookProcessor {
                 Address_Book__c = ab.Id
             ));
 
-            contactsToUpdate.add(new Contact(
-                Id = i.contactId,
-                Street__c = ab.Street__c,
-                City__c = ab.City__c,
-                State__c = ab.State__c,
-                Country__c = ab.Country__c,
-                PIN__c = ab.PIN__c,
-                Zone__c = ab.Zone__c
-            ));
+            if (i.contactId != null) {
+                contactsToUpdate.add(new Contact(
+                    Id = i.contactId,
+                    Street__c = ab.Street__c,
+                    City__c = ab.City__c,
+                    State__c = ab.State__c,
+                    Country__c = ab.Country__c,
+                    PIN__c = ab.PIN__c,
+                    Zone__c = ab.Zone__c
+                ));
+            } else {
+                throw new AuraHandledException('Contact is missing in the bidder record!');
+            }
         }
 
         if (!junctions.isEmpty()) {

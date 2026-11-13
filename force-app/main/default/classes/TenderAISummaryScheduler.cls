@@ -11,7 +11,7 @@ public class TenderAISummaryScheduler implements Schedulable {
 
     public void execute(SchedulableContext sc) {
         System.debug('[TenderAISummaryScheduler] Firing TenderAISummaryBatch at: ' + DateTime.now());
-        Database.executeBatch(new TenderAISummaryBatch(), 5);
+        Database.executeBatch(new TenderAISummaryBatch(), 3);
     }
 }
 
@@ -35,13 +35,22 @@ System.schedule(
 );
 
 // ================================================================
-// 7:30 PM - Daily recurring
+// 6:30 PM - Daily recurring
 // ================================================================
 System.schedule(
-    'Tender AI Summary Fetch - 7:30 PM',
-    '0 30 19 * * ?',
+    'Tender AI Summary Fetch - 6:30 PM',
+    '0 30 18 * * ?',
     new TenderAISummaryScheduler()
 );
 
-// Database.executeBatch(new TenderAISummaryBatch(), 50);
+// ================================================================
+// 9:30 PM - Daily recurring
+// ================================================================
+System.schedule(
+    'Tender AI Summary Fetch - 9:30 PM',
+    '0 30 21 * * ?',
+    new TenderAISummaryScheduler()
+);
+
+// Database.executeBatch(new TenderAISummaryBatch(), 1);
 */

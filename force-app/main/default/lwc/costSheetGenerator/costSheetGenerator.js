@@ -479,7 +479,8 @@ const ENGINE = (() => {
         const addrVal = {};
 
         // ---- header ----
-        const prodName = quote._Dynamic_Product_Name || quote.type_of_pole || 'Quote';
+        let prodName = quote._Dynamic_Product_Name || quote.type_of_pole || 'Quote';
+        if (prodName === 'PEB QFR') prodName = 'PEB QRF';
         let rn = push([`COST SHEET — ${prodName}`]); mergeRow(rn); styleRow(rn, [ST.title, ST.title, ST.title]); rowHts[rn] = 28;
         rn = push(['Yellow cells are inputs. Green amounts are live Excel formulas — edit an input and the totals recalculate.']);
         mergeRow(rn); styleRow(rn, [ST.note]);
@@ -816,7 +817,8 @@ export default class CostSheetGenerator extends NavigationMixin(LightningElement
             const normalizedFormulas = ENGINE.normalizeFormulasToQuote(formulas, catalog, quote);
 
             const { wb } = ENGINE.buildWorkbook(this._XLSX, quote, rateCard, baseAmount, gst, normalizedFormulas, catalog);
-            const prodName = quote._Dynamic_Product_Name || quote.type_of_pole || 'Quote';
+            let prodName = quote._Dynamic_Product_Name || quote.type_of_pole || 'Quote';
+            if (prodName === 'PEB QFR') prodName = 'PEB QRF';
             const fileName = `Cost_Sheet_${String(prodName).replace(/\s+/g, '_')}.xlsx`;
             if (FORM_FACTOR === 'Large') {
                 // DESKTOP: unchanged - browser download via SheetJS.

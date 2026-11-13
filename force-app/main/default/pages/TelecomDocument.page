@@ -1,8 +1,22 @@
 <apex:page standardController="Quote" extensions="TelecomDocumentController" renderAs="pdf" showHeader="false" sidebar="false" applyBodyTag="false" >
 	<head>
      <style>
-         @page { size: A4 landscape;
-         		margin: 45mm 10mm 24mm 10mm;
+         /* 1. Global - 0 margin so a cover is full-bleed. Body keeps its own
+               named rule below, so its 45mm margin and running header/footer
+               never land on a cover. Deepanjan (21st Aug 2026) */
+         @page { size: A4; margin: 0mm; }
+
+         /* 2. The original body page, unchanged except for being named.
+               NOTE: no separate portrait @page for the covers - iText ignores a
+               per-page size change here (measured: every page still came out
+               841.88 x 595.28), which is what split each cover across 2-3 pages.
+               The covers are therefore sized for a LANDSCAPE A4 sheet, and the
+               artwork must be landscape too. Height 209mm not 210mm: the page box
+               is 595.28pt while 210mm converts to 595.276pt, and any overflow at
+               all opens a blank page. */
+         @page standard-content { 
+         		size: A4;
+         		margin: 30mm 6mm 8mm 6mm;
                 @top-center {
                     content: element(header);
                 }
@@ -10,12 +24,25 @@
                     content: element(footer);
                 }
          }
+
+         /* Cover pages - full bleed on a landscape sheet */
+         div.page-cover,
+         div.page-cover-last { width: 99.9%; height:99.9% margin: 0mm;
+                               line-height: 0; font-size: 0; overflow: hidden; }
+         div.page-cover      { page-break-after: always; }
+         div.page-cover-last { page-break-before: always; }
+         .cover-img          { width: 100%; height: 100%; display: block; object-position: center; }
+
+         /* Everything between the covers uses the named landscape page.
+            The tables below are untouched - no page-break rule is added or
+            changed here, so tele-table splits exactly where it does today. */
+         div.document-body   { page: standard-content; }
         body { font-family: sans-serif; font-size: 10px; margin: 0; padding: 0; width:100%; }
          
          .image-container{
          	position: running(header);
             width: 200%;
-            height: 40px;
+            height: 60px;
          }
          
          .pdf-header {
@@ -23,6 +50,7 @@
             height: 100%;
             display: block;
          	object-fit: cover;
+         	margin-bottom: 60px;
           }
             
             .pdf-footer {
@@ -32,24 +60,15 @@
                 line-height: 1.3;
                 color: #333;
             }
-         
-         .header-title{
-            text-align:center;
-            font-size:24px;
-            font-weight:bold;
-            margin: 10px 0 10px 0;
-            letter-spacing:0.3px;
-        }
 
         .main-container{
-            width: 98%;
+            width: 90%;
             max-width:100%;
          	height: auto;
          	background:#f3f3f3;
             border-top:1px solid #d7d7d7;
-            padding: 12px 14px;
+            padding: 6px 8px;
             box-sizing:border-box;
-         	margin: auto;
         }
         
         .ref-section{
@@ -94,7 +113,7 @@
         .sub-heading{
             font-size:11px;
             font-weight:bold;
-            margin:16px 0 6px 0;
+            margin:16px 0px 10px 6px;
         }
         
         .normal-text{
@@ -192,7 +211,7 @@
             width: 98%;
             border-collapse: collapse;
             font-size: 11px;
-            margin-bottom: 16px;
+            margin-bottom: 25px;
          	align-items: center;
          	margin: auto;
          	background: red;
@@ -247,11 +266,13 @@
                 </table>
             </div>
         </div>
-        
-        <div class="header-title">
-             Section
-        </div>
-        
+
+        <!-- PAGE 1: Front Cover (landscape artwork) -->
+        <div class="page-cover"><apex:image url="{!$Resource.Telecom1stPage}" styleClass="cover-img"/></div>
+
+        <!-- PAGE 2 onwards: offer body -->
+        <div class="document-body">
+
         <div class="main-container">
                 <div class="ref-section">
                     Ref:- {!quoteNumber}<br/>
@@ -273,8 +294,8 @@ of our proposal are as here under:
                 </div>
     			
             	<apex:outputPanel rendered="{!isBOMNotAvailable}">
-            		<div style="margin: 0 0 20px 0;">
-                        Please refer to our below price Offer which is tentative as the BOM is not available and hence the weight considered is also tentative. Further, prices are basic and all applicable taxes are extra.
+            		<div style="margin: 0 0 20px 0; font-size: 12px;">
+                        Please refer to our below price Offer which is tentative and the weight considered is also tentative. Further, prices are basic and all applicable taxes are extra.
                     </div>
             	</apex:outputPanel>
             
@@ -292,7 +313,8 @@ of our proposal are as here under:
             
             <!-- ═══ TELECOM TOWER PART DETAILS (dynamic) ═══ -->
             <apex:repeat value="{!towerDetailGroups}" var="grp">
-                <div class="sub-heading">{!grp.subType}</div>
+                <apex:outputPanel rendered="{!grp.showTable}">
+                	<div class="sub-heading">{!grp.subType}</div>
                 <table class="tele-table">
                     <colgroup>
                         <col style="width:5%;"/>
@@ -332,6 +354,7 @@ of our proposal are as here under:
                         </apex:repeat>
                     </tbody>
                 </table>
+                </apex:outputPanel>
             </apex:repeat>
             
             <apex:outputPanel rendered="{!isMGLForType}">
@@ -604,6 +627,11 @@ requirements. We look forward to receiving your valued order which shall receive
                 <div class="bottom-space"></div>
     
             </div>
+
+        </div><!-- /document-body -->
+
+        <!-- LAST PAGE: back cover (landscape artwork) -->
+        <div class="page-cover-last"><apex:image url="{!$Resource.HM_Last_Page}" styleClass="cover-img"/></div>
     </body>
     
 </apex:page>

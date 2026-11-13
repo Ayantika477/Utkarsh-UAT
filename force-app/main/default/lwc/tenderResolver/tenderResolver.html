@@ -113,6 +113,9 @@
 
             <!-- Address Book Selector for existing Accounts -->
             <template lwc:if={showAddressSelector}>
+                <div class="slds-text-color_error slds-var-m-bottom_small slds-var-m-top_medium">
+                    <strong>*Please Select Either An Address Book Or Enter The Address Details Below</strong>
+                </div>
                 <div class="slds-box slds-box_x-small slds-theme_default slds-var-m-top_medium">
                     <c-address-book-selector
                         account-id={selectedAccountId}
@@ -129,25 +132,21 @@
                     </h3>
                     <div class="slds-section__content slds-var-p-top_small">
                         
-                        <div class="slds-grid slds-wrap slds-gutters slds-var-m-bottom_medium">
+                       <div class="slds-grid slds-wrap slds-gutters slds-var-m-bottom_medium">
                             <div class="slds-col slds-size_1-of-1 slds-var-m-bottom_x-small">
-                                <lightning-input label="Street Address" value={addressStreet} onchange={handleAddressChange} data-field="addressStreet"></lightning-input>
+                                <lightning-input required label="Street Address" value={addressStreet} onchange={handleAddressChange} data-field="addressStreet"></lightning-input>
                             </div>
                             <div class="slds-col slds-size_1-of-2 slds-var-m-bottom_x-small">
-                                <lightning-input label="City" value={addressCity} onchange={handleAddressChange} data-field="addressCity"></lightning-input>
+                                <lightning-input required label="City" value={addressCity} onchange={handleAddressChange} data-field="addressCity"></lightning-input>
                             </div>
                             <div class="slds-col slds-size_1-of-2 slds-var-m-bottom_x-small">
-                                <lightning-input label="State" value={addressState} onchange={handleAddressChange} data-field="addressState"></lightning-input>
+                                <lightning-input required label="State" value={addressState} onchange={handleAddressChange} data-field="addressState"></lightning-input>
                             </div>
                             <div class="slds-col slds-size_1-of-2 slds-var-m-bottom_x-small">
-                                <lightning-input label="Country" value={addressCountry} onchange={handleAddressChange} data-field="addressCountry"></lightning-input>
+                                <lightning-input required label="Country" value={addressCountry} onchange={handleAddressChange} data-field="addressCountry"></lightning-input>
                             </div>
                             <div class="slds-col slds-size_1-of-2 slds-var-m-bottom_x-small">
-                                <lightning-input 
-                                    label="Pincode" 
-                                    value={addressPincode} 
-                                    onchange={handleAddressChange} 
-                                    data-field="addressPincode">
+                                <lightning-input required label="Pincode" value={addressPincode} onchange={handleAddressChange} data-field="addressPincode">
                                 </lightning-input>
                             </div>
                         </div>

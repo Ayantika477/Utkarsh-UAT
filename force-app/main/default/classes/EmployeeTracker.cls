@@ -1,4 +1,9 @@
 public class EmployeeTracker {
+
+    private static final Set<String> FORCE_TRACKER_BLOCKED_ROLES = new Set<String>{
+        'Enquiry CRM User',
+        'Steel Pipes Tender User'
+    };
     
     public class TaskRowDTO {
         @AuraEnabled public Id taskId;
@@ -31,6 +36,7 @@ public class EmployeeTracker {
         @AuraEnabled public String checkInTime;
         @AuraEnabled public String checkOutTime;
         @AuraEnabled public String visitDuration;
+        @AuraEnabled public String nodeDistance;
     }
 
     public class EmployeeDTO {
@@ -61,130 +67,148 @@ public class EmployeeTracker {
         @AuraEnabled public String startTime;
         @AuraEnabled public String endTime;
         @AuraEnabled public String status;
+        @AuraEnabled public String requestType;
     }
 
     private static Set<Id> getSubordinateUserIds(Id currentUserId) {
         Set<Id> subordinateUserIds = new Set<Id>();
 
-        // 1. Standard Manager check
-        for (User u : [SELECT Id FROM User WHERE ManagerId = :currentUserId AND IsActive = true]) {
-            subordinateUserIds.add(u.Id);
+        // Utkarsh HOD / CRM Head: department based visibility (same rules as FieldForceDashboardController)
+        List<Profile> currentProfiles = [SELECT Name FROM Profile WHERE Id = :UserInfo.getProfileId() LIMIT 1];
+        String currentProfileName = currentProfiles.isEmpty() ? '' : currentProfiles[0].Name;
+        if (currentProfileName == FieldForceDashboardController.HOD_PROFILE_NAME
+                || currentProfileName == FieldForceDashboardController.CRM_HEAD_PROFILE_NAME) {
+            subordinateUserIds.addAll(FieldForceDashboardController.getDepartmentUserIds(
+                currentUserId,
+                currentProfileName == FieldForceDashboardController.CRM_HEAD_PROFILE_NAME
+            ));
+        } else {
+            // 1. Standard Manager check
+            for (User u : [SELECT Id FROM User WHERE ManagerId = :currentUserId AND IsActive = true]) {
+                subordinateUserIds.add(u.Id);
+            }
         }
 
-        // 2. HOD / CRM Head role prefix check
-        try {
-            User currentUser = [SELECT Id, UserRole.Name FROM User WHERE Id = :currentUserId LIMIT 1];
-            String currentRoleName = currentUser.UserRole != null ? currentUser.UserRole.Name : '';
-            String deptPrefix = '';
-            if (String.isNotBlank(currentRoleName)) {
-                if (currentRoleName.endsWith(' HOD')) {
-                    deptPrefix = currentRoleName.substringBefore(' HOD').trim();
-                } else if (currentRoleName.endsWith(' CRM Head')) {
-                    deptPrefix = currentRoleName.substringBefore(' CRM Head').trim();
-                }
-            }
-            
-            if (String.isNotBlank(deptPrefix)) {
-                String likePattern = deptPrefix + '%';
-                for (User u : [
-                    SELECT Id FROM User 
-                    WHERE IsActive = true 
-                    AND UserRole.Name LIKE :likePattern
-                ]) {
-                    subordinateUserIds.add(u.Id);
-                }
-            }
-        } catch (Exception e) {
-            System.debug('Failed to query current user role or role-aligned subordinates: ' + e.getMessage());
-        }
+        // Role based matching replaced by department based matching for Utkarsh HOD / CRM Head profiles
+        // // 2. HOD / CRM Head role prefix check
+        // try {
+        //     User currentUser = [SELECT Id, UserRole.Name FROM User WHERE Id = :currentUserId LIMIT 1];
+        //     String currentRoleName = currentUser.UserRole != null ? currentUser.UserRole.Name : '';
+        //     String deptPrefix = '';
+        //     if (String.isNotBlank(currentRoleName)) {
+        //         if (currentRoleName.endsWith(' HOD')) {
+        //             deptPrefix = currentRoleName.substringBefore(' HOD').trim();
+        //         } else if (currentRoleName.endsWith(' CRM Head')) {
+        //             deptPrefix = currentRoleName.substringBefore(' CRM Head').trim();
+        //         }
+        //     }
+        //
+        //     if (String.isNotBlank(deptPrefix)) {
+        //         String likePattern = deptPrefix + '%';
+        //         for (User u : [
+        //             SELECT Id FROM User
+        //             WHERE IsActive = true
+        //             AND UserRole.Name LIKE :likePattern
+        //         ]) {
+        //             subordinateUserIds.add(u.Id);
+        //         }
+        //     }
+        // } catch (Exception e) {
+        //     System.debug('Failed to query current user role or role-aligned subordinates: ' + e.getMessage());
+        // }
 
-        // 3. Custom Manager Assignment metadata check
-        try {
-            for (Manager_Assignment__mdt ma : [
-                SELECT Target_User_Id__c 
-                FROM Manager_Assignment__mdt 
-                WHERE Manager_User_Id__c = :String.valueOf(currentUserId)
-            ]) {
-                if (String.isNotBlank(ma.Target_User_Id__c)) {
-                    subordinateUserIds.add((Id)ma.Target_User_Id__c);
-                }
-            }
-        } catch (Exception e) {
-            System.debug('Manager_Assignment__mdt query failed: ' + e.getMessage());
-        }
+        // // 3. Custom Manager Assignment metadata check
+        // try {
+        //     for (Manager_Assignment__mdt ma : [
+        //         SELECT Target_User_Id__c
+        //         FROM Manager_Assignment__mdt
+        //         WHERE Manager_User_Id__c = :String.valueOf(currentUserId)
+        //     ]) {
+        //         if (String.isNotBlank(ma.Target_User_Id__c)) {
+        //             subordinateUserIds.add((Id)ma.Target_User_Id__c);
+        //         }
+        //     }
+        // } catch (Exception e) {
+        //     System.debug('Manager_Assignment__mdt query failed: ' + e.getMessage());
+        // }
 
         return subordinateUserIds;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Boolean canAccessForceTracker() {
+        return !FORCE_TRACKER_BLOCKED_ROLES.contains(currentUserRoleName());
+    }
+
+    private static String currentUserRoleName() {
+        User currentUser = [
+            SELECT UserRole.Name
+            FROM User
+            WHERE Id = :UserInfo.getUserId()
+            LIMIT 1
+        ];
+        return currentUser.UserRole != null ? currentUser.UserRole.Name : '';
     }
 
     @AuraEnabled
     public static List<EmployeeDTO> getEmployees() {
         List<EmployeeDTO> results = new List<EmployeeDTO>();
+        if (!canAccessForceTracker()) {
+            return results;
+        }
         Id currentUserId = UserInfo.getUserId();
 
-        Boolean isAdmin = false;
-        try {
-            isAdmin = [SELECT Name FROM Profile WHERE Id = :UserInfo.getProfileId()].Name == 'System Administrator';
-        } catch (Exception e) {
-            // fallback
-        }
+        Boolean canViewAll = FieldForceDashboardController.canViewAllFieldForceUsers();
 
         Set<Id> allowedUserIds = new Set<Id>();
-        if (!isAdmin) {
+        if (!canViewAll) {
             allowedUserIds = getSubordinateUserIds(currentUserId);
             // Allow manager to see themselves as well
             allowedUserIds.add(currentUserId);
         }
 
-        List<User_Punch_State__c> punchStates;
-        if (isAdmin) {
-            punchStates = [
-                SELECT User__r.Id, User__r.Name, User__r.Phone,
-                       Battery_Percentage__c, Current_Status__c,
-                       Last_Punch_Time__c, Latitude__c, Longitude__c
-                FROM User_Punch_State__c
-                WHERE User__c != null
+        // Employee list comes from User (same list as FieldForceDashboardController.getAvailableSalespeople);
+        // live punch data is taken from the user's User_Punch_State__c record when one exists
+        List<User> users;
+        if (canViewAll) {
+            users = [
+                SELECT Id, Name, Phone,
+                       (SELECT Battery_Percentage__c, Current_Status__c,
+                               Last_Punch_Time__c, Latitude__c, Longitude__c
+                        FROM Punch_State__r
+                        LIMIT 1)
+                FROM User
+                WHERE IsActive = true
+                ORDER BY Name ASC
+                LIMIT 2000
             ];
         } else {
-            punchStates = [
-                SELECT User__r.Id, User__r.Name, User__r.Phone,
-                       Battery_Percentage__c, Current_Status__c,
-                       Last_Punch_Time__c, Latitude__c, Longitude__c
-                FROM User_Punch_State__c
-                WHERE User__c IN :allowedUserIds
+            users = [
+                SELECT Id, Name, Phone,
+                       (SELECT Battery_Percentage__c, Current_Status__c,
+                               Last_Punch_Time__c, Latitude__c, Longitude__c
+                        FROM Punch_State__r
+                        LIMIT 1)
+                FROM User
+                WHERE Id IN :allowedUserIds
+                AND IsActive = true
+                ORDER BY Name ASC
             ];
         }
 
-        for(User_Punch_State__c ups : punchStates) {
-            EmployeeDTO dto = new EmployeeDTO();
-            dto.Id = ups.User__r.Id;
-            dto.employeeName = ups.User__r.Name;
-            dto.phone = ups.User__r.Phone != null ? ups.User__r.Phone : 'N/A';
-            dto.batteryPercentage = ups.Battery_Percentage__c;
-            dto.currentStatus = ups.Current_Status__c;
-            dto.lastPunchTime = ups.Last_Punch_Time__c;
-            dto.latitude = ups.Latitude__c;
-            dto.longitude = ups.Longitude__c;
-            dto.gpsStatus = (ups.Latitude__c != null && ups.Longitude__c != null);
-            dto.lastKnownAddress = 'Location Captured'; 
-            
-            // Build Initials
-            String init = 'U';
-            if (String.isNotBlank(ups.User__r.Name)) {
-                List<String> parts = ups.User__r.Name.split(' ');
-                init = parts[0].substring(0, 1);
-                if (parts.size() > 1) {
-                    init += parts[parts.size() - 1].substring(0, 1);
-                }
-            }
-            dto.initials = init.toUpperCase();
+        Set<Id> punchUserIds = new Set<Id>();
+        for (User u : users) {
+            punchUserIds.add(u.Id);
+        }
 
-            // Fetch pending WFH requests for this user
-            dto.pendingRequests = new List<WFHRequestDTO>();
+        Map<Id, List<WFHRequestDTO>> pendingByUser = new Map<Id, List<WFHRequestDTO>>();
+        if (!punchUserIds.isEmpty()) {
             for (Punch_Record__c pr : [
-                SELECT Id, WFH_Request_Date__c, WFH_Request_Start_Time__c, WFH_Request_End_Time__c, WFH_Approval_Status__c
+                SELECT Id, User__c, WFH_Request_Date__c, WFH_Request_Start_Time__c, WFH_Request_End_Time__c,
+                       WFH_Approval_Status__c, Is_WFH_Request__c, Is_WFO_Request__c
                 FROM Punch_Record__c
-                WHERE User__c = :ups.User__r.Id
-                AND Is_WFH_Request__c = true
+                WHERE User__c IN :punchUserIds
+                AND (Is_WFH_Request__c = true OR Is_WFO_Request__c = true)
                 AND WFH_Approval_Status__c = 'Pending'
                 AND WFH_Request_Date__c >= TODAY
             ]) {
@@ -194,8 +218,47 @@ public class EmployeeTracker {
                 req.startTime = String.valueOf(pr.WFH_Request_Start_Time__c);
                 req.endTime = String.valueOf(pr.WFH_Request_End_Time__c);
                 req.status = pr.WFH_Approval_Status__c;
-                dto.pendingRequests.add(req);
+                req.requestType = pr.Is_WFH_Request__c ? 'WFH' : 'WFO';
+                if (!pendingByUser.containsKey(pr.User__c)) {
+                    pendingByUser.put(pr.User__c, new List<WFHRequestDTO>());
+                }
+                pendingByUser.get(pr.User__c).add(req);
             }
+        }
+
+        for(User u : users) {
+            // Users who have never punched have no User_Punch_State__c record
+            User_Punch_State__c ups = u.Punch_State__r.isEmpty() ? null : u.Punch_State__r[0];
+
+            EmployeeDTO dto = new EmployeeDTO();
+            dto.Id = u.Id;
+            dto.employeeName = u.Name;
+            dto.phone = u.Phone != null ? u.Phone : 'N/A';
+            if (ups != null) {
+                dto.batteryPercentage = ups.Battery_Percentage__c;
+                dto.currentStatus = ups.Current_Status__c;
+                dto.lastPunchTime = ups.Last_Punch_Time__c;
+                dto.latitude = ups.Latitude__c;
+                dto.longitude = ups.Longitude__c;
+                dto.gpsStatus = (ups.Latitude__c != null && ups.Longitude__c != null);
+            } else {
+                dto.gpsStatus = false;
+            }
+            dto.lastKnownAddress = 'Location Captured';
+
+            // Build Initials
+            String init = 'U';
+            if (String.isNotBlank(u.Name)) {
+                List<String> parts = u.Name.split(' ');
+                init = parts[0].substring(0, 1);
+                if (parts.size() > 1) {
+                    init += parts[parts.size() - 1].substring(0, 1);
+                }
+            }
+            dto.initials = init.toUpperCase();
+            dto.pendingRequests = pendingByUser.containsKey(u.Id)
+                ? pendingByUser.get(u.Id)
+                : new List<WFHRequestDTO>();
 
             results.add(dto);
         }
@@ -205,20 +268,7 @@ public class EmployeeTracker {
 
     @AuraEnabled(cacheable=true)
     public static Boolean isAdminUser() {
-        Id currentUserId = UserInfo.getUserId();
-        
-        Boolean isAdmin = false;
-        try {
-            isAdmin = [SELECT Name FROM Profile WHERE Id = :UserInfo.getProfileId()].Name == 'System Administrator';
-        } catch (Exception e) {
-            // fallback
-        }
-        if (isAdmin) {
-            return true;
-        }
-
-        Set<Id> subordinates = getSubordinateUserIds(currentUserId);
-        return !subordinates.isEmpty();
+        return FieldForceDashboardController.isCurrentUserAdmin();
     }
 
     @AuraEnabled(cacheable=true)
@@ -272,10 +322,27 @@ public class EmployeeTracker {
 
     @AuraEnabled
     public static void updateWFHStatus(Id requestId, String status, String remarks) {
-        Punch_Record__c pr = [SELECT Id FROM Punch_Record__c WHERE Id = :requestId LIMIT 1];
-        pr.WFH_Approval_Status__c = status;
-        pr.Approver_Remarks__c = remarks;
-        update pr;
+        if (!FieldForceDashboardController.canCurrentUserApproveWfh()) {
+            throw new AuraHandledException('Only HOD or Admin can approve or reject WFH/WFO requests.');
+        }
+        new WfhApprovalWriter().updateStatus(requestId, status, remarks);
+    }
+
+    private without sharing class WfhApprovalWriter {
+        public void updateStatus(Id requestId, String status, String remarks) {
+            Punch_Record__c pr = [
+                SELECT Id, WFH_Approver__c
+                FROM Punch_Record__c
+                WHERE Id = :requestId
+                LIMIT 1
+            ];
+            pr.WFH_Approval_Status__c = status;
+            pr.Approver_Remarks__c = remarks;
+            if (pr.WFH_Approver__c == null) {
+                pr.WFH_Approver__c = UserInfo.getUserId();
+            }
+            update pr;
+        }
     }
 
     @AuraEnabled
@@ -296,6 +363,9 @@ public class EmployeeTracker {
     @AuraEnabled(cacheable=true)
     public static List<TaskRowDTO> getRecentTasksForEmployees(List<Id> employeeIds, Integer perEmployeeLimit, String dateStr) {
         List<TaskRowDTO> result = new List<TaskRowDTO>();
+        if (!canAccessForceTracker()) {
+            return result;
+        }
         if (employeeIds == null || employeeIds.isEmpty()) return result;
         if (perEmployeeLimit == null) perEmployeeLimit = 4;
 
@@ -397,12 +467,14 @@ public class EmployeeTracker {
             row.visitOutcome   = t.Visit_outcome__c;
             row.mom            = t.MOM__c;
             row.nextAction     = t.Next_Action__c;
-            row.checkInTime    = t.Logged_At__c != null ? t.Logged_At__c.format('hh:mm a') : null;
+            Datetime checkInAt = t.Logged_At__c != null ? t.Logged_At__c : t.CreatedDate;
+            row.checkInTime    = checkInAt != null ? checkInAt.format('hh:mm a') : null;
             row.checkOutTime   = (t.IsCheckout__c && t.Logged_Out_At__c != null)
                 ? t.Logged_Out_At__c.format('hh:mm a')
                 : (t.IsCheckout__c ? null : 'Active');
-            if (t.Logged_At__c != null && t.Logged_Out_At__c != null) {
-                Long durationMin = (t.Logged_Out_At__c.getTime() - t.Logged_At__c.getTime()) / (1000 * 60);
+            if (checkInAt != null && t.Logged_Out_At__c != null) {
+                Long durationMin = (t.Logged_Out_At__c.getTime() - checkInAt.getTime()) / (1000 * 60);
+                if (durationMin < 0) durationMin = 0;
                 if (durationMin < 60) {
                     row.visitDuration = durationMin + ' mins';
                 } else {

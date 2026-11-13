@@ -3,6 +3,13 @@
     <apiVersion>65.0</apiVersion>
     <isExposed>true</isExposed>
     <targets>
-        <target>lightning__Tab</target>
+        <target>lightning__AppPage</target>
     </targets>
+    <targetConfigs>
+        <targetConfig targets="lightning__AppPage">
+            <supportedFormFactors>
+                <supportedFormFactor type="Large"/>
+            </supportedFormFactors>
+        </targetConfig>
+    </targetConfigs>
 </LightningComponentBundle>

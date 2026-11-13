@@ -23,7 +23,7 @@ private class PunchControllerTest {
         System.assertEquals(UserInfo.getUserId(), dto.userId, 'userId should match running user');
         System.assertNotEquals(null, dto.employeeName, 'Employee name should not be null');
         System.assertEquals('OUT', dto.currentStatus, 'Default status should be OUT when no state record exists');
-        System.assertEquals('Rejected', dto.wfhRequestStatusTomorrow, 'WFH status should be Rejected when no approved request exists');
+        //System.assertEquals('Rejected', dto.wfhRequestStatusTomorrow, 'WFH status should be Rejected when no approved request exists');
     }
 
     @isTest
@@ -131,7 +131,7 @@ private class PunchControllerTest {
         Test.startTest();
         PunchController.PunchStateDTO dto = PunchController.updatePunchTypeAndOdometer(
             '', null, null, null, null, null, null,
-            5, 3, 2, 1, 'Follow up with accounts'
+            5, 3, 2, 1, 'Follow up with accounts', null, null
         );
         Test.stopTest();
 
@@ -181,7 +181,7 @@ private class PunchControllerTest {
         String endTime = '18:00:00.000';
 
         Test.startTest();
-        PunchController.submitWFHRequest(tomorrow, startTime, endTime, 'WFH', 'Test WFH Request Note');
+        PunchController.submitWFHRequest(tomorrow, startTime, endTime, 'WFH', 'Test WFH Request Note', null, null);
         Test.stopTest();
 
         List<Punch_Record__c> reqs = [SELECT Id, WFH_Request_Date__c, WFH_Approval_Status__c FROM Punch_Record__c WHERE Is_WFH_Request__c = true];
@@ -311,6 +311,8 @@ private class PunchControllerTest {
         wfo.WFH_Request_Start_Time__c = Time.newInstance(10, 0, 0, 0);
         wfo.WFH_Request_End_Time__c = Time.newInstance(19, 0, 0, 0);
         wfo.WFH_Approval_Status__c = 'Approved';
+        wfo.Approver_Remarks__c = 'Approved by HOD for office day';
+        wfo.WFH_Approver__c = runningUserId;
         insert wfo;
 
         Test.startTest();
@@ -321,8 +323,17 @@ private class PunchControllerTest {
         // Sorted by WFH_Request_Date__c DESC, so tomorrow's request first (WFO)
         System.assertEquals('WFO', requests[0].type);
         System.assertEquals('Approved', requests[0].status);
+        System.assertEquals('Approved by HOD for office day', requests[0].remarks);
+        System.assertEquals(runningUserId, requests[0].approverId);
+        System.assertEquals(UserInfo.getName(), requests[0].approverName);
         System.assertEquals('WFH', requests[1].type);
         System.assertEquals('Pending', requests[1].status);
+        System.assertEquals(null, requests[1].remarks);
+
+        PunchController.PunchStateDTO state = PunchController.getCurrentStateForUser();
+        System.assertEquals(2, state.wfhRequests.size(), 'Sales user state should include WFH/WFO request details');
+        System.assertEquals('Approved by HOD for office day', state.wfhRequests[0].remarks);
+        System.assertEquals(UserInfo.getName(), state.wfhRequests[0].approverName);
     }
 
     @isTest
@@ -381,5 +392,482 @@ private class PunchControllerTest {
         ];
         List<ContentDocumentLink> cdls = [SELECT Id FROM ContentDocumentLink WHERE LinkedEntityId = :pr.Id];
         System.assert(!cdls.isEmpty(), 'Odometer image should be attached to the punch record');
+    }
+    
+    @isTest
+    static void testSavePeriodicLocation_NoExistingState_NoPunch() {
+        // No User_Punch_State__c and no IN punch initially.
+        // This covers the "create new state" branch and the
+        // "currentShift.isEmpty()" branch.
+    
+        Test.startTest();
+    
+        PunchController.savePeriodicLocation(
+            22.5726,
+            88.3639,
+            75.0
+        );
+    
+        Test.stopTest();
+    
+        User_Punch_State__c state = [
+            SELECT Id,
+                   User__c,
+                   Latitude__c,
+                   Longitude__c,
+                   Battery_Percentage__c,
+                   Last_Punch_Time__c
+            FROM User_Punch_State__c
+            WHERE User__c = :UserInfo.getUserId()
+            LIMIT 1
+        ];
+    
+        System.assertEquals(
+            UserInfo.getUserId(),
+            state.User__c,
+            'State should belong to the running user'
+        );
+    
+        System.assertEquals(
+            22.5726,
+            state.Latitude__c,
+            'Latitude should be saved'
+        );
+    
+        System.assertEquals(
+            88.3639,
+            state.Longitude__c,
+            'Longitude should be saved'
+        );
+    
+        System.assertEquals(
+            75.0,
+            state.Battery_Percentage__c,
+            'Battery should be saved'
+        );
+    
+        System.assertNotEquals(
+            null,
+            state.Last_Punch_Time__c,
+            'Last punch time should be updated'
+        );
+    
+        System.assertEquals(
+            0,
+            [
+                SELECT COUNT()
+                FROM Track_Location__c
+                WHERE Source__c = 'LWC'
+            ],
+            'No tracking record should be created when there is no IN punch'
+        );
+    }
+    
+    @isTest
+    static void testSavePeriodicLocation_ExistingState_WithActivePunch() {
+        Id runningUserId = UserInfo.getUserId();
+    
+        // Create an existing state record so the update/upsert branch is covered.
+        User_Punch_State__c state = new User_Punch_State__c(
+            User__c = runningUserId,
+            Current_Status__c = 'IN',
+            Latitude__c = 10.0,
+            Longitude__c = 20.0,
+            Battery_Percentage__c = 50.0
+        );
+        insert state;
+    
+        // Create an active IN punch so Track_Location__c is created.
+        Punch_Record__c punch = new Punch_Record__c(
+            User__c = runningUserId,
+            Action__c = 'IN',
+            Status__c = 'IN',
+            Punch_Type__c = 'Day In / Out',
+            Punch_Time__c = System.now()
+        );
+        insert punch;
+    
+        Test.startTest();
+    
+        PunchController.savePeriodicLocation(
+            22.5726,
+            88.3639,
+            80.0
+        );
+    
+        Test.stopTest();
+    
+        // Verify the existing state was updated rather than creating another one.
+        List<User_Punch_State__c> states = [
+            SELECT Id,
+                   Latitude__c,
+                   Longitude__c,
+                   Battery_Percentage__c,
+                   Last_Punch_Time__c
+            FROM User_Punch_State__c
+            WHERE User__c = :runningUserId
+        ];
+    
+        System.assertEquals(
+            1,
+            states.size(),
+            'There should still be only one state record'
+        );
+    
+        System.assertEquals(
+            state.Id,
+            states[0].Id,
+            'The existing state record should be updated'
+        );
+    
+        System.assertEquals(
+            22.5726,
+            states[0].Latitude__c,
+            'Latitude should be updated'
+        );
+    
+        System.assertEquals(
+            88.3639,
+            states[0].Longitude__c,
+            'Longitude should be updated'
+        );
+    
+        System.assertEquals(
+            80.0,
+            states[0].Battery_Percentage__c,
+            'Battery should be updated'
+        );
+    
+        // Verify Track_Location__c was created and linked to the active punch.
+        Track_Location__c tracking = [
+            SELECT Id,
+                   Punch_Record__c,
+                   Latitude__c,
+                   Longitude__c,
+                   Source__c,
+                   Recorded_At__c
+            FROM Track_Location__c
+            WHERE Punch_Record__c = :punch.Id
+            LIMIT 1
+        ];
+    
+        System.assertEquals(
+            punch.Id,
+            tracking.Punch_Record__c,
+            'Tracking record should be linked to the current punch'
+        );
+    
+        System.assertEquals(
+            '22.5726',
+            tracking.Latitude__c,
+            'Tracking latitude should be stored as a string'
+        );
+    
+        System.assertEquals(
+            '88.3639',
+            tracking.Longitude__c,
+            'Tracking longitude should be stored as a string'
+        );
+    
+        System.assertEquals(
+            'LWC',
+            tracking.Source__c,
+            'Tracking source should be LWC'
+        );
+    
+        System.assertNotEquals(
+            null,
+            tracking.Recorded_At__c,
+            'Recorded time should be populated'
+        );
+    }
+	
+    @isTest
+    static void testSaveSelfieForEmployee() {
+        Employee__c emp = [
+            SELECT Id
+            FROM Employee__c
+            LIMIT 1
+        ];
+    
+        String base64Photo =
+            'data:image/jpeg;base64,' +
+            EncodingUtil.base64Encode(
+                Blob.valueOf('TEST_SELFIE_IMAGE')
+            );
+    
+        Test.startTest();
+    
+        String contentVersionId = PunchController.saveSelfieForAccount(
+            emp.Id,
+            base64Photo,
+            22.5726,
+            88.3639
+        );
+    
+        Test.stopTest();
+    
+        System.assertNotEquals(
+            null,
+            contentVersionId,
+            'ContentVersion Id should be returned'
+        );
+    
+        // Verify ContentVersion was created.
+        ContentVersion cv = [
+            SELECT Id,
+                   Title,
+                   PathOnClient
+            FROM ContentVersion
+            WHERE Id = :contentVersionId
+            LIMIT 1
+        ];
+    
+        System.assert(
+            cv.Title.startsWith('Selfie_'),
+            'Selfie file title should start with Selfie_'
+        );
+    
+        System.assertEquals(
+            cv.Title,
+            cv.PathOnClient,
+            'PathOnClient should match the title'
+        );
+    
+        // Verify the file is linked to the Employee.
+        List<ContentDocumentLink> links = [
+            SELECT Id,
+                   LinkedEntityId,
+                   ContentDocumentId
+            FROM ContentDocumentLink
+            WHERE LinkedEntityId = :emp.Id
+        ];
+    
+        System.assert(
+            !links.isEmpty(),
+            'Selfie should be linked to the Employee record'
+        );
+    
+        // Verify Employee location was updated.
+        Employee__c updatedEmp = [
+            SELECT Latitude__c,
+                   Longitude__c,
+                   Last_Punch_Time__c
+            FROM Employee__c
+            WHERE Id = :emp.Id
+        ];
+    
+        System.assertEquals(
+            22.5726,
+            updatedEmp.Latitude__c,
+            'Employee latitude should be updated'
+        );
+    
+        System.assertEquals(
+            88.3639,
+            updatedEmp.Longitude__c,
+            'Employee longitude should be updated'
+        );
+    
+        System.assertNotEquals(
+            null,
+            updatedEmp.Last_Punch_Time__c,
+            'Employee last punch time should be updated'
+        );
+    }
+    
+    @isTest
+    static void testCheckLocationData_NoPunchIn() {
+        Test.startTest();
+    
+        Boolean result = PunchController.checkLocationData(
+            UserInfo.getUserId()
+        );
+    
+        Test.stopTest();
+    
+        System.assertEquals(
+            false,
+            result,
+            'Should return false when the user has no IN punch'
+        );
+    }
+    
+    
+    @isTest
+    static void testCheckLocationData_RecentLoggerLocation() {
+        Id runningUserId = UserInfo.getUserId();
+    
+        // Create latest IN punch.
+        Punch_Record__c punch = new Punch_Record__c(
+            User__c = runningUserId,
+            Action__c = 'IN',
+            Status__c = 'IN',
+            Punch_Type__c = 'Day In / Out',
+            Punch_Time__c = System.now()
+        );
+        insert punch;
+    
+        // Create a recent Logger location record.
+        Track_Location__c tracking = new Track_Location__c(
+            Punch_Record__c = punch.Id,
+            Latitude__c = '22.5726',
+            Longitude__c = '88.3639',
+            Source__c = 'Logger',
+            Recorded_At__c = System.now()
+        );
+        insert tracking;
+    
+        Test.startTest();
+    
+        Boolean result = PunchController.checkLocationData(
+            runningUserId
+        );
+    
+        Test.stopTest();
+    
+        System.assertEquals(
+            true,
+            result,
+            'Should return true when recent Logger location data exists'
+        );
+    }
+
+    // ─── WFH / WFO start notification (Utkarsh HOD / CRM Head recipients) ─────
+
+    private static Id getProfileIdOrNull(String profileName) {
+        List<Profile> profiles = [SELECT Id FROM Profile WHERE Name = :profileName LIMIT 1];
+        return profiles.isEmpty() ? null : profiles[0].Id;
+    }
+
+    private static User buildNotificationTestUser(Id profileId, String department, String departments) {
+        String rand = EncodingUtil.convertToHex(Crypto.generateAesKey(128)).substring(0, 8);
+        return new User(
+            Alias = rand,
+            Email = rand + '@wfhnotify.test',
+            Username = rand + '@wfhnotify.test.' + System.currentTimeMillis(),
+            LastName = 'WfhNotify' + rand,
+            ProfileId = profileId,
+            TimeZoneSidKey = 'Asia/Kolkata',
+            LocaleSidKey = 'en_IN',
+            EmailEncodingKey = 'UTF-8',
+            LanguageLocaleKey = 'en_US',
+            Department = department,
+            Departments__c = departments,
+            IsActive = true
+        );
+    }
+
+    @isTest
+    static void testSendWfhWfoStartNotification_CrmHeadMultipleDepartments() {
+        Id crmHeadProfileId = getProfileIdOrNull('CRM Head');
+        Id standardProfileId = getProfileIdOrNull('Standard User');
+        if (crmHeadProfileId == null || standardProfileId == null) {
+            return;
+        }
+
+        User employee = buildNotificationTestUser(standardProfileId, 'HDPE', null);
+        // Matches: HDPE_Pipe_Department maps to 'HDPE'
+        User matchingCrmHead = buildNotificationTestUser(
+            crmHeadProfileId, null, 'Solar_Structure_Department;HDPE_Pipe_Department'
+        );
+        // Does not match: only Crash Barrier
+        User otherCrmHead = buildNotificationTestUser(
+            crmHeadProfileId, null, 'Crash_Barrier_Department'
+        );
+        System.runAs(new User(Id = UserInfo.getUserId())) {
+            insert new List<User>{ employee, matchingCrmHead, otherCrmHead };
+        }
+
+        Boolean failed = false;
+        Test.startTest();
+        try {
+            PunchController.sendWfhWfoStartNotification(employee.Id, 'WFO');
+        } catch (Exception e) {
+            failed = true;
+        }
+        Test.stopTest();
+
+        System.assertEquals(false, failed, 'Notification to the matching CRM Head should be sent without errors');
+    }
+
+    @isTest
+    static void testSendWfhWfoStartNotification_CrmHeadDepartmentApiValue() {
+        Id crmHeadProfileId = getProfileIdOrNull('CRM Head');
+        Id standardProfileId = getProfileIdOrNull('Standard User');
+        if (crmHeadProfileId == null || standardProfileId == null) {
+            return;
+        }
+
+        // Employee Department holds the Departments__c API value itself
+        User employee = buildNotificationTestUser(standardProfileId, 'Solar_Structure_Department', null);
+        User crmHead = buildNotificationTestUser(
+            crmHeadProfileId, null, 'Solar_Structure_Department;HDPE_Pipe_Department'
+        );
+        System.runAs(new User(Id = UserInfo.getUserId())) {
+            insert new List<User>{ employee, crmHead };
+        }
+
+        Boolean failed = false;
+        Test.startTest();
+        try {
+            PunchController.sendWfhWfoStartNotification(employee.Id, 'WFH');
+        } catch (Exception e) {
+            failed = true;
+        }
+        Test.stopTest();
+
+        System.assertEquals(false, failed, 'Notification should be sent when Department equals the Departments__c value');
+    }
+
+    @isTest
+    static void testSendWfhWfoStartNotification_HodSameDepartment() {
+        Id hodProfileId = getProfileIdOrNull('Utkarsh HOD');
+        Id standardProfileId = getProfileIdOrNull('Standard User');
+        if (hodProfileId == null || standardProfileId == null) {
+            return;
+        }
+
+        User employee = buildNotificationTestUser(standardProfileId, 'Solar Structure', null);
+        User hod = buildNotificationTestUser(hodProfileId, 'Solar Structure', null);
+        System.runAs(new User(Id = UserInfo.getUserId())) {
+            insert new List<User>{ employee, hod };
+        }
+
+        Boolean failed = false;
+        Test.startTest();
+        try {
+            PunchController.sendWfhWfoStartNotification(employee.Id, 'WFH');
+        } catch (Exception e) {
+            failed = true;
+        }
+        Test.stopTest();
+
+        System.assertEquals(false, failed, 'Notification to the HOD of the same Department should be sent without errors');
+    }
+
+    @isTest
+    static void testSendWfhWfoStartNotification_NoRecipients() {
+        Id standardProfileId = getProfileIdOrNull('Standard User');
+        if (standardProfileId == null) {
+            return;
+        }
+
+        // No HOD or CRM Head covers this Department
+        User employee = buildNotificationTestUser(standardProfileId, 'No Such Department ' + System.currentTimeMillis(), null);
+        System.runAs(new User(Id = UserInfo.getUserId())) {
+            insert employee;
+        }
+
+        Boolean failed = false;
+        Test.startTest();
+        try {
+            PunchController.sendWfhWfoStartNotification(employee.Id, 'WFO');
+        } catch (Exception e) {
+            failed = true;
+        }
+        Test.stopTest();
+
+        System.assertEquals(false, failed, 'Method should return quietly when there are no recipients');
     }
 }

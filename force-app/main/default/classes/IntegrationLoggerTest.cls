@@ -1,5 +1,5 @@
 @isTest
-private class IntegrationLoggerTest {
+private without sharing class IntegrationLoggerTest {
 
     @isTest
     static void testSimpleLogAndFlush() {

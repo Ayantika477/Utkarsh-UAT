@@ -237,6 +237,13 @@
                                             </td>
                                         </tr>
                                     </apex:outputPanel>
+                                    <apex:outputPanel layout="none" rendered="{!standard == 'MDPE Pipe'}">
+                                        <tr>
+                                            <td colspan="6" style="font-weight: bold; text-align: center; padding: 5px;">
+                                                <apex:outputText value="{!mdpeTransportText}"/>
+                                            </td>
+                                        </tr>
+                                    </apex:outputPanel>
                                 </tbody>
                             </table>
                         </div>                        

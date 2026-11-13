@@ -1,7 +1,17 @@
+/**
+ * @description   AuraEnabled API for Opportunity (dealer) campaign search and
+ *                multi-channel sends.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public with sharing class DealerOpportunityManagementController {
     private static final String DEALER_OPPORTUNITY_ORG_WIDE_EMAIL =
         'noreply@utkarshindialimited.in';
 
+    /**
+     * @description Returns active Opportunity StageName picklist options for the dealer Opportunity UI.
+     * @return List of PicklistOption values for Opportunity.StageName.
+     */
     @AuraEnabled(cacheable=true)
     public static List<PicklistOption> getOpportunityStageOptions() {
         List<PicklistOption> options = new List<PicklistOption>();
@@ -16,11 +26,56 @@ public with sharing class DealerOpportunityManagementController {
         return options;
     }
 
+    /**
+     * @description Returns active Opportunity Lost Reason picklist options.
+     * @return List of PicklistOption values for Opportunity.Lost_Reason__c.
+     */
     @AuraEnabled(cacheable=true)
     public static List<PicklistOption> getOpportunityLostReasonOptions() {
         return getPicklistOptions(Opportunity.Lost_Reason__c);
     }
 
+    /**
+     * @description Returns active Opportunity Customer Category picklist options.
+     * @return List of PicklistOption values for Opportunity.Customer_Category__c.
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<PicklistOption> getOpportunityCustomerCategoryOptions() {
+        return getPicklistOptions(Opportunity.Customer_Category__c);
+    }
+
+    /**
+     * @description Returns active Opportunity Country picklist options.
+     * @return List of PicklistOption values for Opportunity.Country__c.
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<PicklistOption> getOpportunityCountryOptions() {
+        return getPicklistOptions(Opportunity.Country__c);
+    }
+
+    /**
+     * @description Returns active Opportunity State picklist options.
+     * @return List of PicklistOption values for Opportunity.State__c.
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<PicklistOption> getOpportunityStateOptions() {
+        return getPicklistOptions(Opportunity.State__c);
+    }
+
+    /**
+     * @description Searches Opportunities by name, dealer account, stage, department, lost reason, and created date range.
+     * @param searchTerm Optional Opportunity Name LIKE filter.
+     * @param dealerAccountFilter Optional DealerAccount__r.Name LIKE filter.
+     * @param stages Optional list of StageName values to include.
+     * @param departmentFilter Optional Department_Name__c LIKE filter.
+     * @param lostReasons Optional list of Lost_Reason__c values to include.
+     * @param fromDate Optional CreatedDate lower bound (inclusive).
+     * @param toDate Optional CreatedDate upper bound (inclusive through end of day).
+     * @param customerCategories Optional list of Customer_Category__c values to include.
+     * @param countryFilter Optional exact Country__c value filter.
+     * @param states Optional list of State__c values to include.
+     * @return OpportunityListItem rows including primary contact details (max 5000).
+     */
     @AuraEnabled
     public static List<OpportunityListItem> searchDealerOpportunities(
         String searchTerm,
@@ -29,7 +84,10 @@ public with sharing class DealerOpportunityManagementController {
         String departmentFilter,
         List<String> lostReasons,
         Date fromDate,
-        Date toDate
+        Date toDate,
+        List<String> customerCategories,
+        String countryFilter,
+        List<String> states
     ) {
         String namePattern = String.isNotBlank(searchTerm)
             ? '%' + searchTerm.trim() + '%'
@@ -77,12 +135,25 @@ public with sharing class DealerOpportunityManagementController {
         if (toDateTime != null) {
             soql += ' AND CreatedDate <= :toDateTime';
         }
+        if (customerCategories != null && !customerCategories.isEmpty()) {
+            soql += ' AND Customer_Category__c IN :customerCategories';
+        }
+        if (String.isNotBlank(countryFilter)) {
+            soql += ' AND Country__c = :countryFilter';
+        }
+        if (states != null && !states.isEmpty()) {
+            soql += ' AND State__c IN :states';
+        }
 
         soql += ' ORDER BY CreatedDate DESC LIMIT 5000';
         List<Opportunity> opportunities = Database.query(soql);
         return buildOpportunityListItems(opportunities);
     }
 
+    /**
+     * @description Returns Opportunities ordered by CreatedDate descending for the dealer management grid.
+     * @return OpportunityListItem rows including primary contact details.
+     */
     @AuraEnabled(cacheable=true)
     public static List<OpportunityListItem> getDealerOpportunities() {
         List<Opportunity> opportunities = [
@@ -103,6 +174,11 @@ public with sharing class DealerOpportunityManagementController {
         return buildOpportunityListItems(opportunities);
     }
 
+    /**
+     * @description Maps Opportunity records to UI list items and hydrates primary contact fields.
+     * @param opportunities Opportunity records to transform.
+     * @return List of OpportunityListItem DTOs for the LWC.
+     */
     private static List<OpportunityListItem> buildOpportunityListItems(
         List<Opportunity> opportunities
     ) {
@@ -147,6 +223,11 @@ public with sharing class DealerOpportunityManagementController {
         return rows;
     }
 
+    /**
+     * @description Queries primary OpportunityContactRole rows keyed by Opportunity Id.
+     * @param opportunityIds Opportunity Ids to load primary contacts for.
+     * @return Map of Opportunity Id to primary OpportunityContactRole.
+     */
     private static Map<Id, OpportunityContactRole> queryPrimaryContactsByOpportunityId(
         Set<Id> opportunityIds
     ) {
@@ -173,6 +254,12 @@ public with sharing class DealerOpportunityManagementController {
         return primaryContactByOpportunityId;
     }
 
+    /**
+     * @description Sends Infobip campaign email to the selected Opportunities.
+     * @param opportunityIds Opportunity Ids to send email to.
+     * @param infobipTemplateId Infobip email template identifier.
+     * @return SendCampaignEmailResult from BWM_CampaignEmailService.
+     */
     @AuraEnabled
     public static BWM_CampaignEmailService.SendCampaignEmailResult sendOpportunityCampaignEmail(
         List<Id> opportunityIds,
@@ -189,6 +276,24 @@ public with sharing class DealerOpportunityManagementController {
     }
 
     @AuraEnabled
+    public static BWM_CampaignEmailService.SendCampaignEmailResult sendOpportunityCampaignEmailScheduled(
+        List<Id> opportunityIds,
+        String infobipTemplateId,
+        String scheduledDateTime
+    ) {
+        BWM_CampaignScheduleContext.setScheduledDateTime(scheduledDateTime);
+        try {
+            return sendOpportunityCampaignEmail(opportunityIds, infobipTemplateId);
+        } finally {
+            BWM_CampaignScheduleContext.clear();
+        }
+    }
+
+    /**
+     * @description Loads Bluewave/Infobip email template options for the Opportunity campaign UI.
+     * @return List of TemplateOption values from BWM_InfobipEmailTemplateService.
+     */
+    @AuraEnabled
     public static List<BWM_InfobipEmailTemplateService.TemplateOption> getBluewaveEmailTemplates() {
         try {
             return BWM_InfobipEmailTemplateService.fetchTemplates();
@@ -197,11 +302,21 @@ public with sharing class DealerOpportunityManagementController {
         }
     }
 
+    /**
+     * @description Returns active campaign journey options for Opportunity sends.
+     * @return List of JourneyOption values from BWM_JourneyDefinitionService.
+     */
     @AuraEnabled
     public static List<BWM_JourneyDefinitionService.JourneyOption> getCampaignJourneys() {
         return BWM_JourneyDefinitionService.fetchActiveJourneys();
     }
 
+    /**
+     * @description Starts the selected campaign journey for the given Opportunities.
+     * @param opportunityIds Opportunity Ids to enroll in the journey.
+     * @param journeyName Name of the journey definition to send.
+     * @return SendJourneyResult from BWM_CampaignJourneyService.
+     */
     @AuraEnabled
     public static BWM_JourneyDefinitionService.SendJourneyResult sendOpportunityJourney(
         List<Id> opportunityIds,
@@ -213,6 +328,30 @@ public with sharing class DealerOpportunityManagementController {
         );
     }
 
+    /**
+     * @description Starts the selected campaign journey at the given UTC schedule time.
+     * @param opportunityIds Opportunity Ids to enroll in the journey.
+     * @param journeyName Name of the journey definition to send.
+     * @param scheduledDateTime UTC timestamp yyyy-MM-ddTHH:mm:ssZ written to scheduledatetime.
+     * @return SendJourneyResult from BWM_CampaignJourneyService.
+     */
+    @AuraEnabled
+    public static BWM_JourneyDefinitionService.SendJourneyResult sendOpportunityJourneyScheduled(
+        List<Id> opportunityIds,
+        String journeyName,
+        String scheduledDateTime
+    ) {
+        return BWM_CampaignJourneyService.sendToOpportunities(
+            opportunityIds,
+            journeyName,
+            scheduledDateTime
+        );
+    }
+
+    /**
+     * @description Loads active custom Lightning EmailTemplate options for Salesforce email sends.
+     * @return List of EmailTemplateOption values ordered by folder and name.
+     */
     @AuraEnabled(cacheable=true)
     public static List<EmailTemplateOption> getEmailTemplates() {
         List<EmailTemplateOption> options = new List<EmailTemplateOption>();
@@ -235,27 +374,47 @@ public with sharing class DealerOpportunityManagementController {
         return options;
     }
 
+    /**
+     * @description Loads approved WhatsApp template options for Opportunity campaign sends.
+     * @return List of WhatsAppTemplateOption values.
+     */
     @AuraEnabled
     public static List<DealerOpportunityWhatsAppService.WhatsAppTemplateOption> getWhatsAppTemplates() {
         return DealerOpportunityWhatsAppService.fetchApprovedTemplates();
     }
 
+    /**
+     * @description Sends a WhatsApp template message to the selected Opportunities.
+     * @param opportunityIds Opportunity Ids to message.
+     * @param templateName Approved WhatsApp template name.
+     * @return SendWhatsAppResult with send outcome details.
+     */
     @AuraEnabled
     public static DealerOpportunityWhatsAppService.SendWhatsAppResult sendOpportunityWhatsApp(
         List<Id> opportunityIds,
         String templateName
     ) {
-        return DealerOpportunityWhatsAppService.sendToOpportunities(
+        return BWM_DirectWaCampaignSend.sendToOpportunities(
             opportunityIds,
             templateName
         );
     }
 
+    /**
+     * @description Loads approved RCS template options for Opportunity campaign sends.
+     * @return List of RcsTemplateOption values.
+     */
     @AuraEnabled
     public static List<DealerOpportunityRcsService.RcsTemplateOption> getRcsTemplates() {
         return DealerOpportunityRcsService.fetchApprovedTemplates();
     }
 
+    /**
+     * @description Sends an RCS template message to the selected Opportunities.
+     * @param opportunityIds Opportunity Ids to message.
+     * @param templateName Approved RCS template name.
+     * @return SendRcsResult with send outcome details.
+     */
     @AuraEnabled
     public static DealerOpportunityRcsService.SendRcsResult sendOpportunityRcs(
         List<Id> opportunityIds,
@@ -268,10 +427,34 @@ public with sharing class DealerOpportunityManagementController {
     }
 
     @AuraEnabled
+    public static DealerOpportunityRcsService.SendRcsResult sendOpportunityRcsScheduled(
+        List<Id> opportunityIds,
+        String templateName,
+        String scheduledDateTime
+    ) {
+        BWM_CampaignScheduleContext.setScheduledDateTime(scheduledDateTime);
+        try {
+            return sendOpportunityRcs(opportunityIds, templateName);
+        } finally {
+            BWM_CampaignScheduleContext.clear();
+        }
+    }
+
+    /**
+     * @description Loads approved SMS template options for Opportunity campaign sends.
+     * @return List of SmsTemplateOption values.
+     */
+    @AuraEnabled
     public static List<BWM_SmsTemplateService.SmsTemplateOption> getSmsTemplates() {
         return BWM_SmsTemplateService.fetchApprovedTemplates();
     }
 
+    /**
+     * @description Sends an SMS template message to the selected Opportunities.
+     * @param opportunityIds Opportunity Ids to message.
+     * @param templateName Approved SMS template name.
+     * @return SendSmsResult with send outcome details.
+     */
     @AuraEnabled
     public static DealerOpportunitySmsService.SendSmsResult sendOpportunitySms(
         List<Id> opportunityIds,
@@ -283,6 +466,26 @@ public with sharing class DealerOpportunityManagementController {
         );
     }
 
+    @AuraEnabled
+    public static DealerOpportunitySmsService.SendSmsResult sendOpportunitySmsScheduled(
+        List<Id> opportunityIds,
+        String templateName,
+        String scheduledDateTime
+    ) {
+        BWM_CampaignScheduleContext.setScheduledDateTime(scheduledDateTime);
+        try {
+            return sendOpportunitySms(opportunityIds, templateName);
+        } finally {
+            BWM_CampaignScheduleContext.clear();
+        }
+    }
+
+    /**
+     * @description Renders and sends Salesforce email templates to Opportunity contact-role recipients with brochure attachments.
+     * @param opportunityIds Opportunity Ids to email.
+     * @param templateId Salesforce EmailTemplate Id to render and send.
+     * @return SendEmailResult with sent/skipped counts and per-opportunity messages.
+     */
     @AuraEnabled
     public static SendEmailResult sendOpportunityEmails(
         List<Id> opportunityIds,
@@ -406,6 +609,11 @@ public with sharing class DealerOpportunityManagementController {
         return result;
     }
 
+    /**
+     * @description Queries OpportunityContactRole rows keyed by Opportunity Id, primary first.
+     * @param opportunityIds Opportunity Ids to load contact roles for.
+     * @return Map of Opportunity Id to ordered contact role lists.
+     */
     private static Map<Id, List<OpportunityContactRole>> queryContactRolesByOpportunityId(
         List<Id> opportunityIds
     ) {
@@ -430,6 +638,11 @@ public with sharing class DealerOpportunityManagementController {
         return contactRolesByOpportunityId;
     }
 
+    /**
+     * @description Collects unique non-blank email addresses from Opportunity contact roles.
+     * @param contactRoles Contact roles for a single Opportunity; may be null.
+     * @return Deduplicated list of recipient email addresses.
+     */
     private static List<String> collectContactRoleEmails(
         List<OpportunityContactRole> contactRoles
     ) {
@@ -458,6 +671,12 @@ public with sharing class DealerOpportunityManagementController {
         return recipientEmails;
     }
 
+    /**
+     * @description Resolves the Contact Id used for template merge (primary, then first emailed role, else Opportunity.ContactId).
+     * @param contactRoles Contact roles for the Opportunity; may be null.
+     * @param opportunityRecord Opportunity providing fallback ContactId.
+     * @return Contact Id for template rendering, or null if none available.
+     */
     private static Id resolveContactIdForTemplate(
         List<OpportunityContactRole> contactRoles,
         Opportunity opportunityRecord
@@ -482,6 +701,10 @@ public with sharing class DealerOpportunityManagementController {
         return opportunityRecord.ContactId;
     }
 
+    /**
+     * @description Sets the dealer Opportunity org-wide email address on the message when configured.
+     * @param message SingleEmailMessage to apply the org-wide from address to.
+     */
     private static void applyDealerOrgWideEmail(Messaging.SingleEmailMessage message) {
         List<OrgWideEmailAddress> rows = [
             SELECT Id
@@ -494,6 +717,11 @@ public with sharing class DealerOpportunityManagementController {
         }
     }
 
+    /**
+     * @description Builds active picklist options from a field describe token.
+     * @param fieldToken Schema field token whose picklist values are read.
+     * @return List of PicklistOption label/value pairs for active entries.
+     */
     private static List<PicklistOption> getPicklistOptions(Schema.SObjectField fieldToken) {
         List<PicklistOption> options = new List<PicklistOption>();
         for (Schema.PicklistEntry entry : fieldToken.getDescribe().getPicklistValues()) {
@@ -512,6 +740,12 @@ public with sharing class DealerOpportunityManagementController {
         @AuraEnabled
         public String folderName;
 
+        /**
+         * @description Constructs an email template option for the Opportunity Management UI.
+         * @param templateId EmailTemplate Id stored as value.
+         * @param templateName Display name of the template.
+         * @param folder Folder name of the template.
+         */
         public EmailTemplateOption(Id templateId, String templateName, String folder) {
             value = templateId;
             label = templateName;
@@ -561,6 +795,11 @@ public with sharing class DealerOpportunityManagementController {
         @AuraEnabled
         public String value;
 
+        /**
+         * @description Constructs a picklist option with label and API value.
+         * @param optionLabel Display label for the option.
+         * @param optionValue API value for the option.
+         */
         public PicklistOption(String optionLabel, String optionValue) {
             label = optionLabel;
             value = optionValue;

@@ -408,6 +408,15 @@ public without sharing class BWM_EmailTemplateRenderer {
       contactPhone,
       contactEmail
     );
+    converted = applyOwnerContactTokens(
+      converted,
+      'Lead.Owner',
+      ownerFirstName,
+      ownerLastName,
+      contactPhone,
+      contactEmail
+    );
+    converted = replaceMergeToken(converted, 'Lead.Owner.Name', ownerName);
     converted = replaceMergeToken(
       converted,
       'Lead.Owner_First_name__c',
@@ -468,6 +477,7 @@ public without sharing class BWM_EmailTemplateRenderer {
     String safeValue = String.isBlank(value) ? '' : value;
     return templateBody
       .replace('{{{' + tokenName + '}}}', safeValue)
+      .replace('{{' + tokenName + '}}', safeValue)
       .replace('{!' + tokenName + '}', safeValue);
   }
 

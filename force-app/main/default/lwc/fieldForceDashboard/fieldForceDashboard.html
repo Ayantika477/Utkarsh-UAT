@@ -48,17 +48,15 @@
             </div>
         </header>
 
-        <!-- Spinner -->
-        <template if:true={isLoading}>
-            <div class="spinner-container">
-                <lightning-spinner alternative-text="Fetching dashboard details..." size="medium" variant="brand"></lightning-spinner>
-                <p class="spinner-text">Retrieving daily track logs...</p>
-            </div>
-        </template>
+        <div class="dashboard-body">
+            <template if:true={isLoading}>
+                <div class="spinner-overlay">
+                    <lightning-spinner alternative-text="Fetching dashboard details..." size="medium" variant="brand"></lightning-spinner>
+                    <p class="spinner-text">Retrieving daily track logs...</p>
+                </div>
+            </template>
 
-        <!-- Dashboard Content -->
-        <template if:false={isLoading}>
-            <lightning-tabset variant="scoped" class="dashboard-tabs animate-fade-in">
+            <lightning-tabset active-tab-value={activeTab} variant="scoped" class="dashboard-tabs animate-fade-in">
                 <!-- 0. REALTIME OVERVIEW -->
                 <lightning-tab label="Overview" value="overview" onactive={handleOverviewTabActive}>
                     <template if:false={isSingleView}>
@@ -119,11 +117,13 @@
                                             onchange={handleOverviewSearchChange}
                                             class="overview-search">
                                         </lightning-input>
-                                        <div class="status-filters">
-                                            <button class={overviewAllFilterClass} data-status="ALL" onclick={handleOverviewStatusFilterChange}>All</button>
-                                            <button class={overviewInFilterClass} data-status="IN" onclick={handleOverviewStatusFilterChange}>In ({punchedInCount})</button>
-                                            <button class={overviewOutFilterClass} data-status="OUT" onclick={handleOverviewStatusFilterChange}>Out ({punchedOutCount})</button>
-                                            <button class={overviewInactiveFilterClass} data-status="INACTIVE" onclick={handleOverviewStatusFilterChange}>Inactive ({punchedInInactiveCount})</button>
+                                        <div class="filter-scroll">
+                                            <div class="status-filters">
+                                                <button class={overviewAllFilterClass} data-status="ALL" onclick={handleOverviewStatusFilterChange}>All</button>
+                                                <button class={overviewInFilterClass} data-status="IN" onclick={handleOverviewStatusFilterChange}>In ({punchedInCount})</button>
+                                                <button class={overviewOutFilterClass} data-status="OUT" onclick={handleOverviewStatusFilterChange}>Out ({punchedOutCount})</button>
+                                                <button class={overviewInactiveFilterClass} data-status="INACTIVE" onclick={handleOverviewStatusFilterChange}>Inactive ({punchedInInactiveCount})</button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -198,6 +198,10 @@
                                                                 <span class="mobile-meta-label">Hours</span>
                                                                 <span class="mobile-meta-value">{usr.totalHours}</span>
                                                             </div>
+                                                            <div class="mobile-meta-item">
+                                                                <span class="mobile-meta-label">GPS</span>
+                                                                <span class="mobile-meta-value">{usr.gpsStatus}</span>
+                                                            </div>
                                                             <div class="mobile-meta-item full-width">
                                                                 <span class="mobile-meta-label">Last Location</span>
                                                                 <span class="mobile-meta-value">{usr.lastLocationDisplay}</span>
@@ -222,7 +226,7 @@
                 </lightning-tab>
 
                 <!-- 1. ACTIVITY TRACKING -->
-                <lightning-tab label="Activity Tracking" value="tracking" onactive={handleTrackingTabActive}>
+                <lightning-tab label="Tracking" value="tracking" onactive={handleTrackingTabActive}>
                     <template if:false={isSingleView}>
                         <template if:true={showSidebar}>
                             <div class="filter-bar glass-card animate-fade-in">
@@ -301,7 +305,7 @@
                 </lightning-tab>
 
                 <!-- 2. WFH & WFO REQUESTS -->
-                <lightning-tab label="WFH & WFO Requests" value="requests" onactive={handleWfhTabActive}>
+                <lightning-tab label="Requests" value="requests" onactive={handleWfhTabActive}>
                     <div class="slds-m-top_medium glass-card animate-fade-in requests-panel">
                         <div class="section-title-bar">
                             <lightning-icon icon-name="utility:work_order_type" size="small" class="section-icon"></lightning-icon>
@@ -318,33 +322,47 @@
                                             <th>Type</th>
                                             <th>Request Date</th>
                                             <th>Timing</th>
-                                            <th>Remarks (Optional)</th>
+                                            <th>Reason</th>
+                                            <th>HOD Remarks</th>
                                             <th>Status / Actions</th>
+                                            <th class="req-view-col">View Details</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <template for:each={teamWfhRequests} for:item="req">
                                             <tr key={req.requestId}>
-                                                <td class="req-user-name">
-                                                    <a href="javascript:void(0);" data-id={req.userId} onclick={handleUserClickInTable} class="req-user-link">
-                                                        {req.userName}
-                                                    </a>
-                                                </td>
+                                                <td class="req-user-name">{req.userName}</td>
                                                 <td>
                                                     <span class={req.typeBadgeClass}>{req.type}</span>
                                                 </td>
                                                 <td class="req-date-cell">{req.formattedDate}</td>
                                                 <td class="req-time-cell">{req.startTime} - {req.endTime}</td>
                                                 <td>
+                                                    <template if:true={req.hasRequestNote}>
+                                                        <span class="req-remarks-text">{req.requestNote}</span>
+                                                    </template>
+                                                    <template if:false={req.hasRequestNote}>
+                                                        <span class="req-remarks-empty">—</span>
+                                                    </template>
+                                                </td>
+                                                <td>
                                                     <template if:true={req.isPending}>
                                                         <lightning-input
                                                             type="text"
-                                                            placeholder="Remarks..."
+                                                            placeholder="HOD remarks..."
                                                             data-id={req.requestId}
                                                             onchange={handleDashboardRemarksChange}
                                                             variant="label-hidden"
                                                             class="table-remarks-input">
                                                         </lightning-input>
+                                                    </template>
+                                                    <template if:false={req.isPending}>
+                                                        <template if:true={req.hasRemarks}>
+                                                            <span class="req-remarks-text">{req.remarks}</span>
+                                                        </template>
+                                                        <template if:false={req.hasRemarks}>
+                                                            <span class="req-remarks-empty">—</span>
+                                                        </template>
                                                     </template>
                                                 </td>
                                                 <td>
@@ -358,6 +376,11 @@
                                                         <span class={req.statusBadgeClass}>{req.status}</span>
                                                     </template>
                                                 </td>
+                                                <td class="req-view-col">
+                                                    <template if:true={req.isCompleted}>
+                                                        <lightning-button-icon icon-name="utility:preview" variant="border-filled" data-id={req.requestId} onclick={handleViewActivityDetails} title="View Details" alternative-text="View Details" size="small"></lightning-button-icon>
+                                                    </template>
+                                                </td>
                                             </tr>
                                         </template>
                                     </tbody>
@@ -366,16 +389,19 @@
 
                             <!-- Mobile cards -->
                             <div class="mobile-only-cards">
-                                <div class="mobile-card-list">
+                                <div class="mobile-card-list req-mobile-card-list">
                                     <template for:each={teamWfhRequests} for:item="req">
                                         <div key={req.requestId} class="mobile-data-card">
                                             <div class={req.typeBorderClass}></div>
                                             <div class="wfh-card-content">
                                                 <div class="wfh-card-header">
-                                                    <a href="javascript:void(0);" data-id={req.userId} onclick={handleUserClickInTable} class="req-user-link mobile-card-title">
-                                                        {req.userName}
-                                                    </a>
-                                                    <span class={req.statusBadgeClass}>{req.status}</span>
+                                                    <span class="mobile-card-title req-card-title">{req.userName}</span>
+                                                    <div class="table-action-row req-card-actions">
+                                                        <template if:true={req.isCompleted}>
+                                                            <lightning-button-icon icon-name="utility:preview" variant="border-filled" data-id={req.requestId} onclick={handleViewActivityDetailsMobile} title="View Details" alternative-text="View Details"></lightning-button-icon>
+                                                        </template>
+                                                        <span class={req.statusBadgeClass}>{req.status}</span>
+                                                    </div>
                                                 </div>
                                                 <div class="mobile-card-meta">
                                                     <div class="mobile-meta-item">
@@ -390,6 +416,27 @@
                                                         <span class="mobile-meta-label">Timing</span>
                                                         <span class="mobile-meta-value">{req.startTime} - {req.endTime}</span>
                                                     </div>
+                                                    <div class="mobile-meta-item full-width">
+                                                        <span class="mobile-meta-label">Reason</span>
+                                                        <template if:true={req.hasRequestNote}>
+                                                            <span class="mobile-meta-value req-remarks-text">{req.requestNote}</span>
+                                                        </template>
+                                                        <template if:false={req.hasRequestNote}>
+                                                            <span class="mobile-meta-value req-remarks-empty">—</span>
+                                                        </template>
+                                                    </div>
+                                                    <template if:true={req.hasApprover}>
+                                                        <div class="mobile-meta-item full-width">
+                                                            <span class="mobile-meta-label">HOD</span>
+                                                            <span class="mobile-meta-value">{req.approverName}</span>
+                                                        </div>
+                                                    </template>
+                                                    <template if:true={req.hasRemarks}>
+                                                        <div class="mobile-meta-item full-width">
+                                                            <span class="mobile-meta-label">HOD Remarks</span>
+                                                            <span class="mobile-meta-value req-remarks-text">{req.remarks}</span>
+                                                        </div>
+                                                    </template>
                                                 </div>
                                                 <template if:true={req.isPending}>
                                                     <div class="wfh-card-remarks-actions">
@@ -410,6 +457,50 @@
                                             </div>
                                         </div>
                                     </template>
+
+                                    <!-- Day Activity Log: opens over the tapped card (mobile) -->
+                                    <template if:true={showActivityOverlay}>
+                                        <div class="activity-overlay-backdrop" onclick={closeActivityOverlay}></div>
+                                        <div class="activity-overlay-panel" style={activityOverlayStyle} onclick={stopBubble}>
+                                            <header class="modal-header">
+                                                <h2>{activityModalTitle}</h2>
+                                                <button class="modal-close-btn" onclick={closeActivityOverlay}>&times;</button>
+                                            </header>
+                                            <div class="activity-modal-body">
+                                                <div class="activity-modal-subtitle">
+                                                    <span class={activityDetails.typeBadgeClass}>{activityDetails.type}</span>
+                                                    <span class="mobile-meta-value">{activityDetails.formattedDate}</span>
+                                                </div>
+                                                <div class="mobile-card-meta">
+                                                    <div class="mobile-meta-item">
+                                                        <span class="mobile-meta-label">No. of Emails</span>
+                                                        <span class="mobile-meta-value">{activityDetails.emailsDisplay}</span>
+                                                    </div>
+                                                    <div class="mobile-meta-item">
+                                                        <span class="mobile-meta-label">No. of Meetings</span>
+                                                        <span class="mobile-meta-value">{activityDetails.meetingsDisplay}</span>
+                                                    </div>
+                                                    <div class="mobile-meta-item">
+                                                        <span class="mobile-meta-label">No. of Offers Sent</span>
+                                                        <span class="mobile-meta-value">{activityDetails.offersDisplay}</span>
+                                                    </div>
+                                                    <div class="mobile-meta-item">
+                                                        <span class="mobile-meta-label">No. of Phone Calls</span>
+                                                        <span class="mobile-meta-value">{activityDetails.callsDisplay}</span>
+                                                    </div>
+                                                </div>
+                                                <div class="wfh-remarks-display">
+                                                    <span class="wfh-remarks-label">Open Notes</span>
+                                                    <template if:true={activityDetails.hasOpenNotes}>
+                                                        <span class="wfh-remarks-text">{activityDetails.openNotes}</span>
+                                                    </template>
+                                                    <template if:false={activityDetails.hasOpenNotes}>
+                                                        <span class="wfh-remarks-text req-remarks-empty">—</span>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
                                 </div>
                             </div>
                         </template>
@@ -426,7 +517,7 @@
                 </lightning-tab>
 
                 <!-- 3. ANALYTICS & REPORTS -->
-                <lightning-tab label="Analytics & Reports" value="analytics" onactive={handleAnalyticsTabActive}>
+                <lightning-tab label="Analytics" value="analytics" onactive={handleAnalyticsTabActive}>
                     <div class="slds-m-top_medium glass-card animate-fade-in analytics-card">
                         <div class="analytics-header">
                             <div class="analytics-title-group">
@@ -661,6 +752,49 @@
                                 </div>
 
                                 <div class="stat-card glass-card hover-lift">
+                                    <div class="stat-icon-wrapper odometer-icon">
+                                        <lightning-icon icon-name="utility:dashboard" size="small" class="stat-icon"></lightning-icon>
+                                    </div>
+                                    <div class="stat-details">
+                                        <span class="stat-label">Odometer Distance</span>
+                                        <span class="stat-value">{odometerDistanceLabel}</span>
+                                        <span class="stat-desc">Market Visit distance</span>
+                                    </div>
+                                </div>
+
+                                <div class="stat-card glass-card hover-lift">
+                                    <div class="stat-icon-wrapper distance-icon">
+                                        <lightning-icon
+                                            icon-name="utility:change_request"
+                                            size="small"
+                                            class="stat-icon">
+                                        </lightning-icon>
+                                    </div>
+
+                                    <div class="stat-details">
+                                        <span class="stat-label">Distance Deviation</span>
+                                        <span class="stat-value">{distanceDeviationLabel}</span>
+                                        <span class="stat-desc">Odometer vs GPS distance</span>
+                                    </div>
+                                </div>
+
+                                <div class="stat-card glass-card hover-lift">
+                                    <div class="stat-icon-wrapper distance-icon">
+                                        <lightning-icon
+                                            icon-name="utility:percent"
+                                            size="small"
+                                            class="stat-icon">
+                                        </lightning-icon>
+                                    </div>
+
+                                    <div class="stat-details">
+                                        <span class="stat-label">Deviation %</span>
+                                        <span class="stat-value">{distanceDeviationPercentLabel}</span>
+                                        <span class="stat-desc">Difference vs GPS distance</span>
+                                    </div>
+                                </div>
+
+                                <div class="stat-card glass-card hover-lift">
                                     <div class="stat-icon-wrapper visits-icon">
                                         <lightning-icon icon-name="utility:people" size="small" class="stat-icon"></lightning-icon>
                                     </div>
@@ -718,6 +852,24 @@
                                                                     <lightning-icon icon-name="utility:clock" size="xx-small" class="wfh-icon"></lightning-icon>
                                                                     <span>{req.startTime} - {req.endTime}</span>
                                                                 </div>
+                                                                <template if:true={req.hasRequestNote}>
+                                                                    <div class="wfh-remarks-display">
+                                                                        <span class="wfh-remarks-label">Reason</span>
+                                                                        <span class="wfh-remarks-text">{req.requestNote}</span>
+                                                                    </div>
+                                                                </template>
+                                                                <template if:true={req.hasApprover}>
+                                                                    <div class="wfh-detail">
+                                                                        <lightning-icon icon-name="utility:user" size="xx-small" class="wfh-icon"></lightning-icon>
+                                                                        <span>HOD: {req.approverName}</span>
+                                                                    </div>
+                                                                </template>
+                                                                <template if:true={req.hasRemarks}>
+                                                                    <div class="wfh-remarks-display">
+                                                                        <span class="wfh-remarks-label">HOD Remarks</span>
+                                                                        <span class="wfh-remarks-text">{req.remarks}</span>
+                                                                    </div>
+                                                                </template>
                                                                 <template if:true={req.isPending}>
                                                                     <div class="wfh-card-remarks-actions">
                                                                         <lightning-input
@@ -796,6 +948,24 @@
                                                                             <lightning-icon icon-name="utility:clock" size="xx-small" class="wfh-icon"></lightning-icon>
                                                                             <span>{req.startTime} - {req.endTime}</span>
                                                                         </div>
+                                                                        <template if:true={req.hasRequestNote}>
+                                                                            <div class="wfh-remarks-display">
+                                                                                <span class="wfh-remarks-label">Reason</span>
+                                                                                <span class="wfh-remarks-text">{req.requestNote}</span>
+                                                                            </div>
+                                                                        </template>
+                                                                        <template if:true={req.hasApprover}>
+                                                                            <div class="wfh-detail">
+                                                                                <lightning-icon icon-name="utility:user" size="xx-small" class="wfh-icon"></lightning-icon>
+                                                                                <span>HOD: {req.approverName}</span>
+                                                                            </div>
+                                                                        </template>
+                                                                        <template if:true={req.hasRemarks}>
+                                                                            <div class="wfh-remarks-display">
+                                                                                <span class="wfh-remarks-label">HOD Remarks</span>
+                                                                                <span class="wfh-remarks-text">{req.remarks}</span>
+                                                                            </div>
+                                                                        </template>
                                                                         <template if:true={req.isPending}>
                                                                             <div class="wfh-card-remarks-actions">
                                                                                 <lightning-input
@@ -910,6 +1080,20 @@
                                                             <template if:false={item.reasonForVisit}>
                                                                 <p class="node-description">{item.description}</p>
                                                             </template>
+
+                                                            <template if:true={item.isVisitType}>
+                                                                <template if:true={item.is100mOutside}>
+                                                                    <div class="pt-warning-banner">
+                                                                        <div class="pt-warning-header">
+                                                                            <lightning-icon icon-name="utility:warning" size="xx-small" variant="warning" class="slds-m-right_xx-small"></lightning-icon>
+                                                                            <strong>Check-out Outside Check-in Location</strong>
+                                                                        </div>
+                                                                        <template if:true={item.justification}>
+                                                                            <p class="pt-warning-text"><strong>Justification:</strong> {item.justification}</p>
+                                                                        </template>
+                                                                    </div>
+                                                                </template>
+                                                            </template>
                                                         </div>
 
                                                         <template if:true={item.isExpanded}>
@@ -990,15 +1174,6 @@
                                                                                     </div>
                                                                                 </template>
                                                                             </div>
-
-                                                                            <template if:true={item.is100mOutside}>
-                                                                                <div class="pt-warning-banner animate-fade-in">
-                                                                                    <div class="pt-warning-header">
-                                                                                        <lightning-icon icon-name="utility:warning" size="xx-small" variant="warning" class="slds-m-right_xx-small"></lightning-icon>
-                                                                                        <strong>Outside Boundary (&gt;300m)</strong>
-                                                                                    </div>
-                                                                                </div>
-                                                                            </template>
                                                                         </template>
                                                                     </div>
                                                                 </template>
@@ -1114,7 +1289,7 @@
                     </div>
                 </template>
             </template>
-        </template>
+        </div>
     </div>
 
     <template if:true={showImageModal}>
@@ -1126,6 +1301,50 @@
                 </header>
                 <div class="modal-body">
                     <img src={modalImageUrl} alt="Full screen preview" class="modal-full-img" />
+                </div>
+            </div>
+        </section>
+    </template>
+
+    <template if:true={showActivityModal}>
+        <section class="modal-backdrop animate-fade-in" onclick={closeActivityDetails}>
+            <div class="modal-content activity-modal-content" onclick={stopBubble}>
+                <header class="modal-header">
+                    <h2>{activityModalTitle}</h2>
+                    <button class="modal-close-btn" onclick={closeActivityDetails}>&times;</button>
+                </header>
+                <div class="activity-modal-body">
+                    <div class="activity-modal-subtitle">
+                        <span class={activityDetails.typeBadgeClass}>{activityDetails.type}</span>
+                        <span class="mobile-meta-value">{activityDetails.formattedDate}</span>
+                    </div>
+                    <div class="mobile-card-meta">
+                        <div class="mobile-meta-item">
+                            <span class="mobile-meta-label">No. of Emails</span>
+                            <span class="mobile-meta-value">{activityDetails.emailsDisplay}</span>
+                        </div>
+                        <div class="mobile-meta-item">
+                            <span class="mobile-meta-label">No. of Meetings</span>
+                            <span class="mobile-meta-value">{activityDetails.meetingsDisplay}</span>
+                        </div>
+                        <div class="mobile-meta-item">
+                            <span class="mobile-meta-label">No. of Offers Sent</span>
+                            <span class="mobile-meta-value">{activityDetails.offersDisplay}</span>
+                        </div>
+                        <div class="mobile-meta-item">
+                            <span class="mobile-meta-label">No. of Phone Calls</span>
+                            <span class="mobile-meta-value">{activityDetails.callsDisplay}</span>
+                        </div>
+                    </div>
+                    <div class="wfh-remarks-display">
+                        <span class="wfh-remarks-label">Open Notes</span>
+                        <template if:true={activityDetails.hasOpenNotes}>
+                            <span class="wfh-remarks-text">{activityDetails.openNotes}</span>
+                        </template>
+                        <template if:false={activityDetails.hasOpenNotes}>
+                            <span class="wfh-remarks-text req-remarks-empty">—</span>
+                        </template>
+                    </div>
                 </div>
             </div>
         </section>

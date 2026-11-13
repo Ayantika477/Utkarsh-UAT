@@ -5,7 +5,7 @@ public without sharing class AddressBookProcessorByAddress {
         @InvocableVariable(required=true)
         public Id accountId;
 
-        @InvocableVariable(required=true)
+        @InvocableVariable
         public Id contactId;
 
         @InvocableVariable(required=true)
@@ -82,6 +82,7 @@ public without sharing class AddressBookProcessorByAddress {
         }
 
         Map<String, Address_Book__c> addressBookMap = new Map<String, Address_Book__c>();
+        Set<Id> accountsWithPrimary = new Set<Id>();
 
         if (!accountIds.isEmpty()) {
 
@@ -113,6 +114,9 @@ public without sharing class AddressBookProcessorByAddress {
                 );
 
                 addressBookMap.put(key, ab);
+                if (ab.Primary_Address__c == true && ab.Account__c != null) {
+                    accountsWithPrimary.add(ab.Account__c);
+                }
             }
         }
 
@@ -185,6 +189,10 @@ public without sharing class AddressBookProcessorByAddress {
             ab.Country__c = i.country;
             ab.PIN__c = i.pin;
             ab.Zone__c = i.zone;
+            if (i.accountId != null && !accountsWithPrimary.contains(i.accountId)) {
+                ab.Primary_Address__c = true;
+                accountsWithPrimary.add(i.accountId);
+            }
 
             // Reserve the key to prevent duplicate inserts in same transaction
             addressBookMap.put(key, ab);
@@ -195,7 +203,7 @@ public without sharing class AddressBookProcessorByAddress {
 
         if (!addressBooksToInsert.isEmpty()) {
 
-            insert addressBooksToInsert;
+            Database.insert(addressBooksToInsert, AccessLevel.SYSTEM_MODE);
 
             Integer index = 0;
 
@@ -211,6 +219,7 @@ public without sharing class AddressBookProcessorByAddress {
 
         List<Opportunity_Address_Junc__c> junctions = new List<Opportunity_Address_Junc__c>();
         List<Contact> contactsToUpdate = new List<Contact>();
+        List<Address_Book__c> addressBooksForAccountStamp = new List<Address_Book__c>();
         
         Set<Id> opportunityIds = new Set<Id>();
 
@@ -234,8 +243,6 @@ public without sharing class AddressBookProcessorByAddress {
             
             Opportunity opp = opportunityMap.get(i.opportunityId);
 
-            
-
             Address_Book__c ab = selectedAddressMap.get(i.selectedAddressBookId);
 
             if (ab == null) {
@@ -247,31 +254,136 @@ public without sharing class AddressBookProcessorByAddress {
                 Opportunity__c = i.opportunityId,
                 Address_Book__c = ab.Id
             ));
+
+            if (i.contactId != null) {
+                contactsToUpdate.add(new Contact(
+                    Id = i.contactId,
+                    Street__c = ab.Street__c,
+                    City__c = ab.City__c,
+                    State__c = ab.State__c,
+                    Country__c = ab.Country__c,
+                    PIN__c = ab.PIN__c,
+                    Zone__c = ab.Zone__c
+                ));
+            }
+
+            addressBooksForAccountStamp.add(ab);
             
-            contactsToUpdate.add(new Contact(
-                Id = i.contactId,
-                Street__c = ab.Street__c,
-                City__c = ab.City__c,
-                State__c = ab.State__c,
-                Country__c = ab.Country__c,
-                PIN__c = ab.PIN__c,
-                Zone__c = ab.Zone__c
-            ));
-            
-            System.debug('Opportunity Account : ' + opp.AccountId);
+            System.debug('Opportunity Account : ' + (opp == null ? null : opp.AccountId));
             System.debug('Input Account       : ' + i.accountId);
             System.debug('AddressBook Account : ' + ab.Account__c);
             
         }
 
         if (!junctions.isEmpty()) {
-            //insert junctions;
             Database.insert(junctions, AccessLevel.SYSTEM_MODE);
         }
 
         if (!contactsToUpdate.isEmpty()) {
             Database.update(contactsToUpdate, AccessLevel.SYSTEM_MODE);
         }
+
+        stampAccountBillingFromAddressBooks(addressBooksForAccountStamp);
+    }
+
+    private static void stampAccountBillingFromAddressBooks(List<Address_Book__c> addressBooks) {
+        if (addressBooks == null || addressBooks.isEmpty()) {
+            return;
+        }
+
+        Map<Id, Address_Book__c> bookByAccount = new Map<Id, Address_Book__c>();
+        for (Address_Book__c ab : addressBooks) {
+            if (ab == null || ab.Account__c == null) {
+                continue;
+            }
+            if (!bookByAccount.containsKey(ab.Account__c) || ab.Primary_Address__c == true) {
+                bookByAccount.put(ab.Account__c, ab);
+            }
+        }
+        if (bookByAccount.isEmpty()) {
+            return;
+        }
+
+        Map<Id, Account> accounts = new Map<Id, Account>([
+            SELECT Id, BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry, Zone__c
+            FROM Account
+            WHERE Id IN :bookByAccount.keySet()
+            WITH SYSTEM_MODE
+        ]);
+
+        List<Account> accountsToUpdate = new List<Account>();
+        for (Id accountId : bookByAccount.keySet()) {
+            Account acc = accounts.get(accountId);
+            Address_Book__c ab = bookByAccount.get(accountId);
+            if (acc == null || ab == null) {
+                continue;
+            }
+            Boolean changed = applyAddressBookToAccount(acc, ab);
+            if (changed) {
+                accountsToUpdate.add(acc);
+            }
+        }
+
+        if (!accountsToUpdate.isEmpty()) {
+            Database.SaveResult[] results = Database.update(accountsToUpdate, false, AccessLevel.SYSTEM_MODE);
+            List<Account> retryWithoutPicklists = new List<Account>();
+            for (Integer i = 0; i < results.size(); i++) {
+                if (results[i].isSuccess()) {
+                    continue;
+                }
+                Account failed = accountsToUpdate[i];
+                Address_Book__c ab = bookByAccount.get(failed.Id);
+                if (ab == null) {
+                    continue;
+                }
+                Account retry = new Account(Id = failed.Id);
+                if (String.isNotBlank(ab.Street__c)) {
+                    retry.BillingStreet = ab.Street__c;
+                }
+                if (String.isNotBlank(ab.City__c)) {
+                    retry.BillingCity = ab.City__c;
+                }
+                if (String.isNotBlank(ab.PIN__c)) {
+                    retry.BillingPostalCode = ab.PIN__c;
+                }
+                if (String.isNotBlank(ab.Zone__c)) {
+                    retry.Zone__c = ab.Zone__c;
+                }
+                retryWithoutPicklists.add(retry);
+            }
+            if (!retryWithoutPicklists.isEmpty()) {
+                Database.update(retryWithoutPicklists, false, AccessLevel.SYSTEM_MODE);
+            }
+        }
+    }
+
+    private static Boolean applyAddressBookToAccount(Account acc, Address_Book__c ab) {
+        Boolean changed = false;
+        if (String.isBlank(acc.BillingStreet) && String.isNotBlank(ab.Street__c)) {
+            acc.BillingStreet = ab.Street__c;
+            changed = true;
+        }
+        if (String.isBlank(acc.BillingCity) && String.isNotBlank(ab.City__c)) {
+            acc.BillingCity = ab.City__c;
+            changed = true;
+        }
+        if (String.isBlank(acc.BillingState) && String.isNotBlank(ab.State__c)) {
+            acc.BillingState = ab.State__c;
+            changed = true;
+        }
+        if (String.isBlank(acc.BillingPostalCode) && String.isNotBlank(ab.PIN__c)) {
+            acc.BillingPostalCode = ab.PIN__c;
+            changed = true;
+        }
+        if (String.isBlank(acc.BillingCountry) && String.isNotBlank(ab.Country__c)) {
+            acc.BillingCountry = ab.Country__c;
+            changed = true;
+        }
+        if (String.isBlank(acc.Zone__c) && String.isNotBlank(ab.Zone__c)) {
+            acc.Zone__c = ab.Zone__c;
+            changed = true;
+        }
+        return changed;
     }
 
     private static String buildKey(

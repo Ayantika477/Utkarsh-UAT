@@ -354,9 +354,30 @@ implements Database.Batchable<SObject>{
                 );
             }
 
-            Messaging.SingleEmailMessage mail =
+            // Messaging.SingleEmailMessage mail =
+            //
+            //     OpportunityNurtureEmailService.buildEmail(
+            //
+            //             dept48Map.get(
+            //                 dept
+            //             ),
+            //
+            //             recipients,
+            //
+            //             48,
+            //
+            //             dept
+            //         );
+            //
+            // if(mail != null){
+            //
+            //     emailMessages.add(
+            //         mail
+            //     );
+            // }
+            emailMessages.addAll(
 
-                OpportunityNurtureEmailService.buildEmail(
+                OpportunityNurtureEmailService.buildEmails(
 
                         dept48Map.get(
                             dept
@@ -367,14 +388,9 @@ implements Database.Batchable<SObject>{
                         48,
 
                         dept
-                    );
+                    )
 
-            if(mail != null){
-
-                emailMessages.add(
-                    mail
-                );
-            }
+            );
         }
 
         /*
@@ -421,9 +437,30 @@ implements Database.Batchable<SObject>{
                 );
             }
 
-            Messaging.SingleEmailMessage mail =
+            // Messaging.SingleEmailMessage mail =
+            //
+            //     OpportunityNurtureEmailService.buildEmail(
+            //
+            //             dept60Map.get(
+            //                 dept
+            //             ),
+            //
+            //             recipients,
+            //
+            //             60,
+            //
+            //             dept
+            //         );
+            //
+            // if(mail != null){
+            //
+            //     emailMessages.add(
+            //         mail
+            //     );
+            // }
+            emailMessages.addAll(
 
-                OpportunityNurtureEmailService.buildEmail(
+                OpportunityNurtureEmailService.buildEmails(
 
                         dept60Map.get(
                             dept
@@ -434,14 +471,9 @@ implements Database.Batchable<SObject>{
                         60,
 
                         dept
-                    );
+                    )
 
-            if(mail != null){
-
-                emailMessages.add(
-                    mail
-                );
-            }
+            );
         }
 
         /*
@@ -468,9 +500,28 @@ implements Database.Batchable<SObject>{
                 );
             }
 
-            Messaging.SingleEmailMessage mail =
+            // Messaging.SingleEmailMessage mail =
+            //
+            //     OpportunityNurtureEmailService.buildEmail(
+            //
+            //             opp72List,
+            //
+            //             recipients,
+            //
+            //             72,
+            //
+            //             'All Departments'
+            //         );
+            //
+            // if(mail != null){
+            //
+            //     emailMessages.add(
+            //         mail
+            //     );
+            // }
+            emailMessages.addAll(
 
-                OpportunityNurtureEmailService.buildEmail(
+                OpportunityNurtureEmailService.buildEmails(
 
                         opp72List,
 
@@ -479,14 +530,9 @@ implements Database.Batchable<SObject>{
                         72,
 
                         'All Departments'
-                    );
+                    )
 
-            if(mail != null){
-
-                emailMessages.add(
-                    mail
-                );
-            }
+            );
         }
 
         System.debug(

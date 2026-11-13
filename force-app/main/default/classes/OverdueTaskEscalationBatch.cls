@@ -99,6 +99,11 @@ global class OverdueTaskEscalationBatch implements Database.Batchable<SObject> {
 
         // Single SOQL - role emails
         Map<String, List<String>> roleEmailMap = new Map<String, List<String>>();
+
+        // Email (lowercased) -> active User Id, filled from the role-user query below.
+        // Used to send to User Ids so the emails count as internal.
+        Map<String, Id> userIdByEmail = new Map<String, Id>();
+
         for (User u : [
             SELECT Id, Email, UserRole.Name
             FROM User
@@ -109,6 +114,9 @@ global class OverdueTaskEscalationBatch implements Database.Batchable<SObject> {
             String rn = u.UserRole.Name;
             if (!roleEmailMap.containsKey(rn)) roleEmailMap.put(rn, new List<String>());
             roleEmailMap.get(rn).add(u.Email);
+            if (!userIdByEmail.containsKey(u.Email.toLowerCase())) {
+                userIdByEmail.put(u.Email.toLowerCase(), u.Id);
+            }
             System.debug('Role [' + rn + '] email: ' + u.Email);
         }
 
@@ -207,7 +215,10 @@ global class OverdueTaskEscalationBatch implements Database.Batchable<SObject> {
                     System.debug('Queuing 1hr owner alert for: ' + parentName);
 
                     Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
-                    mail.setToAddresses(new List<String>{ ownerEmail });
+                    // mail.setToAddresses(new List<String>{ ownerEmail });
+                    // ownerEmailMap only holds active Users, keyed by User Id - send to the Id
+                    // so the email counts as internal.
+                    mail.setTargetObjectId(ownerId);
                     mail.setSaveAsActivity(false);
                     mail.setSubject('Overdue Task Alert - ' + t.Subject);
 
@@ -235,10 +246,16 @@ global class OverdueTaskEscalationBatch implements Database.Batchable<SObject> {
                 if (dept != null) addFromRoleMap(dept + ' HOD', roleEmailMap, recipients);
 
                 if (!recipients.isEmpty()) {
-                    pendingEmails.add(buildEmail(
+                    // pendingEmails.add(buildEmail(
+                    //     recipients,
+                    //     '36hr Escalation - Overdue Task - ' + parentName,
+                    //     t.Subject, parentName, hoursOverdue, 36
+                    // ));
+                    pendingEmails.addAll(buildEmails(
                         recipients,
                         '36hr Escalation - Overdue Task - ' + parentName,
-                        t.Subject, parentName, hoursOverdue, 36
+                        t.Subject, parentName, hoursOverdue, 36,
+                        userIdByEmail
                     ));
 
                     if (isOpp) {
@@ -269,10 +286,16 @@ global class OverdueTaskEscalationBatch implements Database.Batchable<SObject> {
                 addFromRoleMap('Utkarsh ED',       roleEmailMap, recipients);
 
                 if (!recipients.isEmpty()) {
-                    pendingEmails.add(buildEmail(
+                    // pendingEmails.add(buildEmail(
+                    //     recipients,
+                    //     '96hr Senior Escalation - Overdue Task - ' + parentName,
+                    //     t.Subject, parentName, hoursOverdue, 96
+                    // ));
+                    pendingEmails.addAll(buildEmails(
                         recipients,
                         '96hr Senior Escalation - Overdue Task - ' + parentName,
-                        t.Subject, parentName, hoursOverdue, 96
+                        t.Subject, parentName, hoursOverdue, 96,
+                        userIdByEmail
                     ));
 
                     if (isOpp) {
@@ -327,7 +350,8 @@ global class OverdueTaskEscalationBatch implements Database.Batchable<SObject> {
         List<String> finalR = new List<String>(unique);
 
         Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
-        mail.setToAddresses(finalR);
+        // Not used: buildEmails sends to User Ids and copies only the subject/body.
+        // mail.setToAddresses(finalR);
         mail.setSaveAsActivity(false);
         mail.setSubject(subject);
 
@@ -342,6 +366,49 @@ global class OverdueTaskEscalationBatch implements Database.Batchable<SObject> {
 
         mail.setPlainTextBody(body);
         return mail;
+    }
+
+    // Sends to User Ids so the email counts as internal (not against the daily
+    // external email limit). setTargetObjectId takes a single User, so one copy
+    // is built per recipient. Addresses without an active User are skipped
+    // (email address fallback disabled).
+    private static List<Messaging.SingleEmailMessage> buildEmails(
+        List<String> recipients,
+        String subject,
+        String taskSubject,
+        String parentName,
+        Long hoursOverdue,
+        Integer tier,
+        Map<String, Id> userIdByEmail
+    ) {
+        List<Messaging.SingleEmailMessage> messages = new List<Messaging.SingleEmailMessage>();
+
+        Messaging.SingleEmailMessage template =
+            buildEmail(recipients, subject, taskSubject, parentName, hoursOverdue, tier);
+
+        Set<Id> addedUserIds = new Set<Id>();
+        for (String email : new Set<String>(recipients)) {
+            Id userId = String.isBlank(email) ? null : userIdByEmail.get(email.toLowerCase());
+            if (userId == null) {
+                System.debug(
+                    'OverdueTaskEscalationBatch: no active User Id for recipient ' + email +
+                    ' - email address fallback is disabled, email not sent.'
+                );
+                continue;
+            }
+            if (addedUserIds.contains(userId)) {
+                continue;
+            }
+            addedUserIds.add(userId);
+
+            Messaging.SingleEmailMessage userMail = new Messaging.SingleEmailMessage();
+            userMail.setTargetObjectId(userId);
+            userMail.setSaveAsActivity(false);
+            userMail.setSubject(template.getSubject());
+            userMail.setPlainTextBody(template.getPlainTextBody());
+            messages.add(userMail);
+        }
+        return messages;
     }
 
     private static void addFromRoleMap(

@@ -2,6 +2,7 @@ import { LightningElement, api, track, wire } from 'lwc';
 import { refreshApex } from '@salesforce/apex';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import { NavigationMixin } from 'lightning/navigation';
+import { registerRefreshHandler, unregisterRefreshHandler } from 'lightning/refresh';
 import getEmployeeTimeline from '@salesforce/apex/EmployeeTimelineController.getEmployeeTimeline';
 import addEmployeeTimelineItemWithCategory from '@salesforce/apex/EmployeeTimelineController.addEmployeeTimelineItemWithCategory';
 import getReasonForVisitOptions from '@salesforce/apex/EmployeeTimelineController.getReasonForVisitOptions';
@@ -50,7 +51,7 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
     @track scheduleActionType = 'Reschedule'; // 'Reschedule' or 'Cancel'
     @track scheduleActionReason = '';
     @track scheduleActionDate = '';
-    @track scheduleActionTime = '';
+    // @track scheduleActionTime = '';
     @track savingScheduleAction = false;
 
     // Enquiry Association Type / Paths
@@ -106,6 +107,7 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
     @track taskId = '';
     @track customerName = '';
     @track customerCategory = '';
+    @track customerCategoryLocked = false;
     @track customerType = '';
     @track savingCheckedOut = false;
     @track selfiePreview = '';
@@ -148,7 +150,7 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
     @track reasonForVisitValue = '';
     @track visitTypeValue = 'Follow up';
 
-    limitSize = 20;
+    limitSize = 100;
     wiredResult;
     currentLatitude;
     currentLongitude;
@@ -374,7 +376,7 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         searchOpportunities({ searchKey: this.oppSearchKey })
             .then(result => {
                 this.opportunityOptions = result.map(o => ({
-                    label: `${o.Name} (Account: ${o.Account ? o.Account.Name : 'None'})`,
+                    label: `${o.Name} (Account: ${this.headAccountName(o)})`,
                     value: o.Id
                 }));
                 this.rawOpportunities = result;
@@ -391,9 +393,7 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
             selectedOpp = this.opportunitiesList.find(o => o.Id === this.selectedOpportunityId);
         }
         if (selectedOpp && selectedOpp.AccountId) {
-            this.associatedAccountId = selectedOpp.AccountId;
-            this.selectedAccountId = selectedOpp.AccountId;
-            this.associatedAccountName = selectedOpp.Account ? selectedOpp.Account.Name : '';
+            this.applyAssociatedAccountFromOpportunity(selectedOpp);
             this.selectedTagVisitOption = 'Account';
             this.selectedAddressBookId = null;
             this.selectedSiteId = '';
@@ -401,6 +401,25 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
             this.addressBookStatusMessage = 'Checking Address Book...';
             this.checkAccountAddressBook();
         }
+    }
+
+    applyAssociatedAccountFromOpportunity(opp) {
+        const parentId = opp.Account && opp.Account.ParentId;
+        this.associatedAccountId = parentId || opp.AccountId;
+        this.selectedAccountId = this.associatedAccountId;
+        this.associatedAccountName = parentId
+            ? (opp.Account.Parent && opp.Account.Parent.Name) || ''
+            : (opp.Account ? opp.Account.Name : '');
+    }
+
+    headAccountName(opp) {
+        if (!opp || !opp.Account) {
+            return 'None';
+        }
+        if (opp.Account.ParentId && opp.Account.Parent && opp.Account.Parent.Name) {
+            return opp.Account.Parent.Name;
+        }
+        return opp.Account.Name || 'None';
     }
 
     handleTagVisitOptionChange(event) {
@@ -689,7 +708,37 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
     handleRemainingPhoneChange(event) { this.remainingAccountPhone = event.detail.value; }
     handleRemainingEmailChange(event) { this.remainingAccountEmail = event.detail.value; }
     handleRemainingContactNameChange(event) { this.remainingAccountContactName = event.detail.value; }
-    handleCustomerCategoryChange(event) { this.customerCategory = event.detail.value; }
+    handleCustomerCategoryChange(event) {
+        if (this.customerCategoryLocked) {
+            return;
+        }
+        this.customerCategory = event.detail.value;
+    }
+
+    get isCustomerCategoryLocked() {
+        return this.customerCategoryLocked === true && !!this.customerCategory;
+    }
+
+    applyExistingCustomerCategory(value) {
+        const category = value == null ? '' : String(value).trim();
+        if (!category) {
+            return;
+        }
+        this.customerCategory = category;
+        this.customerCategoryLocked = true;
+        this.ensureCustomerCategoryOption(category);
+    }
+
+    ensureCustomerCategoryOption(category) {
+        if (!category) {
+            return;
+        }
+        const options = this.customerCategoryOptions || [];
+        if (!options.some(opt => opt.value === category)) {
+            this.customerCategoryOptions = [{ label: category, value: category }, ...options];
+        }
+    }
+
     handleFollowUpTypeChange(event) { this.followUpTypeValue = event.detail.value; }
 
     get followUpTypeOptions() {
@@ -730,6 +779,14 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         return this.postDispositionValue === 'Mark Lead as Lost';
     }
 
+    get hasCheckoutFile() {
+        return !!(this.fileData && this.fileData.fileName);
+    }
+
+    get checkoutFileName() {
+        return this.fileData?.fileName || '';
+    }
+
     get lostReasonOptions() {
         return [
             { label: 'Price Enquiry', value: 'Price Enquiry' },
@@ -762,9 +819,53 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
     // ── Wire & data loading ──────────────────────────────────────────────────
     wiredScheduledResult;
 
+    // Cacheable Apex results are persisted on the mobile device, so a
+    // reschedule/cancel done on web is invisible there until the cache expires.
+    // Re-fetch from the server on load, on returning to the app, and on
+    // pull-to-refresh.
+    _scheduledFreshLoaded = false;
+    _timelineFreshLoaded = false;
+    _refreshHandlerId;
+    _onVisibilityChange;
+
+    connectedCallback() {
+        this._onVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                this.refreshAll();
+            }
+        };
+        document.addEventListener('visibilitychange', this._onVisibilityChange);
+        this._refreshHandlerId = registerRefreshHandler(this, () => this.refreshAll().then(() => true));
+    }
+
+    disconnectedCallback() {
+        document.removeEventListener('visibilitychange', this._onVisibilityChange);
+        if (this._refreshHandlerId) {
+            unregisterRefreshHandler(this._refreshHandlerId);
+        }
+    }
+
+    refreshAll() {
+        const refreshes = [];
+        if (this.wiredScheduledResult) {
+            refreshes.push(refreshApex(this.wiredScheduledResult));
+        }
+        if (this.wiredResult) {
+            refreshes.push(refreshApex(this.wiredResult));
+        }
+        return Promise.all(refreshes).catch(error => {
+            console.error('Error refreshing punch timeline', error);
+        });
+    }
+
     @wire(getScheduledVisits, { employeeId: '$recordId' })
     wiredScheduledVisits(result) {
         this.wiredScheduledResult = result;
+        if (!this._scheduledFreshLoaded && (result.data || result.error)) {
+            // First emission may be a stale device-cached copy
+            this._scheduledFreshLoaded = true;
+            refreshApex(result);
+        }
         const { data, error } = result;
         if (data) {
             this.scheduledVisits = data.map(visit => {
@@ -784,7 +885,9 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
                 return {
                     ...visit,
                     formattedDate,
-                    displayPurpose: visit.reasonForVisit || visit.nextAction || 'Visit'
+                    displayPurpose: visit.reasonForVisit || visit.nextAction || 'Visit',
+                    isCancelled: visit.isCancelled === true,
+                    cancelReason: visit.cancelReason || ''
                 };
             });
         } else if (error) {
@@ -829,7 +932,14 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
     get filteredScheduledVisits() {
         if (!this.scheduledVisits) return [];
         return this.scheduledVisits.filter(visit => {
-            return visit.followUpDate === this.selectedVisitDate;
+            return visit.followUpDate === this.selectedVisitDate && !visit.isCancelled;
+        });
+    }
+
+    get filteredCancelledVisits() {
+        if (!this.scheduledVisits) return [];
+        return this.scheduledVisits.filter(visit => {
+            return visit.followUpDate === this.selectedVisitDate && visit.isCancelled;
         });
     }
 
@@ -837,8 +947,20 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         return this.filteredScheduledVisits && this.filteredScheduledVisits.length > 0;
     }
 
+    get hasCancelledVisits() {
+        return this.filteredCancelledVisits && this.filteredCancelledVisits.length > 0;
+    }
+
+    get hasAnyVisits() {
+        return this.hasScheduledVisits || this.hasCancelledVisits;
+    }
+
     get scheduledVisitsCount() {
         return this.filteredScheduledVisits ? this.filteredScheduledVisits.length : 0;
+    }
+
+    get cancelledVisitsCount() {
+        return this.filteredCancelledVisits ? this.filteredCancelledVisits.length : 0;
     }
 
     get toggleIconName() {
@@ -996,8 +1118,9 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         this.selectedReasonOption = '';
         this.customReasonText = '';
         this.scheduleActionDate = '';
-        this.scheduleActionTime = '';
+        // this.scheduleActionTime = '';
         this.showScheduleActionModal = true;
+        this.scrollToScheduleActionModal();
     }
 
     handleCancelClick(event) {
@@ -1007,8 +1130,22 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         this.selectedReasonOption = '';
         this.customReasonText = '';
         this.scheduleActionDate = '';
-        this.scheduleActionTime = '';
+        // this.scheduleActionTime = '';
         this.showScheduleActionModal = true;
+        this.scrollToScheduleActionModal();
+    }
+
+    scrollToScheduleActionModal() {
+        // Salesforce Mobile often leaves the page scrolled on the visit list,
+        // so the modal opens off-screen and the tap looks like a no-op.
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // eslint-disable-next-line @lwc/lwc/no-async-operation
+        window.setTimeout(() => {
+            const modal = this.template.querySelector('.pt-schedule-action-modal');
+            if (modal) {
+                modal.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }, 50);
     }
 
     closeScheduleActionModal() {
@@ -1024,13 +1161,28 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         this.customReasonText = event.detail.value;
     }
 
+    get minScheduleDate() {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        return tomorrow.toISOString().split('T')[0];
+    }
+
     handleScheduleActionDateChange(event) {
+        this.scheduleActionDate = event.detail.value;
+
+        const dateInput = event.target;
+        dateInput.setCustomValidity(
+            this.scheduleActionDate < this.minScheduleDate
+                ? 'Please select a date from tomorrow onwards.'
+                : ''
+        );
+        dateInput.reportValidity();
         this.scheduleActionDate = event.detail.value;
     }
 
-    handleScheduleActionTimeChange(event) {
+    /* handleScheduleActionTimeChange(event) {
         this.scheduleActionTime = event.detail.value;
-    }
+    } */
 
     handleScheduleActionSubmit() {
         let finalReason = this.selectedReasonOption;
@@ -1047,6 +1199,18 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         
         if (this.scheduleActionType === 'Reschedule') {
             if (!this.scheduleActionDate) {
+                this.showToast('Validation Error', 'Please select a valid next schedule date.', 'error');
+                this.savingScheduleAction = false;
+                return;
+            }
+
+            if (this.scheduleActionDate < this.minScheduleDate) {
+                this.showToast('Validation Error', 'Next schedule date must be from tomorrow onwards.', 'error');
+                this.savingScheduleAction = false;
+                return;
+            }
+
+            if (!this.scheduleActionDate) {
                 this.showToast('Validation Error', 'Please select a next schedule date.', 'error');
                 this.savingScheduleAction = false;
                 return;
@@ -1055,8 +1219,8 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
             rescheduleScheduledVisit({
                 visitId: this.selectedScheduledVisitId,
                 reason: finalReason,
-                nextDate: this.scheduleActionDate,
-                nextTime: this.scheduleActionTime
+                nextDate: this.scheduleActionDate
+                // nextTime: this.scheduleActionTime
             })
             .then(() => {
                 this.showToast('Success', 'Visit rescheduled successfully.', 'success');
@@ -1075,8 +1239,8 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
             cancelScheduledVisit({
                 visitId: this.selectedScheduledVisitId,
                 reason: finalReason,
-                nextDate: this.scheduleActionDate ? this.scheduleActionDate : null,
-                nextTime: this.scheduleActionTime
+                nextDate: this.scheduleActionDate ? this.scheduleActionDate : null
+                // nextTime: this.scheduleActionTime
             })
             .then(() => {
                 this.showToast('Success', 'Visit cancelled successfully.', 'success');
@@ -1096,6 +1260,11 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
     @wire(getEmployeeTimeline, { employeeId: '$recordId', limitSize: '$limitSize' })
     wiredTimeline(result) {
         this.wiredResult = result;
+        if (!this._timelineFreshLoaded && (result.data || result.error)) {
+            // First emission may be a stale device-cached copy
+            this._timelineFreshLoaded = true;
+            refreshApex(result);
+        }
         const { data, error } = result;
         this.isLoading = false;
 
@@ -1137,17 +1306,20 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
             return [];
         }
 
+        const nodeDistanceById = this.buildNodeDistanceMap(this.items);
+
         return this.items.map((i, idx) => {
+            const checkInRaw = i.loggedAt || i.createdTime;
             let time = '';
-            if (i.createdTime) {
+            if (checkInRaw) {
                 try {
-                    const d = new Date(i.createdTime);
+                    const d = new Date(checkInRaw);
                     time = d.toLocaleString('en-IN', {
                         dateStyle: 'short',
                         timeStyle: 'short'
                     });
                 } catch (e) {
-                    time = i.createdTime;
+                    time = checkInRaw;
                 }
             }
 
@@ -1164,6 +1336,12 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
                 }
             }
 
+            const checkInShort = this.formatTimeShort(checkInRaw);
+            const checkOutShort = i.loggedOutAt
+                ? this.formatTimeShort(i.loggedOutAt)
+                : (i.isCheckout ? '' : 'Active');
+            const visitDuration = this.formatVisitDuration(checkInRaw, i.loggedOutAt, i.isCheckout);
+
             let files = [];
             if (i.files) {
                 files = i.files.map(file => {
@@ -1176,17 +1354,23 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
             }
 
             const isCollapsed = i.isCollapsed !== false;
+            const itemId = i.id || idx;
 
             return {
-                id: i.id || idx,
+                id: itemId,
                 description: i.description,
                 time,
                 checkoutTime,
+                checkInShort,
+                checkOutShort,
+                visitDuration,
+                nodeDistance: i.nodeDistance || nodeDistanceById[itemId] || '',
                 user: i.createdByName,
                 isCheckout: i.isCheckout,
                 clientName: i.clientName || 'Unknown Customer',
                 visitType: i.visitType,
                 customerType: i.customerType,
+                customerCategory: i.customerCategory,
                 mom: i.mom,
                 visitOutcome: i.visitOutcome,
                 nextAction: i.nextAction,
@@ -1200,6 +1384,85 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
                 toggleIcon: isCollapsed ? 'utility:chevrondown' : 'utility:chevronup'
             };
         });
+    }
+
+    formatTimeShort(value) {
+        if (!value) return '';
+        try {
+            const d = new Date(value);
+            if (isNaN(d.getTime())) return String(value);
+            return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+        } catch (e) {
+            return String(value);
+        }
+    }
+
+    formatVisitDuration(startValue, endValue, isCheckout) {
+        if (!startValue) {
+            return '';
+        }
+        if (!endValue) {
+            return isCheckout ? '' : 'In Progress';
+        }
+        const start = new Date(startValue);
+        const end = new Date(endValue);
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+            return '';
+        }
+        let durationMin = Math.floor((end.getTime() - start.getTime()) / 60000);
+        if (durationMin < 0) durationMin = 0;
+        if (durationMin < 60) {
+            return durationMin + ' mins';
+        }
+        const hours = Math.floor(durationMin / 60);
+        const mins = durationMin % 60;
+        return hours + ' hr ' + mins + ' mins';
+    }
+
+    buildNodeDistanceMap(items) {
+        const distById = {};
+        const chronological = [...items].sort((a, b) => {
+            const ta = new Date(a.loggedAt || a.createdTime || 0).getTime();
+            const tb = new Date(b.loggedAt || b.createdTime || 0).getTime();
+            return ta - tb;
+        });
+        let lastLat = null;
+        let lastLng = null;
+        let isFirst = true;
+        chronological.forEach((item, idx) => {
+            const id = item.id || idx;
+            const lat = item.latitude != null ? Number(item.latitude) : null;
+            const lng = item.longitude != null ? Number(item.longitude) : null;
+            if (isFirst) {
+                distById[id] = 'Start';
+                isFirst = false;
+            } else if (lat != null && lng != null && lastLat != null && lastLng != null && !isNaN(lat) && !isNaN(lng)) {
+                distById[id] = this.calculateDistanceKm(lastLat, lastLng, lat, lng).toFixed(1) + ' KM';
+            } else {
+                distById[id] = '0 KM';
+            }
+            if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+                lastLat = lat;
+                lastLng = lng;
+            }
+        });
+        return distById;
+    }
+
+    calculateDistanceKm(lat1, lon1, lat2, lon2) {
+        if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) {
+            return 0;
+        }
+        const radius = 6371.0;
+        const dLat = (lat2 - lat1) * Math.PI / 180.0;
+        const dLon = (lon2 - lon1) * Math.PI / 180.0;
+        const rLat1 = lat1 * Math.PI / 180.0;
+        const rLat2 = lat2 * Math.PI / 180.0;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(rLat1) * Math.cos(rLat2) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return radius * c;
     }
 
     toggleItem(event) {
@@ -1252,6 +1515,7 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         getCustomerCategoryOptions()
             .then(result => {
                 this.customerCategoryOptions = result.map(item => ({ label: item, value: item }));
+                this.ensureCustomerCategoryOption(this.customerCategory);
             })
             .catch(error => {
                 console.error('Error fetching Customer Category picklist:', error);
@@ -1344,7 +1608,21 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         return this.nextActionOptions && this.nextActionOptions.length > 0;
     }
 
-    handleFollowUpDateChange(event) { this.followUpDate = event.target.value; }
+    get followUpDateMin() {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    handleFollowUpDateChange(event) {
+        this.followUpDate = event.target.value;
+        if (this.followUpDate && this.followUpDate < this.followUpDateMin) {
+            this.followUpDate = '';
+            this.showToast('Error', 'Next Follow Up Date cannot be a past date.', 'error');
+        }
+    }
     handleMOMChange(event) { this.momValue = event.target.value; }
     handleVisitOutcomeChange(event) { this.visitOutcomeValue = event.detail.value; }
     handleNextActionChange(event) { this.nextActionValue = event.detail.value; }
@@ -1545,7 +1823,8 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
                 opportunityId: finalOpportunityId,
                 scheduledVisitId: scheduledVisitId,
                 visitCategory: this.visitCategoryValue,
-                approvedRequestId: this.selectedApprovedRequestId || null
+                approvedRequestId: this.selectedApprovedRequestId || null,
+                mapAddressToAccount: this.isNoEnquiryPath && this.createNewAccount
             });
 
             this.saving = false;
@@ -1595,7 +1874,9 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         this.lostReasonValue = '';
         this.customerType = '';
         this.customerCategory = '';
+        this.customerCategoryLocked = false;
         this.savingCheckedOut = false;
+        this.fileData = null;
 
         const currentItem = this.formattedItems ? this.formattedItems.find(i => i.id == this.taskId) : null;
         if (currentItem) {
@@ -1609,6 +1890,7 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
                 else if (ct.includes('account') || ct.includes('noenquiry')) this.customerType = 'Account';
                 else this.customerType = currentItem.customerType;
             }
+            this.applyExistingCustomerCategory(currentItem.customerCategory);
         }
 
         // Auto scroll to top to show modal instantly
@@ -1641,9 +1923,13 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
 
     async fetchTaskDetails() {
         try {
-            const location = await this.getCurrentLocation();
-            this.currentLatitude = location.latitude;
-            this.currentLongitude = location.longitude;
+            try {
+                const location = await this.getCurrentLocation();
+                this.currentLatitude = location.latitude;
+                this.currentLongitude = location.longitude;
+            } catch (gpsError) {
+                console.error('Checkout location lookup failed', gpsError);
+            }
 
             const result = await taskDetails({
                 taskId: this.taskId,
@@ -1655,9 +1941,7 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
                 if (result[0].customerName) {
                     this.customerName = result[0].customerName;
                 }
-                if (result[0].customerCategory) {
-                    this.customerCategory = result[0].customerCategory;
-                }
+                this.applyExistingCustomerCategory(result[0].customerCategory);
                 if (result[0].customerType) {
                     let ct = result[0].customerType.toLowerCase();
                     if (ct.includes('lead')) this.customerType = 'Lead';
@@ -1799,14 +2083,15 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
     }
 
     handleFileChange(event) {
-        const file = event.target.files[0];
+        const files = event.detail?.files || event.target?.files;
+        const file = files && files[0];
         if (!file) return;
 
         // Validate extension
         const allowedExtensions = ['pdf', 'xls', 'xlsx', 'doc', 'docx', 'png', 'jpg', 'jpeg'];
         const extension = file.name.split('.').pop().toLowerCase();
 
-        // Validate MIME type
+        // Validate MIME type (empty type is common on mobile; fall back to extension)
         const allowedMimeTypes = [
             'application/pdf',
             'application/vnd.ms-excel',
@@ -1818,24 +2103,40 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
             'image/jpg'
         ];
 
-        if (!allowedExtensions.includes(extension) || 
-            !allowedMimeTypes.includes(file.type)) {
-
+        const mimeOk = !file.type || allowedMimeTypes.includes(file.type);
+        if (!allowedExtensions.includes(extension) || !mimeOk) {
+            this.fileData = null;
             this.showToast('Error', 'PDF/Excel/Word/PNG/JPG/JPEG is accepted', 'error');
-            event.target.value = null;
             return;
         }
 
         // Convert to Base64
         const reader = new FileReader();
         reader.onload = () => {
-            const base64 = reader.result.split(',')[1];
+            const result = reader.result || '';
+            const base64 = typeof result === 'string' && result.includes(',')
+                ? result.split(',')[1]
+                : result;
+            if (!base64) {
+                this.fileData = null;
+                this.showToast('Error', 'Could not read the selected file. Please try again.', 'error');
+                return;
+            }
             this.fileData = {
                 fileName: file.name,
                 base64: base64
             };
+            this.showToast('Success', `${file.name} attached. It will be uploaded on checkout.`, 'success');
+        };
+        reader.onerror = () => {
+            this.fileData = null;
+            this.showToast('Error', 'Could not read the selected file. Please try again.', 'error');
         };
         reader.readAsDataURL(file);
+    }
+
+    clearCheckoutFile() {
+        this.fileData = null;
     }
 
     async updateTaskHandler() {
@@ -1891,6 +2192,16 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
             return;
         }
 
+
+        if (!this.followUpDate) {
+            this.showToast('Error', 'Next Follow Up Date is required.', 'error');
+            return;
+        }
+
+        if (this.followUpDate < this.followUpDateMin) {
+            this.showToast('Error', 'Next Follow Up Date cannot be a past date.', 'error');
+            return;
+        }
 
         if (!this.followUpTypeValue) {
             this.showToast('Error', 'Create Follow Up as (Type) is required.', 'error');
@@ -1993,10 +2304,12 @@ export default class PunchTimeline extends NavigationMixin(LightningElement) {
         this.remainingAccountEmail = '';
         this.remainingAccountContactName = '';
         this.customerCategory = '';
+        this.customerCategoryLocked = false;
         this.followUpTypeValue = 'Visit';
         this.postDispositionValue = 'No Action';
         this.lostReasonValue = '';
         this.savingCheckedOut = false;
+        this.fileData = null;
     }
 
     openImagePreview(event) {

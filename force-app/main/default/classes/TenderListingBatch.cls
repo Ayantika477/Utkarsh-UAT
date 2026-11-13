@@ -1,179 +1,86 @@
 /*
-================================================================================
+Owner - Ayantika
 CLASS: TenderListingBatch
---------------------------------------------------------------------------------
-SCENARIO / OWNER: Ayantika
 
-This is Stage 1 of 3 in the daily Tender247 integration (runs at 8AM = MailType
-1/Morning, and 4PM = MailType 2/Noon, via TenderBatchScheduler).
-
-For every Product (read from Tender_Product_Mapping__mdt custom metadata):
-  1. Calls the Tender Listing Data Count API to get the total tender count for
-     that product/date/mailType.
-  2. Calculates how many pages are needed (RECORDS_PER_PAGE per page, driven
-     by the Custom Label Tender_RECORDS_PER_PAGE = 50).
-  3. Calls the Tender Listing Data API for every page and collects all tender
-     records returned.
-  4. CORRIGENDUM SKIP LOGIC: for tenders that ALREADY EXIST in Salesforce
-     (matched by External_Tender_Id__c), only carries them forward into the
-     upsert if Corrigendum_Info__c = true (i.e. the API says this tender was
-     genuinely amended). If an existing tender comes back with no corrigendum,
-     it is skipped entirely (no-op) - this avoids overwriting untouched
-     records on every run.
-  5. Upserts the remaining tenders in one bulk DML call, keyed on
-     External_Tender_Id__c (which stores the API's "tenderid" field - see
-     FIELD MAPPING note below). New tenders are inserted, existing (amended)
-     tenders are updated. For updated tenders, their old
-     Tender_Docoment_Details__c child records are deleted and replaced with
-     the current document list.
-  6. Products flagged MergeProduct__c on the metadata (e.g. "Polymer, HDPE")
-     cause their tenders to be flagged Tender__c.MergeProduct__c = true, and
-     collected into mergeProductTenderMap for a downstream classification
-     step (Part 2 - to be wired in separately, not yet built).
-  7. finish() triggers Stage 2 (ProbableBidderBatch) for:
-       - every tender that was newly created this run, AND
-       - every existing tender that was updated because it had a genuine
-         corrigendum (Corrigendum_Info__c = true) - since an amendment can
-         bring in new bidders too.
-
-FIELD MAPPING (per latest Tender__c schema confirmed by field describe):
-  - Name                  -> Auto Number. Never set by code, Salesforce
-                             generates it automatically.
-  - External_Tender_Id__c -> stores the API's "tenderid" field. This is the
-                             UPSERT KEY (marked External ID + Unique in Setup).
-                             tenderid is always present in the API response,
-                             unlike sourcetenderid which can be blank - using
-                             tenderid avoids the MISSING_ARGUMENT upsert error
-                             seen when sourcetenderid was blank.
-  - Source_Tender_Id__c   -> stores the API's "sourcetenderid" field. Purely
-                             informational, NOT used for upsert matching.
-
-COMMON KEY STRUCTURE (updated):
-  - ONE Base Common Key is generated per Product per run:
-        {ProductName}-{ddMMyyyy}-{6DigitRandomNumber}
-        e.g. "Steel Pipes-24072026-123456"
-  - This exact Base Common Key is used, unchanged, for:
-        - the Count API's Integration_Log__c
-        - every Listing API page's Integration_Log__c
-  - For every BRAND-NEW tender created this run, the Base Common Key gets a
-    "-Tender-N" suffix (N = 1, 2, 3... sequential, per product, per run):
-        Tender__c.Common_Key__c        = "Steel Pipes-24072026-123456-Tender-1"
-        Tender__c.Base_Common_Key__c   = "Steel Pipes-24072026-123456"
-    and a matching Integration_Log__c entry is created with the SAME key.
-  - For EXISTING tenders updated via corrigendum, Common_Key__c /
-    Base_Common_Key__c are left untouched on the sObject before upsert, so
-    whatever was set when the tender was FIRST created is preserved. Their
-    Integration_Log__c entry (for traceability) uses that ORIGINAL key,
-    fetched via SOQL before the upsert - no new Tender-N is generated for them.
-
-DOCUMENT INSERT (updated):
-  - Tender_Docoment_Details__c rows are NO LONGER inserted directly inside
-    this batch's execute(). They are now handed off, in the same 8000-row
-    chunks as before, to a Queueable (TenderDocumentInsertQueueable).
-  - Reason: the 10,000-row DML limit is CUMULATIVE across the whole
-    execute() transaction. The Tender__c upsert + Integration_Log__c inserts
-    + document inserts were all sharing that same 10,000-row ceiling, so
-    chunking the doc insert into 8000-row pieces did NOT actually protect
-    against the limit (two chunks = 16,000 rows in the same transaction).
-  - A Queueable job runs in its OWN transaction with its OWN fresh 10,000-row
-    limit, so moving document inserts there removes them from competing with
-    the Tender upsert / logs for this product's DML budget.
-  - Nothing else about tender mapping, corrigendum logic, common key logic,
-    or upsert logic has changed. Only WHERE the document rows get inserted
-    has changed - from "inline, same transaction" to "queued, own
-    transaction, still chunked the same way (8000 rows per chunk)".
-
-Governor limits: scope size = 1 product per execute() (max ~11 callouts per
-transaction: 1 count call + up to 10 listing page calls at 50 records/page for
-a 500-tender product); all Tender__c upserts and existing-tender lookups are
-done as single bulk DML/SOQL calls, never per-record. Document inserts now
-run as separate Queueable transactions (see DOCUMENT INSERT note above).
-
-REQUIRES: External_Tender_Id__c must be marked as an External ID field in
-Setup for Database.upsert() to match on it. (Confirmed already set.)
-REQUIRES (NEW): Tender__c.Base_Common_Key__c (Text) must exist on the object.
-
-Authority is stored as plain text on Tender__c.Authority_T__c - there is no
-Account lookup for Authority.
-================================================================================
+Runs as Stage 1 of the daily Tender integration.
+Runs for each Product configured in Tender_Product_Mapping__mdt.
+Calls the Tender Listing Data Count API to get the total number of Tenders.
+Calculates the required number of pages and calls the Tender Listing Data API for each page.
+Checks whether the Tender already exists using External_Tender_Id__c.
+Skips existing Tenders if there is no corrigendum/update.
+Creates new Tenders and updates existing Tenders when there is a genuine corrigendum.
+Generates and assigns the Common Key for newly created Tenders.
+Creates/updates Tender_Docoment_Details__c records from the Tender documents.
+Sends document insertion to TenderDocumentInsertQueueable to manage the DML limit.
+Creates Integration Logs for API calls and Tender processing.
+For newly created or corrigendum-updated Tenders, starts Stage 2: ProbableBidderBatch in finish().
+Overall, this class fetches Tenders from the API, creates/updates them in Salesforce, handles documents and logs, and then starts the Probable Bidder process.
 */
-public class TenderListingBatch implements Database.Batchable<sObject>, Database.AllowsCallouts, Database.Stateful {
 
+public class TenderListingBatch implements Database.Batchable<sObject>, Database.AllowsCallouts, Database.Stateful {
+    
     private static final String NAMED_CREDENTIAL = 'callout:tender247_Tender';
     private static final Integer RECORDS_PER_PAGE = Integer.valueOf(System.Label.Tender_RECORDS_PER_PAGE);
     private static final Integer DOC_INSERT_CHUNK_SIZE = 8000; // chunk size handed to each Queueable job
-
+    
     // MailType values per Tender247 update: 0=Whole-day, 1=Morning, 2=Noon
     private Integer mailType;
-
+    
     private Set<Id> newTenderIds = new Set<Id>();
     private Map<Id, String> newTenderProductMap = new Map<Id, String>();
     private Map<Id, String> mergeProductTenderMap = new Map<Id, String>();
-
+    
     // Default constructor - defaults to Whole-day data (MailType = 0) for backward compatibility.
     public TenderListingBatch() {
         this.mailType = 0;
     }
-
+    
     // Preferred constructor - called by TenderBatchScheduler with 1 (Morning) or 2 (Noon).
     public TenderListingBatch(Integer mailType) {
         this.mailType = mailType;
     }
-
-    // Returns the list of Products to process, from Custom Metadata.
-    /*public Database.QueryLocator start(Database.BatchableContext bc) {
-        return Database.getQueryLocator(
-            [SELECT Id, Tender_Product_Name__c, MergeProduct__c, Real_Product_Name__c
-         FROM Tender_Product_Mapping__mdt]
-        );
-    }*/
+    
     public Database.QueryLocator start(Database.BatchableContext bc) {
-    return Database.getQueryLocator(
-        [SELECT Id, Tender_Product_Name__c, MergeProduct__c, Real_Product_Name__c, Owner_ID__c
-     FROM Tender_Product_Mapping__mdt]
-    );
-}
-
+        return Database.getQueryLocator(
+            [SELECT Id, Tender_Product_Name__c, MergeProduct__c, Real_Product_Name__c, Owner_ID__c
+             FROM Tender_Product_Mapping__mdt]
+        );
+    }
+    
     // Runs once per Product (scope size = 1). Fetches count -> all pages ->
     // applies corrigendum skip logic -> upserts. Wrapped in a try/catch per
     // product so one failing product never blocks the rest of the batch.
     public void execute(Database.BatchableContext bc, List<sObject> scope) {
-
-        /*for (sObject s : scope) {
+        
+        for (sObject s : scope) {
             Tender_Product_Mapping__mdt product = (Tender_Product_Mapping__mdt) s;
             String productName = product.Tender_Product_Name__c;
             Boolean isMergeProduct = (product.MergeProduct__c == true);
-            String departmentName = product.Real_Product_Name__c; // null if not set on the mdt record*/
-
-        for (sObject s : scope) {
-    Tender_Product_Mapping__mdt product = (Tender_Product_Mapping__mdt) s;
-    String productName = product.Tender_Product_Name__c;
-    Boolean isMergeProduct = (product.MergeProduct__c == true);
-    String departmentName = product.Real_Product_Name__c; // null if not set on the mdt record
-    Id ownerId = String.isNotBlank(product.Owner_ID__c) ? (Id) product.Owner_ID__c : null; // <<< OWNER CHANGE >>>
+            String departmentName = product.Real_Product_Name__c; // null if not set on the mdt record
+            Id ownerId = String.isNotBlank(product.Owner_ID__c) ? (Id) product.Owner_ID__c : null; // <<< OWNER CHANGE >>>
             // ONE Base Common Key per Product per run - carried through Count,
             // every Listing page, and used as the prefix for every Tender-N key
             // for brand-new tenders created below.
             String baseCommonKey = generateBaseCommonKey(productName);
             Integer tenderSequence = 0; // increments ONLY for brand-new tenders this run
-
+            
             System.debug('[TenderListingBatch] Processing Product: ' + productName
                          + ' | MailType=' + mailType + ' | BaseCommonKey=' + baseCommonKey);
-
+            
             try {
-
+                
                 Integer totalCount = callCountApi(productName, baseCommonKey);
                 if (totalCount == null || totalCount <= 0) {
                     IntegrationLogger.flush();
                     continue;
                 }
-
+                
                 Integer totalPages = (Integer) Math.ceil(Decimal.valueOf(totalCount) / RECORDS_PER_PAGE);
-
+                
                 List<TenderWrappers.TenderRecord> allRecords = new List<TenderWrappers.TenderRecord>();
-
+                
                 for (Integer page = 1; page <= totalPages; page++) {
-
+                    
                     // Each page call is isolated so a timeout on one page doesn't
                     // discard pages already fetched for this product.
                     try {
@@ -192,29 +99,21 @@ public class TenderListingBatch implements Database.Batchable<sObject>, Database
                         break;
                     }
                 }
-
+                
                 // Build Tender__c candidates from the fetched API records.
                 // Common_Key__c / Base_Common_Key__c are intentionally NOT set here -
                 // they're assigned further below, only for tenders confirmed to be
                 // brand-new (see corrigendum skip logic block).
                 List<Tender__c> tendersToUpsert = new List<Tender__c>();
                 List<TenderWrappers.TenderRecord> recordsForUpsert = new List<TenderWrappers.TenderRecord>();
-
-                /*
+                
                 for (Integer i = 0; i < allRecords.size(); i++) {
                     //Tender__c t = mapToTenderRecord(allRecords[i], productName, isMergeProduct);
-                    Tender__c t = mapToTenderRecord(allRecords[i], productName, isMergeProduct, departmentName);
+                    Tender__c t = mapToTenderRecord(allRecords[i], productName, isMergeProduct, departmentName, ownerId); // <<< OWNER CHANGE >>>
                     tendersToUpsert.add(t);
                     recordsForUpsert.add(allRecords[i]);
                 }
-*/
-                for (Integer i = 0; i < allRecords.size(); i++) {
-    //Tender__c t = mapToTenderRecord(allRecords[i], productName, isMergeProduct);
-    Tender__c t = mapToTenderRecord(allRecords[i], productName, isMergeProduct, departmentName, ownerId); // <<< OWNER CHANGE >>>
-    tendersToUpsert.add(t);
-    recordsForUpsert.add(allRecords[i]);
-}
-
+                
                 // Corrigendum skip logic: existing tenders only carry forward if
                 // Corrigendum_Info__c = true; brand-new tenders always go through.
                 Set<String> fetchedExtIds = new Set<String>();
@@ -223,7 +122,7 @@ public class TenderListingBatch implements Database.Batchable<sObject>, Database
                         fetchedExtIds.add(t.External_Tender_Id__c);
                     }
                 }
-
+                
                 // Also pull each existing tender's CURRENT Common_Key__c so that if it
                 // gets updated via corrigendum, we can still log against its ORIGINAL
                 // key instead of generating a new Tender-N for it.
@@ -238,22 +137,22 @@ public class TenderListingBatch implements Database.Batchable<sObject>, Database
                     }
                 }
                 Set<String> existingExtIds = existingExtIdToCommonKey.keySet();
-
+                
                 List<Tender__c> filteredTendersToUpsert = new List<Tender__c>();
                 List<TenderWrappers.TenderRecord> filteredRecordsForUpsert = new List<TenderWrappers.TenderRecord>();
                 Integer skippedNoOpCount = 0;
-List<String> skippedExtIds = new List<String>();   
-List<String> skippedReasons = new List<String>();
+                List<String> skippedExtIds = new List<String>();   
+                List<String> skippedReasons = new List<String>();
                 for (Integer i = 0; i < tendersToUpsert.size(); i++) {
                     Tender__c t = tendersToUpsert[i];
                     Boolean isExisting = String.isNotBlank(t.External_Tender_Id__c)
-                                          && existingExtIds.contains(t.External_Tender_Id__c);
-
+                        && existingExtIds.contains(t.External_Tender_Id__c);
+                    
                     if (isExisting && t.Corrigendum_Info__c != true) {
                         skippedNoOpCount++;
                         continue;
                     }
-
+                    
                     // Brand-new tender -> assign this run's next Tender-N key.
                     // Existing (corrigendum) tender -> leave Common_Key__c /
                     // Base_Common_Key__c untouched so the upsert preserves whatever
@@ -263,111 +162,96 @@ List<String> skippedReasons = new List<String>();
                         t.Common_Key__c = baseCommonKey + '-Tender-' + tenderSequence;
                         t.Base_Common_Key__c = baseCommonKey;
                     }
-
+                    
                     filteredTendersToUpsert.add(t);
                     filteredRecordsForUpsert.add(recordsForUpsert[i]);
                 }
-
+                
                 tendersToUpsert = filteredTendersToUpsert;
                 recordsForUpsert = filteredRecordsForUpsert;
-
+                
                 Integer createdCount = 0;
                 Integer updatedCount = 0;
                 List<String> createdExtIds = new List<String>();  // NEW
                 Integer failedCount = 0;
-List<String> failedExtIds = new List<String>();
-List<String> updatedExtIds = new List<String>();  // NEW
-
+                List<String> failedExtIds = new List<String>();
+                List<String> updatedExtIds = new List<String>();  // NEW
+                
                 if (!tendersToUpsert.isEmpty()) {
-
-                    Database.UpsertResult[] results =
-                        Database.upsert(tendersToUpsert, Tender__c.External_Tender_Id__c, false);
-
+                    TenderNotificationHandler.skipNewTenderNotification = true;
+                    Database.UpsertResult[] results;
+                    
+                    try {
+                        results = 
+                            Database.upsert(tendersToUpsert, Tender__c.External_Tender_Id__c, false);
+                    } finally {
+                        TenderNotificationHandler.skipNewTenderNotification = false;
+                    }
+                    
                     List<Tender_Docoment_Details__c> docDetailsToInsert = new List<Tender_Docoment_Details__c>();
                     List<Id> updatedTenderIdsForDocRefresh = new List<Id>();
-
+                    Set<Id> notificationTenderIds = new Set<Id>();
+                    
                     for (Integer i = 0; i < results.size(); i++) {
                         Database.UpsertResult res = results[i];
-                        /*if (!res.isSuccess()) {
-                            String errMsg = '';
-        for (Database.Error err : res.getErrors()) {
-            errMsg += err.getStatusCode() + ': ' + err.getMessage()
-                    + ' | Fields: ' + err.getFields() + '; ';
-        }
-                            System.debug('[TenderListingBatch] UPSERT FAILED: ' + res.getErrors());
-                            IntegrationLogger.log(
-            'TenderUpsertFailed',
-            productName,
-            'tender-listing-data (upsert-failed)',
-            null,
-            errMsg,
-            null,
-            false,
-            errMsg,
-            null,
-            baseCommonKey
-        );
-
-        failedCount++;              // <<< NEW - declare this counter above the loop, like createdCount/updatedCount
-        failedExtIds.add(tendersToUpsert[i].External_Tender_Id__c); // <<< NEW - declare above the loop
-        continue;
-                        }*/
+                        
                         if (!res.isSuccess()) {
-    String errMsg = '';
-    for (Database.Error err : res.getErrors()) {
-        errMsg += err.getStatusCode() + ': ' + err.getMessage()
-                + ' | Fields: ' + err.getFields() + '; ';
-    }
-    System.debug('[TenderListingBatch] UPSERT FAILED: ' + errMsg);
-
-    String failedRecordJson = JSON.serializePretty(recordsForUpsert[i]);
-
-    IntegrationLogger.log(
-        'TenderUpsertFailed',
-        productName,
-        'tender-listing-data (upsert-failed)',
-        null,
-        failedRecordJson,   
-        null,
-        false,
-        errMsg,            
-        null,
-        baseCommonKey
-    );
-
-    failedCount++;
-    failedExtIds.add(tendersToUpsert[i].External_Tender_Id__c);
-    continue;
-}
-
+                            String errMsg = '';
+                            for (Database.Error err : res.getErrors()) {
+                                errMsg += err.getStatusCode() + ': ' + err.getMessage()
+                                    + ' | Fields: ' + err.getFields() + '; ';
+                            }
+                            System.debug('[TenderListingBatch] UPSERT FAILED: ' + errMsg);
+                            
+                            String failedRecordJson = JSON.serializePretty(recordsForUpsert[i]);
+                            
+                            IntegrationLogger.log(
+                                'TenderUpsertFailed',
+                                productName,
+                                'tender-listing-data (upsert-failed)',
+                                null,
+                                failedRecordJson,   
+                                null,
+                                false,
+                                errMsg,            
+                                null,
+                                baseCommonKey
+                            );
+                            
+                            failedCount++;
+                            failedExtIds.add(tendersToUpsert[i].External_Tender_Id__c);
+                            continue;
+                        }
+                        
                         Boolean isNewTender = res.isCreated();
                         String extId = tendersToUpsert[i].External_Tender_Id__c;
-
+                        
                         if (isNewTender) {
                             createdCount++;
                             newTenderIds.add(res.getId());
                             createdExtIds.add(extId);  
                             newTenderProductMap.put(res.getId(), productName);
-
+                            notificationTenderIds.add(res.getId());
+                            
                             // One Integration Log entry per newly created Tender, keyed
                             // with the EXACT SAME Common_Key__c stamped on the Tender__c.
                             IntegrationLogger.log(
-    'TenderCreated', productName,
-    'tender-listing-data (tender-created)',
-    null,
-    'External_Tender_Id=' + extId,
-    null, true, null,
-    res.getId(), tendersToUpsert[i].Common_Key__c, mailType
-);
-
+                                'TenderCreated', productName,
+                                'tender-listing-data (tender-created)',
+                                null,
+                                'External_Tender_Id=' + extId,
+                                null, true, null,
+                                res.getId(), tendersToUpsert[i].Common_Key__c, mailType
+                            );
+                            
                         } else {
                             updatedCount++;
                             updatedExtIds.add(extId);
                             updatedTenderIdsForDocRefresh.add(res.getId());
-
+                            
                             if (tendersToUpsert[i].Corrigendum_Info__c == true) {
                                 newTenderProductMap.put(res.getId(), productName);
-
+                                
                                 // Updated (corrigendum) tender - log against its ORIGINAL
                                 // Common_Key__c, not a new Tender-N.
                                 IntegrationLogger.log(
@@ -380,27 +264,11 @@ List<String> updatedExtIds = new List<String>();  // NEW
                                 );
                             }
                         }
-
+                        
                         if (isMergeProduct) {
                             mergeProductTenderMap.put(res.getId(), productName);
                         }
                         
-                        List<TenderWrappers.DocumentInfo> docs = recordsForUpsert[i].documents;
-if (docs != null && !docs.isEmpty()) {
-    for (TenderWrappers.DocumentInfo d : docs) {
-        Tender_Docoment_Details__c docDetail = new Tender_Docoment_Details__c();
-        docDetail.Tender__c        = res.getId();
-        docDetail.Document_Id__c   = d.documentid != null ? String.valueOf(d.documentid) : null;
-        docDetail.Name__c          = d.name;
-        docDetail.Type__c          = d.type;
-        //docDetail.Download_URL__c  = d.downloadLink;
-        docDetail.Download_URL_Text__c  = d.downloadLink;
-        if (ownerId != null) { docDetail.OwnerId = ownerId; } // <<< OWNER CHANGE >>>
-        docDetailsToInsert.add(docDetail);
-    }
-}
-
-                        /*
                         List<TenderWrappers.DocumentInfo> docs = recordsForUpsert[i].documents;
                         if (docs != null && !docs.isEmpty()) {
                             for (TenderWrappers.DocumentInfo d : docs) {
@@ -410,13 +278,16 @@ if (docs != null && !docs.isEmpty()) {
                                 docDetail.Name__c          = d.name;
                                 docDetail.Type__c          = d.type;
                                 //docDetail.Download_URL__c  = d.downloadLink;
+                                /*docDetail.Download_URL_Text__c  = d.downloadLink;
+                                if (ownerId != null) { docDetail.OwnerId = ownerId; } // <<< OWNER CHANGE >>>
+                                docDetailsToInsert.add(docDetail);*/
                                 docDetail.Download_URL_Text__c  = d.downloadLink;
+                                // No OwnerId here: Tender_Docoment_Details__c is master-detail and inherits the owner from Tender__c
                                 docDetailsToInsert.add(docDetail);
                             }
                         }
-                        */
                     }
-
+                    
                     // Wipe stale doc children for updated tenders before inserting the current set.
                     if (!updatedTenderIdsForDocRefresh.isEmpty()) {
                         List<Tender_Docoment_Details__c> oldDocs = [
@@ -427,7 +298,7 @@ if (docs != null && !docs.isEmpty()) {
                             delete oldDocs;
                         }
                     }
-
+                    
                     // <<< CHANGED >>>
                     // Document rows are still built and chunked exactly as before
                     // (8000 rows per chunk), but each chunk is now handed off to a
@@ -435,60 +306,75 @@ if (docs != null && !docs.isEmpty()) {
                     // keeps document DML out of this execute() transaction's
                     // 10,000-row DML budget, which it was previously sharing with
                     // the Tender__c upsert and Integration_Log__c inserts above.
-                    if (!docDetailsToInsert.isEmpty()) {
-                        for (Integer start = 0; start < docDetailsToInsert.size(); start += DOC_INSERT_CHUNK_SIZE) {
-                            Integer endIdx = Math.min(start + DOC_INSERT_CHUNK_SIZE, docDetailsToInsert.size());
-                            List<Tender_Docoment_Details__c> chunk = new List<Tender_Docoment_Details__c>();
-                            for (Integer j = start; j < endIdx; j++) {
-                                chunk.add(docDetailsToInsert[j]);
-                            }
-                            System.enqueueJob(new TenderDocumentInsertQueueable(chunk, productName));
-                        }
+                    
+                    Boolean pushNotificationEnabled = false;
+                    try {
+                        Tender_Trigger_Controll__mdt setting =
+                            Tender_Trigger_Controll__mdt.getInstance('Tender_Share_Trigger');
+                        pushNotificationEnabled = (setting != null && setting.Push_Notification_For_New_Tender__c == true);
+                    } catch (Exception mdtEx) {
+                        System.debug('[TenderListingBatch] Failed to read Tender_Trigger_Controll__mdt: ' + mdtEx.getMessage());
                     }
+                    
+                    if (pushNotificationEnabled && !notificationTenderIds.isEmpty()) {
+                        System.enqueueJob(
+                            new TenderNewTenderNotificationQueueable(
+                                notificationTenderIds, docDetailsToInsert, productName, DOC_INSERT_CHUNK_SIZE
+                            )
+                        );
+                    } else if (!docDetailsToInsert.isEmpty()) {
+                        // Notification off ase, ba notun tender nei - sudhu doc-insert.
+                        System.enqueueJob(
+                            new TenderDocumentInsertQueueable(
+                                docDetailsToInsert, 0, DOC_INSERT_CHUNK_SIZE, productName
+                            )
+                        );
+                    }
+                    
                     // <<< END CHANGED >>>
                 }
-
+                
                 // One summary log per product per run (instead of one row per tender).
                 /*IntegrationLogger.log(
+'TenderUpsertSummary',
+productName,
+'tender-upsert-summary (internal)',
+null,
+'Created=' + createdCount + ', Updated=' + updatedCount + ', SkippedNoOp=' + skippedNoOpCount,
+null,
+true,
+null,
+null, baseCommonKey
+);*/
+                String summaryDetails =
+                    'Created=' + createdCount + ' [' + String.join(createdExtIds, ',') + ']' +
+                    ', Updated=' + updatedCount + ' [' + String.join(updatedExtIds, ',') + ']' +
+                    ', SkippedNoOp=' + skippedNoOpCount +
+                    ', Failed=' + failedCount + ' [' + String.join(failedExtIds, ',') + ']';
+                
+                // <<< CHANGED >>> capture the returned Integration_Log__c so we can stamp
+                // Tender_Record_Create__c / Tender_Record_Update__c / Tender_Record_Skipped__c
+                // on this exact "tender-upsert-summary (internal)" log record.
+                Integration_Log__c summaryLog = IntegrationLogger.log(
                     'TenderUpsertSummary',
                     productName,
                     'tender-upsert-summary (internal)',
                     null,
-                    'Created=' + createdCount + ', Updated=' + updatedCount + ', SkippedNoOp=' + skippedNoOpCount,
+                    summaryDetails,
                     null,
                     true,
                     null,
-                    null, baseCommonKey
-                );*/
-                String summaryDetails =
-    'Created=' + createdCount + ' [' + String.join(createdExtIds, ',') + ']' +
-    ', Updated=' + updatedCount + ' [' + String.join(updatedExtIds, ',') + ']' +
-    ', SkippedNoOp=' + skippedNoOpCount +
-    ', Failed=' + failedCount + ' [' + String.join(failedExtIds, ',') + ']';
-
-// <<< CHANGED >>> capture the returned Integration_Log__c so we can stamp
-// Tender_Record_Create__c / Tender_Record_Update__c / Tender_Record_Skipped__c
-// on this exact "tender-upsert-summary (internal)" log record.
-Integration_Log__c summaryLog = IntegrationLogger.log(
-    'TenderUpsertSummary',
-    productName,
-    'tender-upsert-summary (internal)',
-    null,
-    summaryDetails,
-    null,
-    true,
-    null,
-    null, baseCommonKey , mailType
-);
-
-if (summaryLog != null) {
-    summaryLog.Tender_Record_Create__c  = createdCount;
-    summaryLog.Tender_Record_Update__c  = updatedCount;
-    summaryLog.Tender_Record_Skipped__c = skippedNoOpCount;
-}
-
+                    null, baseCommonKey , mailType
+                );
+                
+                if (summaryLog != null) {
+                    summaryLog.Tender_Record_Create__c  = createdCount;
+                    summaryLog.Tender_Record_Update__c  = updatedCount;
+                    summaryLog.Tender_Record_Skipped__c = skippedNoOpCount;
+                }
+                
                 IntegrationLogger.flush();
-
+                
             } catch (Exception productEx) {
                 // Catches anything unexpected for this product so it gets logged
                 // instead of silently rolling back, and the batch moves to the next product.
@@ -502,43 +388,34 @@ if (summaryLog != null) {
             }
         }
     }
-
-    // Once all products are processed, kicks off Stage 2 (ProbableBidderBatch)
-    // for tenders that are either brand-new or updated via a genuine corrigendum.
-    /*public void finish(Database.BatchableContext bc) {
-        System.debug('[TenderListingBatch] New/updated tenders for Stage 2: ' + newTenderProductMap.size()
-                     + ' | Merge-product tenders: ' + mergeProductTenderMap.size());
-
-        if (!newTenderProductMap.isEmpty()) {
-            Database.executeBatch(new ProbableBidderBatch(newTenderProductMap), 10);
-        }
-    }*/
+    
+    
     public void finish(Database.BatchableContext bc) {
-    System.debug('[TenderListingBatch] New/updated tenders for Stage 2: '
-        + newTenderProductMap.size()
-        + ' | Merge-product tenders: '
-        + mergeProductTenderMap.size());
-
-    if (!newTenderProductMap.isEmpty() && !Test.isRunningTest()) {
-        Database.executeBatch(
-            new ProbableBidderBatch(newTenderProductMap),
-            10
-        );
+        System.debug('[TenderListingBatch] New/updated tenders for Stage 2: '
+                     + newTenderProductMap.size()
+                     + ' | Merge-product tenders: '
+                     + mergeProductTenderMap.size());
+        
+        if (!newTenderProductMap.isEmpty() && !Test.isRunningTest()) {
+            Database.executeBatch(
+                new ProbableBidderBatch(newTenderProductMap),
+                10
+            );
+        }
     }
-}
-
+    
     // Generates ONE Base Common Key per Product per run: {ProductName}-{ddMMyyyy}-{6DigitRandom}.
     // Reused as-is for the Count call and every Listing page call, and stored on every
     // brand-new Tender__c (Base_Common_Key__c) so Stage 2 can build matching Bidder-N keys later.
     private String generateBaseCommonKey(String productName) {
         Date d = Date.today();
         String dateStr = String.valueOf(d.day()).leftPad(2, '0')
-                        + String.valueOf(d.month()).leftPad(2, '0')
-                        + String.valueOf(d.year());
+            + String.valueOf(d.month()).leftPad(2, '0')
+            + String.valueOf(d.year());
         Integer randNum = Integer.valueOf(Math.floor(Math.random() * 900000)) + 100000; // 100000-999999
         return productName + '-' + dateStr + '-' + String.valueOf(randNum);
     }
-
+    
     // Calls the Tender Listing Data Count API for a product; returns total tender count.
     private Integer callCountApi(String productName, String baseCommonKey) {
         HttpRequest req = new HttpRequest();
@@ -547,26 +424,26 @@ if (summaryLog != null) {
         req.setHeader('Content-Type', 'application/json');
         req.setHeader('Accept', 'application/json');
         req.setTimeout(120000);
-
+        
         Map<String, Object> payload = new Map<String, Object>{
             'Date'        => Date.today(),
-            'TenderIds'   => '',
-            'ProductName' => productName,
-            'MailType'    => mailType
-        };
-        String body = formatDateAndSerialize(payload);
+                'TenderIds'   => '',
+                'ProductName' => productName,
+                'MailType'    => mailType
+                };
+                    String body = formatDateAndSerialize(payload);
         req.setBody(body);
-
+        
         Integer statusCode;
         String responseBody;
         Boolean success = false;
         Integer count = null;
-
+        
         try {
             HttpResponse res = new Http().send(req);
             statusCode = res.getStatusCode();
             responseBody = res.getBody();
-
+            
             if (statusCode == 200) {
                 TenderWrappers.CountResponse parsed =
                     (TenderWrappers.CountResponse) JSON.deserialize(responseBody, TenderWrappers.CountResponse.class);
@@ -578,20 +455,20 @@ if (summaryLog != null) {
         } catch (Exception e) {
             responseBody = 'EXCEPTION: ' + e.getMessage();
         }
-
+        
         // <<< CHANGED >>> capture the returned Integration_Log__c so we can
         // stamp Tender_Record_Count__c on this "tender-listing-data-count" log record.
         Integration_Log__c countLog = IntegrationLogger.log('Count', productName, 'tender-listing-data-count', body, responseBody,
-            statusCode, success, success ? null : responseBody, null, baseCommonKey,mailType);
-
+                                                            statusCode, success, success ? null : responseBody, null, baseCommonKey,mailType);
+        
         if (countLog != null) {
             countLog.Tender_Record_Count__c = count;
         }
-
+        
         return count;
         
     }
-
+    
     // Calls the Tender Listing Data API for one page of a product; returns that page's tender records.
     private List<TenderWrappers.TenderRecord> callListingApi(String productName, Integer pageNo, String baseCommonKey) {
         HttpRequest req = new HttpRequest();
@@ -600,28 +477,28 @@ if (summaryLog != null) {
         req.setHeader('Content-Type', 'application/json');
         req.setHeader('Accept', 'application/json');
         req.setTimeout(120000);
-
+        
         Map<String, Object> payload = new Map<String, Object>{
             'Date'             => Date.today(),
-            'TenderIds'        => '',
-            'ProductName'      => productName,
-            'page_no'          => pageNo,
-            '_record_per_page' => RECORDS_PER_PAGE,
-            'MailType'         => mailType
-        };
-        String body = formatDateAndSerialize(payload);
+                'TenderIds'        => '',
+                'ProductName'      => productName,
+                'page_no'          => pageNo,
+                '_record_per_page' => RECORDS_PER_PAGE,
+                'MailType'         => mailType
+                };
+                    String body = formatDateAndSerialize(payload);
         req.setBody(body);
-
+        
         Integer statusCode;
         String responseBody;
         Boolean success = false;
         List<TenderWrappers.TenderRecord> records = null;
-
+        
         try {
             HttpResponse res = new Http().send(req);
             statusCode = res.getStatusCode();
             responseBody = res.getBody();
-
+            
             if (statusCode == 200) {
                 TenderWrappers.ListingResponse parsed =
                     (TenderWrappers.ListingResponse) JSON.deserialize(responseBody, TenderWrappers.ListingResponse.class);
@@ -634,13 +511,13 @@ if (summaryLog != null) {
         } catch (Exception e) {
             responseBody = 'EXCEPTION: ' + e.getMessage();
         }
-
+        
         IntegrationLogger.log('Listing', productName, 'tender-listing-data (page ' + pageNo + ')', body,
-            responseBody, statusCode, success, success ? null : responseBody, null, baseCommonKey,mailType);
-
+                              responseBody, statusCode, success, success ? null : responseBody, null, baseCommonKey,mailType);
+        
         return records;
     }
-
+    
     // Fills TenderRecord.currencyCode from the raw JSON's "currency" key -
     // JSON.deserialize can't auto-map it since "currency" is a reserved identifier here.
     private void backfillCurrency(List<TenderWrappers.TenderRecord> records, String responseBody) {
@@ -662,42 +539,28 @@ if (summaryLog != null) {
             System.debug('[TenderListingBatch] backfillCurrency failed: ' + e.getMessage());
         }
     }
-
-    // Maps one API tender record to a Tender__c ready for upsert.
-    // Common_Key__c / Base_Common_Key__c are set by the caller, not here.
-    //private Tender__c mapToTenderRecord(TenderWrappers.TenderRecord rec, String productName, Boolean isMergeProduct) {
-    /*private Tender__c mapToTenderRecord(TenderWrappers.TenderRecord rec, String productName, Boolean isMergeProduct, String departmentName) {
-
+    
+    private Tender__c mapToTenderRecord(TenderWrappers.TenderRecord rec, String productName, Boolean isMergeProduct, String departmentName, Id ownerId) { // <<< OWNER CHANGE >>>
+        
         Tender__c t = new Tender__c();
-
+        
         t.External_Tender_Id__c    = rec.tenderid != null ? String.valueOf(rec.tenderid) : null;
         t.Source_Tender_Id__c      = rec.sourcetenderid;
         t.Product_Name__c          = productName;
         t.MergeProduct__c = isMergeProduct;
         t.Department_Name__c = String.isNotBlank(departmentName) ? departmentName : null;
-        t.Tender_Value__c          = rec.value != null ? String.valueOf(rec.value) : null;*/
-    //private Tender__c mapToTenderRecord(TenderWrappers.TenderRecord rec, String productName, Boolean isMergeProduct) {
-private Tender__c mapToTenderRecord(TenderWrappers.TenderRecord rec, String productName, Boolean isMergeProduct, String departmentName, Id ownerId) { // <<< OWNER CHANGE >>>
-
-    Tender__c t = new Tender__c();
-
-    t.External_Tender_Id__c    = rec.tenderid != null ? String.valueOf(rec.tenderid) : null;
-    t.Source_Tender_Id__c      = rec.sourcetenderid;
-    t.Product_Name__c          = productName;
-    t.MergeProduct__c = isMergeProduct;
-    t.Department_Name__c = String.isNotBlank(departmentName) ? departmentName : null;
-    if (ownerId != null) { t.OwnerId = ownerId; } // <<< OWNER CHANGE >>>
-    t.Tender_Value__c          = rec.value != null ? String.valueOf(rec.value) : null;
+        if (ownerId != null) { t.OwnerId = ownerId; } // <<< OWNER CHANGE >>>
+        t.Tender_Value__c          = rec.value != null ? String.valueOf(rec.value) : null;
         //t.EMD__c                   = rec.emd != null ? String.valueOf(rec.emd) : null;
         //t.Document_Cost__c         = rec.documentcost != null ? String.valueOf(rec.documentcost) : null;
         t.EMD__c                   = rec.emd;
         t.Document_Cost__c         = rec.documentcost;
-
+        
         t.Biddead_Line__c       = parseDateSafe(rec.biddeadline);
         t.MailType__c = mailType;
         // Authority is plain text - no Account lookup.
         t.Authority_T__c           = rec.authority;
-
+        
         t.Currency__c              = rec.currencyCode;
         t.Tender_Details__c        = rec.tenderdetails;
         t.Tender_Description__c    = rec.tenderdescription;
@@ -717,24 +580,24 @@ private Tender__c mapToTenderRecord(TenderWrappers.TenderRecord rec, String prod
         
         
         //Creating duplicate Text(255) variables - For repoart , shows like (240 chars)...
-t.Tender_Description_Text__c = truncate240WithEllipsis(rec.tenderdescription);
-t.Tender_Details_Text__c     = truncate240WithEllipsis(rec.tenderdetails);
-t.Sector_Text__c             = truncate240WithEllipsis(t.Sector__c); // reuse the already-joined string
-t.Sub_Industry_Text__c       = truncate240WithEllipsis(t.Sub_Industry__c);
-t.Zip_Document_Download_Text2__c = truncate240WithEllipsis(rec.zipdocumentdownload);
-t.Source_URL_in_Text2__c     = truncate240WithEllipsis(rec.sourceurl);
-
-
+        t.Tender_Description_Text__c = truncate240WithEllipsis(rec.tenderdescription);
+        t.Tender_Details_Text__c     = truncate240WithEllipsis(rec.tenderdetails);
+        t.Sector_Text__c             = truncate240WithEllipsis(t.Sector__c); // reuse the already-joined string
+        t.Sub_Industry_Text__c       = truncate240WithEllipsis(t.Sub_Industry__c);
+        t.Zip_Document_Download_Text2__c = truncate240WithEllipsis(rec.zipdocumentdownload);
+        t.Source_URL_in_Text2__c     = truncate240WithEllipsis(rec.sourceurl);
+        
+        
         if (rec.location != null && !rec.location.isEmpty()) {
             TenderWrappers.LocationInfo loc = rec.location[0];
             t.City__c    = loc.city;
             t.State__c   = loc.state;
             t.Country__c = loc.country;
         }
-
+        
         return t;
     }
-
+    
     // Safely parses a date string (yyyy-MM-dd, or longer with a time component) into a Date.
     private Date parseDateSafe(String dateStr) {
         if (String.isBlank(dateStr)) {
@@ -746,19 +609,19 @@ t.Source_URL_in_Text2__c     = truncate240WithEllipsis(rec.sourceurl);
             return null;
         }
     }
-
     
-// keeping the total length within a 255-char Text field (240 + 3 = 243, well under 255).
-private String truncate240WithEllipsis(String val) {
-    if (String.isBlank(val)) {
-        return val;
+    
+    // keeping the total length within a 255-char Text field (240 + 3 = 243, well under 255).
+    private String truncate240WithEllipsis(String val) {
+        if (String.isBlank(val)) {
+            return val;
+        }
+        if (val.length() <= 240) {
+            return val;
+        }
+        return val.substring(0, 240) + '...';
     }
-    if (val.length() <= 240) {
-        return val;
-    }
-    return val.substring(0, 240) + '...';
-}
-
+    
     // Serializes the payload, formatting Date as yyyy-MM-dd (API requirement).
     private String formatDateAndSerialize(Map<String, Object> payload) {
         Map<String, Object> clone = payload.clone();

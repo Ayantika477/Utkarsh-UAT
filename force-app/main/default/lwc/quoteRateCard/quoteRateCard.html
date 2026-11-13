@@ -72,7 +72,12 @@
                 </div>
 
                 <div class="slds-text-align_right">
-                    <lightning-button variant="brand" label="Save Configuration" icon-name="utility:save" onclick={handleSaveGrid} disabled={isSaving}></lightning-button>
+                    <template if:true={isHighMast}>
+                        <lightning-button variant="brand" label="Save High Mast Amounts" icon-name="utility:save" onclick={handleSaveHighMast} disabled={isSaving}></lightning-button>
+                    </template>
+                    <template if:false={isHighMast}>
+                        <lightning-button variant="brand" label="Save Configuration" icon-name="utility:save" onclick={handleSaveGrid} disabled={isSaving}></lightning-button>
+                    </template>
                 </div>
             </div>
         </template>

@@ -1,0 +1,78 @@
+<template>
+    <div class="slds-page-header slds-page-header_record-home">
+        <div class="slds-page-header__row">
+            <div class="slds-page-header__col-title">
+                <div class="slds-media">
+                    <div class="slds-media__figure">
+                        <lightning-icon icon-name="standard:case" alternative-text={title} size="medium"></lightning-icon>
+                    </div>
+                    <div class="slds-media__body">
+                        <div class="slds-page-header__name">
+                            <div class="slds-page-header__name-title">
+                                <h1>
+                                    <span>{title}</span>
+                                    <span class="slds-page-header__title slds-truncate" title={subject}>{subject}</span>
+                                </h1>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <template lwc:if={hasActions}>
+                <div class="slds-page-header__col-actions">
+                    <div class="slds-page-header__controls">
+                        <div class="slds-page-header__control">
+                            <lightning-button-group>
+                                <template for:each={buttonActions} for:item="action">
+                                    <lightning-button
+                                        key={action.apiName}
+                                        label={action.label}
+                                        data-api-name={action.apiName}
+                                        onclick={handleActionClick}
+                                    ></lightning-button>
+                                </template>
+                                <template lwc:if={hasMenuActions}>
+                                    <lightning-button-menu
+                                        alternative-text="Show more actions"
+                                        menu-alignment="auto"
+                                        onselect={handleMenuSelect}
+                                    >
+                                        <template for:each={menuActions} for:item="action">
+                                            <lightning-menu-item
+                                                key={action.apiName}
+                                                label={action.label}
+                                                value={action.apiName}
+                                            ></lightning-menu-item>
+                                        </template>
+                                    </lightning-button-menu>
+                                </template>
+                            </lightning-button-group>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <template lwc:if={errorMessage}>
+            <div class="slds-page-header__row slds-p-top_small slds-text-color_error">{errorMessage}</div>
+        </template>
+        <div class="slds-page-header__row slds-page-header__row_gutters">
+            <div class="slds-page-header__col-details">
+                <ul class="slds-page-header__detail-row">
+                    <template for:each={fields} for:item="field">
+                        <li key={field.key} class="slds-page-header__detail-block">
+                            <div class="slds-text-title slds-truncate" title={field.label}>{field.label}</div>
+                            <div class="slds-truncate">
+                                <template lwc:if={field.isRichText}>
+                                    <lightning-formatted-rich-text value={field.value}></lightning-formatted-rich-text>
+                                </template>
+                                <template lwc:else>
+                                    <span title={field.value}>{field.value}</span>
+                                </template>
+                            </div>
+                        </li>
+                    </template>
+                </ul>
+            </div>
+        </div>
+    </div>
+</template>

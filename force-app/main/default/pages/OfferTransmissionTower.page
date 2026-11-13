@@ -1,9 +1,28 @@
 <apex:page standardController="Quote" extensions="TransmissionTowerOfferController" renderAs="pdf" applyBodyTag="false" applyHtmlTag="false" showHeader="false" sidebar="false">
 	<head>
     	<style>
-        @page { size: A4 landscape;
-        	margin: 38mm 8mm 18mm 8mm;
-        	padding:2mm;
+        /* ── PAGE SETUP ──────────────────────────────────────────────────
+           Three page rules. The global one MUST have 0 margin and no running
+           header, or the full-page cover is laid into the leftover height and
+           spills onto a second page with the header printed over it. The offer
+           pages opt back in to the old margins + header/footer through the
+           named page below, so nothing about them changes.
+
+           The covers do NOT get their own @page. This renderer honours margin
+           and the header slots on a named page but IGNORES a per-page "size",
+           so a portrait cover-page rule left the page landscape while the image
+           was laid out 210 x 297 - 87mm of white down the right and the bottom
+           87mm pushed onto a second page. The covers therefore ride the global
+           page, exactly the way HMScopeSingle does, and are sized to the
+           landscape page box: 297 wide x 210 high. Deepanjan (19th Aug 2026) */
+        @page { 
+            size: A4;
+        	margin: 0mm;
+        }
+
+        @page standard-content { 
+            size: A4;
+        	margin: 30mm 8mm 16mm 8mm;
                 @top-center {
                     content: element(header);
                 }
@@ -11,13 +30,44 @@
                     content: element(footer);
                 }
         }
-        body { font-family: sans-serif; font-size: 10px; margin: 0; padding: 0; width:100%; }
-        
+          
+		* { box-sizing: border-box; }
+            
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 10px;
+        }
+        /* Cover pages - full bleed, LANDSCAPE (297 x 210) to match the page box */
+        div.page-cover {
+            page-break-after: always;
+            width: 99.9%;
+            height: 99.9%;
+            margin: 0mm;
+            overflow: hidden;
+        }
+        div.page-cover-last {
+            page-break-before: always;
+            width: 100%;
+            height: 100%;
+            margin: 0mm;
+            overflow: hidden;
+        }
+        .cover-img {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+            
         .image-container{
          	position: running(header);
             width: 200%;
-            height: 30px;
-            background: red;
+            height: 30mm;
+            overflow: hidden;
+            display:block;
          }
          
          .pdf-header {
@@ -26,8 +76,8 @@
             display: block;
          	object-fit: cover;
           }
-            
-            .pdf-footer {
+          
+          .pdf-footer {
                 position: running(footer);
                 text-align: right;
                 font-size: 8px;
@@ -36,11 +86,13 @@
             }
 
         .main-container{
-            width:100%;
+            page: standard-content; 
+            width:90%;
+            background:red;
             max-width:100%;
             background:#f3f3f3;
             border:1px solid #d7d7d7;
-            padding:2px;
+            padding:6px;
             box-sizing:border-box;
         }
         
@@ -127,15 +179,16 @@
         .price-table-title{
             font-size:14px;
             font-weight:bold;
-            margin:30px 0 10px 0;
+            margin:30px 0 10px 24px;
         }
     
         .price-table{
-            width:100%;
+            width:95%;
             border-collapse:collapse;
             table-layout:fixed;
             font-size:11px;
-            margin-bottom:18px;
+            margin: auto;
+            margin-bottom:20px;
         }
     
         .price-table th{
@@ -248,17 +301,20 @@
                 <table style="width: 100%; border-collapse: collapse;">
                     <tr>
                         <td style="padding:0;">
-                            <img src="{!$Resource.UtkarshHeader}" alt="Utkarsh header" style="width: 100%; height: 100px; display:block;"/>
+                            <img src="{!$Resource.UtkarshHeader}" alt="Utkarsh header" style="width: 100%; height: 24mm; display:block; object-fit: cover;"/>
                         </td>
                     </tr>
                 </table>
             </div>
         </div>
         
-        <div class="header-title">
-             Section
-        </div>
         
+        
+        <!-- ══════════ FRONT COVER — full bleed ══════════ -->
+        <div class="page-cover">
+            <apex:image url="{!$Resource.Transmission1stPage}" styleClass="cover-img"/>
+        </div>
+
         <div class="main-container">
                 <div class="ref-section">
                     Ref:- {!quoteNumber}<br/>
@@ -346,7 +402,7 @@
                     for <span class="bold">{!hasIncoterms}</span> basis, as per IEEMA February' 2023.
                 </div>
             	
-            	<apex:outputPanel rendered="{!productType == 'Tower'}">
+            	<apex:outputPanel rendered="{!towerTables != null}">
                     
             		<apex:repeat value="{!towerTables}" var="pt">
             		<div class="price-table-title">
@@ -356,18 +412,18 @@
                     <table class="price-table">
                         <thead>
                             <tr>
-                                <th style="width:45%;">Product Details</th>
+                                <th style="width:35%;">Product Details</th>
                                 <th style="width:15%;">UOM</th>
-                                <th style="width:40%;">Unit Price (INR)</th>
+                                <th style="width:30%;">Unit Price (INR)</th>
                             </tr>
                         </thead>
                         <apex:repeat value="{!pt.rows}" var="row">
                         	<tbody>
                                 <tr>
-                                    <td style="width:40%;" class="center">
+                                    <td style="width:45%;" class="center">
                                         <apex:outputText >{!row.label}</apex:outputText>
                                     </td>
-                                    <td style="width:20%;" class="center">
+                                    <td style="width:15%;" class="center">
                                         <apex:outputText >{!row.uom}</apex:outputText>
                                     </td>
                                     <td style="width:40%;" class="center">
@@ -381,7 +437,7 @@
                 
             	</apex:outputPanel>	
             
-            	<apex:outputPanel rendered="{!productType == 'Substation'}">
+            <apex:outputPanel rendered="{!substationTables != null}">
             		<apex:repeat value="{!substationTables}" var="tbl">
                 
                         <div class="price-table-title">{!tbl.title}</div>
@@ -692,5 +748,10 @@ requirements. We look forward to receiving your valued order which shall receive
                 <div class="bottom-space"></div>
     
             </div>
+
+        <!-- ══════════ LAST COVER — full bleed ══════════ -->
+        <div class="page-cover-last">
+            <apex:image url="{!$Resource.HM_Last_Page}" styleClass="cover-img"/>
+        </div>
     </body>
 </apex:page>

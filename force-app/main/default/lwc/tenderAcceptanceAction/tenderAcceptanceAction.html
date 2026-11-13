@@ -85,8 +85,24 @@
                         class="slds-m-top_medium"
                         label="Notes"
                         value={acceptNotes}
-                        onchange={handleAcceptNotesChange}>
+                        onchange={handleAcceptNotesChange}
+                        required>
                     </lightning-textarea>
+
+                    <template lwc:if={isResendScenario}>
+                          
+                            <lightning-combobox
+                                class="slds-m-top_medium"
+                                label="Select Owner"
+                                placeholder="Select a Owner"
+                                options={projectOwnerOptions}
+                                value={selectedProjectOwnerId}
+                                onchange={handleProjectOwnerChange}
+                                required>
+                            </lightning-combobox>
+                        
+                    </template>
+
 
                     <div class="slds-m-top_medium slds-text-align_right">
                         <lightning-button
@@ -111,6 +127,7 @@
                         required>
                     </lightning-textarea>
 
+                    
                     <div class="slds-m-top_medium slds-text-align_right">
 
                         <lightning-button

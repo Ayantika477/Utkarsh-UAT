@@ -1,3 +1,9 @@
+/**
+ * @description   Batch and Schedulable that sends messaging for Opportunities stuck in
+ *                Negotiation stage.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_NegotiationStageUpdateBatch implements Database.Batchable<SObject>, Schedulable {
   public Database.QueryLocator start(Database.BatchableContext context) {
     DateTime cutoffDate = System.now().addDays(-30);
@@ -52,6 +58,11 @@ public without sharing class BWM_NegotiationStageUpdateBatch implements Database
   }
 
   public void finish(Database.BatchableContext context) {
+    System.debug(
+      LoggingLevel.INFO,
+      'BWM_NegotiationStageUpdateBatch finished. JobId=' +
+        (context == null ? 'null' : String.valueOf(context.getJobId()))
+    );
   }
 
   public void execute(SchedulableContext context) {

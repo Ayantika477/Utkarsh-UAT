@@ -1,10 +1,170 @@
 /**
  * @description   Test class for Escalation Matrix email service and batch entry points.
+ *                Includes coverage for the consolidated (digest) Lead / Opportunity / Task emails.
  * @author        Anshita Chanda
  * @date          2026-08-10
  */
 @IsTest
 private class EscalationMatrixEmailServiceTest {
+  @IsTest
+  static void testHodRecipientsResolvedByProfileAndDepartment() {
+    Profile hodProfile = [
+      SELECT Id
+      FROM Profile
+      WHERE Name = :EscalationMatrixEmailService.PROFILE_HOD
+      LIMIT 1
+    ];
+    String unique = String.valueOf(Math.abs(Crypto.getRandomInteger()));
+    String hodEmail = 'hod.profile.test' + unique + '@example.com';
+    insert new User(
+      ProfileId = hodProfile.Id,
+      LastName = 'HOD Profile Test',
+      Email = hodEmail,
+      Username = hodEmail + '.uat',
+      Alias = ('h' + unique).left(8),
+      TimeZoneSidKey = 'Asia/Kolkata',
+      LocaleSidKey = 'en_IN',
+      EmailEncodingKey = 'UTF-8',
+      LanguageLocaleKey = 'en_US',
+      Department = 'Test Dept Alpha, Test Dept Beta'
+    );
+    EscalationMatrixEmailService.clearTestState();
+
+    System.assert(
+      EscalationMatrixEmailService.resolveProfileDepartmentEmails(
+        EscalationMatrixEmailService.PROFILE_HOD,
+        'Test Dept Beta'
+      ).contains(hodEmail),
+      'A User listing several departments must match each of them'
+    );
+    System.assert(
+      EscalationMatrixEmailService.resolveProfileDepartmentEmails(
+        EscalationMatrixEmailService.PROFILE_HOD,
+        ' test dept alpha '
+      ).contains(hodEmail)
+    );
+    System.assert(
+      !EscalationMatrixEmailService.resolveProfileDepartmentEmails(
+        EscalationMatrixEmailService.PROFILE_HOD,
+        'Test Dept Gamma'
+      ).contains(hodEmail)
+    );
+    System.assert(
+      !EscalationMatrixEmailService.resolveProfileDepartmentEmails(
+        EscalationMatrixEmailService.PROFILE_CRM_HEAD,
+        'Test Dept Alpha'
+      ).contains(hodEmail),
+      'Only Users with the requested profile are returned'
+    );
+    System.assert(
+      EscalationMatrixEmailService.resolveProfileDepartmentEmails(
+        EscalationMatrixEmailService.PROFILE_HOD,
+        null
+      ).isEmpty()
+    );
+
+    Lead leadRecord = (Lead) JSON.deserialize(
+      '{"attributes":{"type":"Lead"},"Department_NameFormula__c":"Test Dept Alpha"}',
+      Lead.class
+    );
+    System.assert(
+      EscalationMatrixEmailService.resolveLeadRecipients(
+        leadRecord,
+        EscalationMatrixEmailService.RecipientGroup.HOD_BY_PROFILE_DEPARTMENT
+      ).contains(hodEmail)
+    );
+    System.assert(
+      !EscalationMatrixEmailService.resolveLeadRecipients(
+        leadRecord,
+        EscalationMatrixEmailService.RecipientGroup.CRM_HEAD_BY_PROFILE_DEPARTMENT
+      ).contains(hodEmail)
+    );
+
+    // The original groups now also use profile + department instead of roles.
+    System.assert(
+      EscalationMatrixEmailService.resolveLeadRecipients(
+        leadRecord,
+        EscalationMatrixEmailService.RecipientGroup.HOD_ONLY
+      ).contains(hodEmail)
+    );
+    System.assert(
+      EscalationMatrixEmailService.resolveLeadRecipients(
+        leadRecord,
+        EscalationMatrixEmailService.RecipientGroup.HOD_AND_CRM_HEAD
+      ).contains(hodEmail)
+    );
+    Opportunity opportunityRecord = (Opportunity) JSON.deserialize(
+      '{"attributes":{"type":"Opportunity"},"Department_Name__c":"Test Dept Beta"}',
+      Opportunity.class
+    );
+    System.assert(
+      EscalationMatrixEmailService.resolveOpportunityRecipients(
+        opportunityRecord,
+        EscalationMatrixEmailService.RecipientGroup.HOD_ONLY
+      ).contains(hodEmail)
+    );
+    System.assert(
+      !EscalationMatrixEmailService.resolveOpportunityRecipients(
+        opportunityRecord,
+        EscalationMatrixEmailService.RecipientGroup.CRM_HEAD_ONLY
+      ).contains(hodEmail)
+    );
+  }
+
+  @IsTest
+  static void testOpportunityCrmHeadResolvedByProfileAndDepartment() {
+    Profile crmHeadProfile = [
+      SELECT Id
+      FROM Profile
+      WHERE Name = :EscalationMatrixEmailService.PROFILE_CRM_HEAD
+      LIMIT 1
+    ];
+    String unique = String.valueOf(Math.abs(Crypto.getRandomInteger()));
+    String crmHeadEmail = 'crm.head.profile.test' + unique + '@example.com';
+    insert new User(
+      ProfileId = crmHeadProfile.Id,
+      LastName = 'CRM Head Profile Test',
+      Email = crmHeadEmail,
+      Username = crmHeadEmail + '.uat',
+      Alias = ('c' + unique).left(8),
+      TimeZoneSidKey = 'Asia/Kolkata',
+      LocaleSidKey = 'en_IN',
+      EmailEncodingKey = 'UTF-8',
+      LanguageLocaleKey = 'en_US',
+      Department = 'Test Dept Omega, Test Dept Sigma'
+    );
+    EscalationMatrixEmailService.clearTestState();
+
+    Opportunity opportunityRecord = (Opportunity) JSON.deserialize(
+      '{"attributes":{"type":"Opportunity"},"Department_NameFormula__c":"Test Dept Sigma"}',
+      Opportunity.class
+    );
+    System.assert(
+      EscalationMatrixEmailService.resolveOpportunityRecipients(
+        opportunityRecord,
+        EscalationMatrixEmailService.RecipientGroup.CRM_HEAD_BY_PROFILE_DEPARTMENT
+      ).contains(crmHeadEmail),
+      'CRM Head is found by profile and any of the departments on the User'
+    );
+    System.assert(
+      !EscalationMatrixEmailService.resolveOpportunityRecipients(
+        opportunityRecord,
+        EscalationMatrixEmailService.RecipientGroup.HOD_BY_PROFILE_DEPARTMENT
+      ).contains(crmHeadEmail)
+    );
+
+    Lead leadRecord = (Lead) JSON.deserialize(
+      '{"attributes":{"type":"Lead"},"Department_NameFormula__c":"Test Dept Omega"}',
+      Lead.class
+    );
+    System.assert(
+      EscalationMatrixEmailService.resolveLeadRecipients(
+        leadRecord,
+        EscalationMatrixEmailService.RecipientGroup.CRM_HEAD_BY_PROFILE_DEPARTMENT
+      ).contains(crmHeadEmail)
+    );
+  }
+
   @IsTest
   static void testBatchStartMethodsAndScheduler() {
     Test.startTest();
@@ -59,6 +219,16 @@ private class EscalationMatrixEmailServiceTest {
         'test@example.com'
       )
     );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendTaskRelatedEmail(
+        null,
+        'Task Overdue Owner',
+        EscalationMatrixEmailService.RecipientGroup.OWNER,
+        null,
+        null
+      )
+    );
   }
 
   @IsTest
@@ -94,7 +264,7 @@ private class EscalationMatrixEmailServiceTest {
       Status = 'Not Started',
       ActivityDate = Date.today().addDays(-1)
     );
-    insert taskRecord;
+    insert as system taskRecord;
 
     System.assertEquals(
       true,
@@ -130,7 +300,7 @@ private class EscalationMatrixEmailServiceTest {
     leadRecord.Prospect_Stage_Entry_Date__c = System.now().addHours(-50);
     leadRecord.Escalation_48_Sent__c = false;
     leadRecord.Escalation_72_Sent__c = false;
-    update leadRecord;
+    update as system leadRecord;
 
     leadRecord = queryProspectLead(leadRecord.Id);
 
@@ -154,7 +324,7 @@ private class EscalationMatrixEmailServiceTest {
     leadRecord.Prospect_Stage_Entry_Date__c = System.now().addHours(-100);
     leadRecord.Escalation_48_Sent__c = true;
     leadRecord.Escalation_72_Sent__c = false;
-    update leadRecord;
+    update as system leadRecord;
 
     leadRecord = queryProspectLead(leadRecord.Id);
 
@@ -176,7 +346,7 @@ private class EscalationMatrixEmailServiceTest {
 
     Lead leadRecord = createLead('Prospecting', 'Prospecting24');
     leadRecord.Prospecting_Escalation_24_Sent__c = false;
-    update leadRecord;
+    update as system leadRecord;
     LeadProspectingNoActivityBatch.setTestLastProspectingActivity(
       leadRecord.Id,
       System.now().addHours(-25)
@@ -185,7 +355,9 @@ private class EscalationMatrixEmailServiceTest {
     leadRecord = queryProspectingLead(leadRecord.Id);
 
     Test.startTest();
-    new LeadProspectingNoActivityBatch().execute(null, new List<Lead>{ leadRecord });
+    LeadProspectingNoActivityBatch batchJob = new LeadProspectingNoActivityBatch();
+    batchJob.execute(null, new List<Lead>{ leadRecord });
+    batchJob.finish(null);
     Test.stopTest();
 
     Lead updatedLead = [
@@ -204,7 +376,8 @@ private class EscalationMatrixEmailServiceTest {
     leadRecord.Prospecting_Escalation_24_Sent__c = true;
     leadRecord.Prospecting_Escalation_48_Sent__c = false;
     leadRecord.Prospecting_Escalation_72_Sent__c = false;
-    update leadRecord;
+    leadRecord.Prospecting_Escalation_168_Sent__c = true;
+    update as system leadRecord;
     LeadProspectingNoActivityBatch.setTestLastProspectingActivity(
       leadRecord.Id,
       System.now().addHours(-100)
@@ -213,7 +386,9 @@ private class EscalationMatrixEmailServiceTest {
     leadRecord = queryProspectingLead(leadRecord.Id);
 
     Test.startTest();
-    new LeadProspectingNoActivityBatch().execute(null, new List<Lead>{ leadRecord });
+    LeadProspectingNoActivityBatch batchJob = new LeadProspectingNoActivityBatch();
+    batchJob.execute(null, new List<Lead>{ leadRecord });
+    batchJob.finish(null);
     Test.stopTest();
 
     Lead updatedLead = [
@@ -237,7 +412,7 @@ private class EscalationMatrixEmailServiceTest {
     );
     opportunityRecord.Nurture_Stage_Entry_Date__c = System.now().addHours(-50);
     opportunityRecord.Nurture_Escalation_48_Sent__c = false;
-    update opportunityRecord;
+    update as system opportunityRecord;
 
     opportunityRecord = queryOpportunity(opportunityRecord.Id);
 
@@ -268,7 +443,7 @@ private class EscalationMatrixEmailServiceTest {
     opportunityRecord.Nurture_Escalation_48_Sent__c = true;
     opportunityRecord.Nurture_Escalation_60_Sent__c = false;
     opportunityRecord.Nurture_Escalation_72_Sent__c = false;
-    update opportunityRecord;
+    update as system opportunityRecord;
 
     opportunityRecord = queryOpportunity(opportunityRecord.Id);
 
@@ -298,13 +473,13 @@ private class EscalationMatrixEmailServiceTest {
     );
     opportunityRecord.Nurture_Stage_Entry_Date__c = System.now().addHours(-50);
     opportunityRecord.Nurture_Escalation_48_Sent__c = false;
-    update opportunityRecord;
+    update as system opportunityRecord;
 
     Quote quoteRecord = new Quote(
-      Name = 'Test Quote',
+      Name = 'Test Quote ' + String.valueOf(Math.abs(Crypto.getRandomInteger())),
       OpportunityId = opportunityRecord.Id
     );
-    insert quoteRecord;
+    insert as system quoteRecord;
 
     opportunityRecord = queryOpportunity(opportunityRecord.Id);
 
@@ -334,7 +509,7 @@ private class EscalationMatrixEmailServiceTest {
     setOldOpportunityActivity(opportunityRecord.Id, 5);
     opportunityRecord.Active_Task_Escalation_72_Sent__c = false;
     opportunityRecord.Active_Task_Escalation_96_Sent__c = false;
-    update opportunityRecord;
+    update as system opportunityRecord;
 
     opportunityRecord = queryActiveNurtureOpportunity(opportunityRecord.Id);
 
@@ -370,7 +545,7 @@ private class EscalationMatrixEmailServiceTest {
     setOldOpportunityActivity(opportunityRecord.Id, 22);
     opportunityRecord.TenderEsc15Sent__c = false;
     opportunityRecord.TenderEsc21Sent__c = false;
-    update opportunityRecord;
+    update as system opportunityRecord;
 
     opportunityRecord = queryTenderOpportunity(opportunityRecord.Id);
 
@@ -401,7 +576,7 @@ private class EscalationMatrixEmailServiceTest {
     setOldOpportunityActivity(opportunityRecord.Id, 22);
     opportunityRecord.NurtureEscalation48Sent__c = false;
     opportunityRecord.NurtureEscalation60Sent__c = false;
-    update opportunityRecord;
+    update as system opportunityRecord;
 
     opportunityRecord = queryBudgetaryOpportunity(opportunityRecord.Id);
 
@@ -429,17 +604,18 @@ private class EscalationMatrixEmailServiceTest {
       false,
       null
     );
-    setOldOpportunityActivity(opportunityRecord.Id, 22);
+    setOldOpportunityActivity(opportunityRecord.Id, 31);
     opportunityRecord.EscalationNeg7Sent__c = false;
     opportunityRecord.EscalationNeg14Sent__c = false;
     opportunityRecord.EscalationNeg21Sent__c = false;
-    update opportunityRecord;
+    update as system opportunityRecord;
 
     opportunityRecord = queryNegotiationActiveOpportunity(opportunityRecord.Id);
 
     Test.startTest();
-    new OpportunityNegotiationActiveMatrixBatch()
-      .execute(null, new List<Opportunity>{ opportunityRecord });
+    OpportunityNegotiationActiveMatrixBatch batchJob = new OpportunityNegotiationActiveMatrixBatch();
+    batchJob.execute(null, new List<Opportunity>{ opportunityRecord });
+    batchJob.finish(null);
     Test.stopTest();
 
     Opportunity updatedOpp = [
@@ -471,13 +647,14 @@ private class EscalationMatrixEmailServiceTest {
     opportunityRecord.TenderEsc15Sent__c = false;
     opportunityRecord.TenderEsc21Sent__c = false;
     opportunityRecord.TenderEsc30Sent__c = false;
-    update opportunityRecord;
+    update as system opportunityRecord;
 
     opportunityRecord = queryTenderOpportunity(opportunityRecord.Id);
 
     Test.startTest();
-    new OpportunityNegotiationTenderMatrixBatch()
-      .execute(null, new List<Opportunity>{ opportunityRecord });
+    OpportunityNegotiationTenderMatrixBatch batchJob = new OpportunityNegotiationTenderMatrixBatch();
+    batchJob.execute(null, new List<Opportunity>{ opportunityRecord });
+    batchJob.finish(null);
     Test.stopTest();
 
     Opportunity updatedOpp = [
@@ -504,13 +681,14 @@ private class EscalationMatrixEmailServiceTest {
     opportunityRecord.NurtureEscalation48Sent__c = false;
     opportunityRecord.NurtureEscalation60Sent__c = false;
     opportunityRecord.NurtureEscalation72Sent__c = false;
-    update opportunityRecord;
+    update as system opportunityRecord;
 
     opportunityRecord = queryBudgetaryOpportunity(opportunityRecord.Id);
 
     Test.startTest();
-    new OppNegoBudgetaryMatrixBatch()
-      .execute(null, new List<Opportunity>{ opportunityRecord });
+    OppNegoBudgetaryMatrixBatch batchJob = new OppNegoBudgetaryMatrixBatch();
+    batchJob.execute(null, new List<Opportunity>{ opportunityRecord });
+    batchJob.finish(null);
     Test.stopTest();
 
     Opportunity updatedOpp = [
@@ -531,7 +709,7 @@ private class EscalationMatrixEmailServiceTest {
     leadRecord.FirstOverdueTaskDate__c = System.now().addHours(-40);
     leadRecord.LeadOverdueEsc36Sent__c = false;
     leadRecord.LeadOverdueEsc96Sent__c = false;
-    update leadRecord;
+    update as system leadRecord;
 
     Task taskRecord = new Task(
       WhoId = leadRecord.Id,
@@ -539,7 +717,7 @@ private class EscalationMatrixEmailServiceTest {
       Status = 'Not Started',
       ActivityDate = Date.today().addDays(-2)
     );
-    insert taskRecord;
+    insert as system taskRecord;
 
     leadRecord = [
       SELECT
@@ -557,8 +735,9 @@ private class EscalationMatrixEmailServiceTest {
     ];
 
     Test.startTest();
-    new TaskOverdueEscalationMatrixBatch()
-      .execute(null, new List<Task>{ taskRecord });
+    TaskOverdueEscalationMatrixBatch batchJob = new TaskOverdueEscalationMatrixBatch();
+    batchJob.execute(null, new List<Task>{ taskRecord });
+    batchJob.finish(null);
     Test.stopTest();
 
     Lead updatedLead = [
@@ -577,7 +756,7 @@ private class EscalationMatrixEmailServiceTest {
     leadRecord.FirstOverdueTaskDate__c = System.now().addHours(-100);
     leadRecord.LeadOverdueEsc36Sent__c = true;
     leadRecord.LeadOverdueEsc96Sent__c = false;
-    update leadRecord;
+    update as system leadRecord;
 
     Task taskRecord = new Task(
       WhoId = leadRecord.Id,
@@ -585,7 +764,7 @@ private class EscalationMatrixEmailServiceTest {
       Status = 'Not Started',
       ActivityDate = Date.today().addDays(-5)
     );
-    insert taskRecord;
+    insert as system taskRecord;
 
     leadRecord = [
       SELECT
@@ -603,8 +782,9 @@ private class EscalationMatrixEmailServiceTest {
     ];
 
     Test.startTest();
-    new TaskOverdueEscalationMatrixBatch()
-      .execute(null, new List<Task>{ taskRecord });
+    TaskOverdueEscalationMatrixBatch batchJob = new TaskOverdueEscalationMatrixBatch();
+    batchJob.execute(null, new List<Task>{ taskRecord });
+    batchJob.finish(null);
     Test.stopTest();
 
     Lead updatedLead = [
@@ -622,9 +802,9 @@ private class EscalationMatrixEmailServiceTest {
     Lead leadRecord = createLead('Prospect', 'ProspectSkip');
     leadRecord.Prospect_Stage_Entry_Date__c = System.now().addHours(-50);
     leadRecord.Escalation_48_Sent__c = false;
-    update leadRecord;
+    update as system leadRecord;
 
-    insert new Task(
+    insert as system new Task(
       WhoId = leadRecord.Id,
       Subject = 'Recent Activity',
       Status = 'Completed',
@@ -697,7 +877,7 @@ private class EscalationMatrixEmailServiceTest {
     );
     opportunityRecord.FirstOverdueTaskDate__c = System.now().addHours(-40);
     opportunityRecord.OppOverdueEsc36Sent__c = false;
-    update opportunityRecord;
+    update as system opportunityRecord;
 
     Task taskRecord = new Task(
       WhatId = opportunityRecord.Id,
@@ -705,11 +885,12 @@ private class EscalationMatrixEmailServiceTest {
       Status = 'Not Started',
       ActivityDate = Date.today().addDays(-2)
     );
-    insert taskRecord;
+    insert as system taskRecord;
 
     Test.startTest();
-    new TaskOverdueEscalationMatrixBatch()
-      .execute(null, new List<Task>{ taskRecord });
+    TaskOverdueEscalationMatrixBatch batchJob = new TaskOverdueEscalationMatrixBatch();
+    batchJob.execute(null, new List<Task>{ taskRecord });
+    batchJob.finish(null);
     Test.stopTest();
 
     Opportunity updatedOpp = [
@@ -735,7 +916,7 @@ private class EscalationMatrixEmailServiceTest {
     List<EmailTemplate> templates = [
       SELECT Id
       FROM EmailTemplate
-      WHERE Folder.Name = 'Utkarsh Escalation Matrix Template'
+      WHERE Folder.Name LIKE 'Utkarsh Escalation Matrix Template%'
       LIMIT 1
     ];
     if (!templates.isEmpty()) {
@@ -774,7 +955,7 @@ private class EscalationMatrixEmailServiceTest {
     List<EmailTemplate> templates = [
       SELECT Id, Name
       FROM EmailTemplate
-      WHERE Folder.Name = 'Utkarsh Escalation Matrix Template'
+      WHERE Folder.Name LIKE 'Utkarsh Escalation Matrix Template%'
       LIMIT 1
     ];
 
@@ -803,13 +984,13 @@ private class EscalationMatrixEmailServiceTest {
       null
     );
 
-    insert new Task(
+    insert as system new Task(
       WhatId = opportunityRecord.Id,
       Subject = 'Old Task',
       Status = 'Completed',
       ActivityDate = Date.today().addDays(-3)
     );
-    insert new Event(
+    insert as system new Event(
       WhatId = opportunityRecord.Id,
       Subject = 'Old Event',
       DurationInMinutes = 30,
@@ -864,6 +1045,657 @@ private class EscalationMatrixEmailServiceTest {
     System.assertEquals(false, EscalationMatrixEmailService.hasNoActivitySince(null, Date.today()));
   }
 
+  // ===========================================================================
+  // NEW: additional helper coverage (daysSince / hoursSince / partial update / flush)
+  // ===========================================================================
+
+  @IsTest
+  static void testDateHelpersAndEmptyFlush() {
+    System.assertEquals(0, EscalationMatrixEmailService.hoursSince(null));
+    System.assertEquals(0, EscalationMatrixEmailService.daysSince((Datetime) null));
+    System.assertEquals(
+      2,
+      EscalationMatrixEmailService.daysSince(System.now().addDays(-2))
+    );
+    System.assertEquals(
+      3,
+      EscalationMatrixEmailService.daysSince(Date.today().addDays(-3))
+    );
+    System.assertEquals(
+      true,
+      EscalationMatrixEmailService.hasNoActivitySince(
+        System.now().addDays(-2),
+        Date.today().addDays(-5)
+      )
+    );
+
+    EscalationMatrixEmailService.clearTestState();
+    // Nothing queued: must be a harmless no-op.
+    EscalationMatrixEmailService.flushQueuedEmails();
+    System.assertEquals(false, EscalationMatrixEmailService.wasSendSuccessful(null, 'x'));
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.wasSendSuccessful(UserInfo.getUserId(), 'x')
+    );
+  }
+
+  @IsTest
+  static void testUpdateOpportunitiesAllowPartial() {
+    // Null / empty guards.
+    EscalationMatrixEmailService.updateOpportunitiesAllowPartial(null);
+    EscalationMatrixEmailService.updateOpportunitiesAllowPartial(new List<Opportunity>());
+
+    Opportunity opportunityRecord = createOpportunity(
+      'Nurture',
+      'Partial Update Opp',
+      false,
+      null
+    );
+    opportunityRecord.Description = 'Updated via partial update';
+
+    EscalationMatrixEmailService.updateOpportunitiesAllowPartial(
+      new List<Opportunity>{ null, new Opportunity(), opportunityRecord }
+    );
+
+    Opportunity updatedOpp = [
+      SELECT Description
+      FROM Opportunity
+      WHERE Id = :opportunityRecord.Id
+    ];
+    System.assertEquals('Updated via partial update', updatedOpp.Description);
+  }
+
+  @IsTest
+  static void testSendTaskRelatedEmailUsesOverridesForLeadAndOpportunity() {
+    prepareTestContext();
+
+    Lead leadRecord = queryLead(createLead('Prospect', 'TaskRelatedLead').Id);
+    Opportunity opportunityRecord = queryOpportunity(
+      createOpportunity('Nurture', 'Task Related Opp', false, null).Id
+    );
+
+    Task taskRecord = new Task(
+      WhoId = leadRecord.Id,
+      Subject = 'Task Related',
+      Status = 'Not Started',
+      ActivityDate = Date.today().addDays(-1)
+    );
+    insert as system taskRecord;
+
+    // Lead override branch.
+    System.assertEquals(
+      true,
+      EscalationMatrixEmailService.sendTaskRelatedEmail(
+        taskRecord,
+        'Task Overdue Owner',
+        EscalationMatrixEmailService.RecipientGroup.OWNER,
+        leadRecord,
+        null
+      )
+    );
+
+    // Opportunity override branch (no lead supplied).
+    System.assertEquals(
+      true,
+      EscalationMatrixEmailService.sendTaskRelatedEmail(
+        taskRecord,
+        'Task Overdue Owner',
+        EscalationMatrixEmailService.RecipientGroup.OWNER,
+        null,
+        opportunityRecord
+      )
+    );
+  }
+
+  // ===========================================================================
+  // NEW: consolidated LEAD email
+  // ===========================================================================
+
+  @IsTest
+  static void testConsolidatedLeadEmailGuards() {
+    prepareTestContext();
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsLeadGuard').Id);
+    List<Lead> leads = new List<Lead>{ leadRecord };
+    EscalationMatrixEmailService.RecipientGroup owner = EscalationMatrixEmailService.RecipientGroup.OWNER;
+
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedLeadEmail(
+        null,
+        'Lead Not Contacted 48h HOD',
+        owner,
+        'G',
+        null
+      )
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedLeadEmail(
+        new List<Lead>(),
+        'Lead Not Contacted 48h HOD',
+        owner,
+        'G',
+        null
+      )
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedLeadEmail(leads, '', owner, 'G', null)
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedLeadEmail(
+        leads,
+        'Lead Not Contacted 48h HOD',
+        owner,
+        '',
+        null
+      )
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.wasConsolidatedSendSuccessful('', 'x')
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.wasConsolidatedSendSuccessful('G', '')
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedLeadEmailBuildsDigestWithRegardsSplit() {
+    prepareTestContext();
+    setRenderedOverrides(
+      'Lead Digest Subject',
+      '<p>Dear Team,</p><p>Please act on the leads below.</p><p>Regards,<br/>Team CRM</p>',
+      'Dear Team,\n\nPlease act on the leads below.\n\nRegards,\nTeam CRM'
+    );
+
+    Lead leadOne = queryLeadForDigest(createLead('Prospect', 'ConsLeadOne').Id);
+    Lead leadTwo = queryLeadForDigest(createLead('Prospect', 'ConsLeadTwo').Id);
+    // leadTwo intentionally has no entry in the hours map -> defaults to 0.
+    Map<Id, Long> hoursByLeadId = new Map<Id, Long>{ leadOne.Id => 50L };
+
+    Test.startTest();
+    Boolean sent = EscalationMatrixEmailService.sendConsolidatedLeadEmail(
+      new List<Lead>{ leadOne, leadTwo },
+      'Lead Not Contacted 48h HOD',
+      EscalationMatrixEmailService.RecipientGroup.OWNER,
+      'LEAD-GROUP-1',
+      hoursByLeadId
+    );
+    Test.stopTest();
+
+    System.assertEquals(true, sent);
+    System.assertEquals(
+      true,
+      EscalationMatrixEmailService.wasConsolidatedSendSuccessful(
+        'LEAD-GROUP-1',
+        'Lead Not Contacted 48h HOD'
+      )
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedLeadEmailWithPlainTextOnlyAndNullHoursMap() {
+    // prepareTestContext() only sets plainTextBody (no HTML, no "Regards").
+    prepareTestContext();
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsLeadPlain').Id);
+
+    Boolean sent = EscalationMatrixEmailService.sendConsolidatedLeadEmail(
+      new List<Lead>{ leadRecord },
+      'Lead Not Contacted 48h HOD',
+      EscalationMatrixEmailService.RecipientGroup.OWNER,
+      'LEAD-GROUP-PLAIN',
+      null
+    );
+
+    System.assertEquals(true, sent);
+  }
+
+  @IsTest
+  static void testConsolidatedLeadEmailWithBlankTemplateContent() {
+    prepareTestContext();
+    setRenderedOverrides(null, null, null);
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsLeadBlank').Id);
+
+    Boolean sent = EscalationMatrixEmailService.sendConsolidatedLeadEmail(
+      new List<Lead>{ leadRecord },
+      'Lead Not Contacted 48h HOD',
+      EscalationMatrixEmailService.RecipientGroup.OWNER,
+      'LEAD-GROUP-BLANK',
+      new Map<Id, Long>()
+    );
+
+    System.assertEquals(true, sent);
+  }
+
+  @IsTest
+  static void testConsolidatedLeadEmailReturnsFalseWhenTemplateMissing() {
+    EscalationMatrixEmailService.clearTestState();
+    EscalationMatrixEmailService.testRecipientOverrides = new Set<String>{
+      UserInfo.getUserEmail().trim().toLowerCase()
+    };
+    EscalationMatrixEmailService.testSimulateSuccessfulSend = true;
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsLeadNoTpl').Id);
+
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedLeadEmail(
+        new List<Lead>{ leadRecord },
+        'Missing Template Name XYZ',
+        EscalationMatrixEmailService.RecipientGroup.OWNER,
+        'LEAD-GROUP-NOTPL',
+        null
+      )
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedLeadEmailLiveSendPath() {
+    EscalationMatrixEmailService.clearTestState();
+    setRenderedOverrides(
+      'Live Lead Digest',
+      '<p>Hello</p><p>Regards,<br/>Team</p>',
+      'Hello\nRegards,\nTeam'
+    );
+    EscalationMatrixEmailService.testRecipientOverrides = new Set<String>{
+      UserInfo.getUserEmail().trim().toLowerCase()
+    };
+    // testSimulateSuccessfulSend stays false -> goes through enqueue + flush.
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsLeadLive').Id);
+
+    Test.startTest();
+    Boolean queued = EscalationMatrixEmailService.sendConsolidatedLeadEmail(
+      new List<Lead>{ leadRecord },
+      'Lead Not Contacted 48h HOD',
+      EscalationMatrixEmailService.RecipientGroup.OWNER,
+      'LEAD-GROUP-LIVE',
+      new Map<Id, Long>{ leadRecord.Id => 60L }
+    );
+    Test.stopTest();
+
+    System.assertEquals(true, queued);
+  }
+
+  // ===========================================================================
+  // NEW: consolidated OPPORTUNITY email
+  // ===========================================================================
+
+  @IsTest
+  static void testConsolidatedOpportunityEmailGuards() {
+    prepareTestContext();
+
+    Opportunity opportunityRecord = queryOpportunityForDigest(
+      createOpportunity('Nurture', 'ConsOppGuard', false, null).Id
+    );
+    List<Opportunity> opportunities = new List<Opportunity>{ opportunityRecord };
+    EscalationMatrixEmailService.RecipientGroup owner = EscalationMatrixEmailService.RecipientGroup.OWNER;
+
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedOpportunityEmail(
+        null,
+        'Pending Quotation 48h Owner',
+        owner,
+        'G',
+        null
+      )
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedOpportunityEmail(
+        new List<Opportunity>(),
+        'Pending Quotation 48h Owner',
+        owner,
+        'G',
+        null
+      )
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedOpportunityEmail(
+        opportunities,
+        '',
+        owner,
+        'G',
+        null
+      )
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedOpportunityEmail(
+        opportunities,
+        'Pending Quotation 48h Owner',
+        owner,
+        '',
+        null
+      )
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedOpportunityEmailBuildsDigestWithRegardsSplit() {
+    prepareTestContext();
+    setRenderedOverrides(
+      'Opportunity Digest Subject',
+      '<div>Dear Team,</div><div>Please review.</div><div>Regards,<br/>Team CRM</div>',
+      'Dear Team,\n\nPlease review.\n\nRegards,\nTeam CRM'
+    );
+
+    Opportunity oppOne = queryOpportunityForDigest(
+      createOpportunity('Nurture', 'ConsOppOne', false, null).Id
+    );
+    Opportunity oppTwo = queryOpportunityForDigest(
+      createOpportunity('Nurture', 'ConsOppTwo', false, null).Id
+    );
+    Map<Id, Long> daysByOpportunityId = new Map<Id, Long>{ oppOne.Id => 7L };
+
+    Test.startTest();
+    Boolean sent = EscalationMatrixEmailService.sendConsolidatedOpportunityEmail(
+      new List<Opportunity>{ oppOne, oppTwo },
+      'Pending Quotation 48h Owner',
+      EscalationMatrixEmailService.RecipientGroup.OWNER_AND_CRM,
+      'OPP-GROUP-1',
+      daysByOpportunityId
+    );
+    Test.stopTest();
+
+    System.assertEquals(true, sent);
+    System.assertEquals(
+      true,
+      EscalationMatrixEmailService.wasConsolidatedSendSuccessful(
+        'OPP-GROUP-1',
+        'Pending Quotation 48h Owner'
+      )
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedOpportunityEmailWithPlainTextOnlyAndNullDaysMap() {
+    prepareTestContext();
+
+    Opportunity opportunityRecord = queryOpportunityForDigest(
+      createOpportunity('Nurture', 'ConsOppPlain', false, null).Id
+    );
+
+    Boolean sent = EscalationMatrixEmailService.sendConsolidatedOpportunityEmail(
+      new List<Opportunity>{ opportunityRecord },
+      'Pending Quotation 48h Owner',
+      EscalationMatrixEmailService.RecipientGroup.OWNER,
+      'OPP-GROUP-PLAIN',
+      null
+    );
+
+    System.assertEquals(true, sent);
+  }
+
+  @IsTest
+  static void testConsolidatedOpportunityEmailWithBlankTemplateContent() {
+    prepareTestContext();
+    setRenderedOverrides(null, null, null);
+
+    Opportunity opportunityRecord = queryOpportunityForDigest(
+      createOpportunity('Nurture', 'ConsOppBlank', false, null).Id
+    );
+
+    Boolean sent = EscalationMatrixEmailService.sendConsolidatedOpportunityEmail(
+      new List<Opportunity>{ opportunityRecord },
+      'Pending Quotation 48h Owner',
+      EscalationMatrixEmailService.RecipientGroup.OWNER,
+      'OPP-GROUP-BLANK',
+      new Map<Id, Long>()
+    );
+
+    System.assertEquals(true, sent);
+  }
+
+  @IsTest
+  static void testConsolidatedOpportunityEmailReturnsFalseWhenTemplateMissing() {
+    EscalationMatrixEmailService.clearTestState();
+    EscalationMatrixEmailService.testRecipientOverrides = new Set<String>{
+      UserInfo.getUserEmail().trim().toLowerCase()
+    };
+    EscalationMatrixEmailService.testSimulateSuccessfulSend = true;
+
+    Opportunity opportunityRecord = queryOpportunityForDigest(
+      createOpportunity('Nurture', 'ConsOppNoTpl', false, null).Id
+    );
+
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedOpportunityEmail(
+        new List<Opportunity>{ opportunityRecord },
+        'Missing Template Name XYZ',
+        EscalationMatrixEmailService.RecipientGroup.OWNER,
+        'OPP-GROUP-NOTPL',
+        null
+      )
+    );
+  }
+
+  // ===========================================================================
+  // NEW: consolidated TASK email
+  // ===========================================================================
+
+  @IsTest
+  static void testConsolidatedTaskEmailGuards() {
+    prepareTestContext();
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsTaskGuard').Id);
+    Task taskRecord = createTaskForLead(leadRecord.Id, 'Guard Task');
+    List<EscalationMatrixEmailService.TaskDigestRow> rows = new List<EscalationMatrixEmailService.TaskDigestRow>{
+      buildDigestRow(taskRecord, leadRecord, null, 40L)
+    };
+
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(null, 'Task Overdue Owner', 'a@example.com')
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(
+        new List<EscalationMatrixEmailService.TaskDigestRow>(),
+        'Task Overdue Owner',
+        'a@example.com'
+      )
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(rows, '', 'a@example.com')
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(rows, 'Task Overdue Owner', '')
+    );
+
+    // First row without a task / task Id.
+    EscalationMatrixEmailService.TaskDigestRow emptyRow = new EscalationMatrixEmailService.TaskDigestRow();
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(
+        new List<EscalationMatrixEmailService.TaskDigestRow>{ emptyRow },
+        'Task Overdue Owner',
+        'a@example.com'
+      )
+    );
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(
+        new List<EscalationMatrixEmailService.TaskDigestRow>{ null },
+        'Task Overdue Owner',
+        'a@example.com'
+      )
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedTaskEmailWithOpportunityOverrideAndMixedRows() {
+    prepareTestContext();
+    setRenderedOverrides(
+      'Task Digest Subject',
+      '<p>Dear Team,</p><p>Tasks are overdue.</p><p>Regards,<br/>Team CRM</p>',
+      'Dear Team,\n\nTasks are overdue.\n\nRegards,\nTeam CRM'
+    );
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsTaskLead').Id);
+    Opportunity opportunityRecord = queryOpportunityForDigest(
+      createOpportunity('Nurture', 'ConsTaskOpp', false, null).Id
+    );
+    Task leadTask = createTaskForLead(leadRecord.Id, 'Lead Overdue Task');
+    Task oppTask = createTaskForOpportunity(opportunityRecord.Id, 'Opp Overdue Task');
+
+    EscalationMatrixEmailService.TaskDigestRow noRelatedRow = new EscalationMatrixEmailService.TaskDigestRow();
+    noRelatedRow.taskRecord = oppTask; // neither lead nor opportunity -> skipped by table builders
+
+    List<EscalationMatrixEmailService.TaskDigestRow> rows = new List<EscalationMatrixEmailService.TaskDigestRow>{
+      buildDigestRow(leadTask, leadRecord, null, 40L),
+      buildDigestRow(oppTask, null, opportunityRecord, null),
+      noRelatedRow,
+      null
+    };
+
+    Test.startTest();
+    Boolean sent = EscalationMatrixEmailService.sendConsolidatedTaskEmail(
+      rows,
+      'Task Overdue Owner',
+      'a@example.com;b@example.com'
+    );
+    Test.stopTest();
+
+    System.assertEquals(true, sent);
+    System.assertEquals(
+      true,
+      EscalationMatrixEmailService.wasConsolidatedSendSuccessful(
+        'a@example.com;b@example.com',
+        'Task Overdue Owner'
+      )
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedTaskEmailTargetObjectFallsBackToTaskOwner() {
+    prepareTestContext();
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsTaskOwnerTgt').Id);
+    Task taskRecord = createTaskForLead(leadRecord.Id, 'Owner Target Task');
+
+    // Row with neither Lead nor Opportunity: targetObjectId = Task.OwnerId.
+    EscalationMatrixEmailService.TaskDigestRow row = new EscalationMatrixEmailService.TaskDigestRow();
+    row.taskRecord = taskRecord;
+
+    System.assertEquals(
+      true,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(
+        new List<EscalationMatrixEmailService.TaskDigestRow>{ row },
+        'Task Overdue Owner',
+        'a@example.com'
+      )
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedTaskEmailWithLeadOnlyOverride() {
+    EscalationMatrixEmailService.clearTestState();
+    EscalationMatrixEmailService.testSimulateSuccessfulSend = true;
+
+    LeadManagementEmailService.RenderedEmail leadRendered = new LeadManagementEmailService.RenderedEmail();
+    leadRendered.subject = 'Lead Override Task Subject';
+    leadRendered.htmlBody = '<p>Hi,</p><p>Regards,<br/>Team</p>';
+    leadRendered.plainTextBody = 'Hi,\nRegards,\nTeam';
+    EscalationMatrixEmailService.testLeadRenderedOverride = leadRendered;
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsTaskLeadOvr').Id);
+    Task taskRecord = createTaskForLead(leadRecord.Id, 'Lead Override Task');
+
+    System.assertEquals(
+      true,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(
+        new List<EscalationMatrixEmailService.TaskDigestRow>{
+          buildDigestRow(taskRecord, leadRecord, null, 36L)
+        },
+        'Task Overdue Owner',
+        'a@example.com'
+      )
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedTaskEmailFallbackIntroForOwnerTier() {
+    EscalationMatrixEmailService.clearTestState();
+    EscalationMatrixEmailService.testSimulateSuccessfulSend = true;
+    // A non-EmailTemplate Id forces Messaging.renderStoredEmailTemplate to fail,
+    // so the service falls back to its generic intro.
+    EscalationMatrixEmailService.setTestTemplateId('Task Overdue Owner', UserInfo.getUserId());
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsTaskFallback').Id);
+    Task taskRecord = createTaskForLead(leadRecord.Id, 'Fallback Task');
+
+    System.assertEquals(
+      true,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(
+        new List<EscalationMatrixEmailService.TaskDigestRow>{
+          buildDigestRow(taskRecord, leadRecord, null, 40L)
+        },
+        'Task Overdue Owner',
+        'a@example.com'
+      )
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedTaskEmailFallbackIntroForNonOwnerTierAndOpportunity() {
+    EscalationMatrixEmailService.clearTestState();
+    EscalationMatrixEmailService.testSimulateSuccessfulSend = true;
+    EscalationMatrixEmailService.setTestTemplateId('Task Overdue HOD', UserInfo.getUserId());
+
+    Opportunity opportunityRecord = queryOpportunityForDigest(
+      createOpportunity('Nurture', 'ConsTaskFallbackOpp', false, null).Id
+    );
+    Task taskRecord = createTaskForOpportunity(opportunityRecord.Id, 'Fallback Opp Task');
+
+    // Non-owner template name -> greeting "Sir/Madam".
+    System.assertEquals(
+      true,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(
+        new List<EscalationMatrixEmailService.TaskDigestRow>{
+          buildDigestRow(taskRecord, null, opportunityRecord, 40L)
+        },
+        'Task Overdue HOD',
+        'a@example.com;b@example.com'
+      )
+    );
+  }
+
+  @IsTest
+  static void testConsolidatedTaskEmailReturnsFalseWhenTemplateMissing() {
+    EscalationMatrixEmailService.clearTestState();
+    EscalationMatrixEmailService.testSimulateSuccessfulSend = true;
+
+    Lead leadRecord = queryLeadForDigest(createLead('Prospect', 'ConsTaskNoTpl').Id);
+    Task taskRecord = createTaskForLead(leadRecord.Id, 'No Template Task');
+
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendConsolidatedTaskEmail(
+        new List<EscalationMatrixEmailService.TaskDigestRow>{
+          buildDigestRow(taskRecord, leadRecord, null, 40L)
+        },
+        'Missing Template Name XYZ',
+        'a@example.com'
+      )
+    );
+  }
+
+  // ===========================================================================
+  // Test data helpers
+  // ===========================================================================
+
   private static void prepareTestContext() {
     EscalationMatrixEmailService.clearTestState();
     EscalationMatrixOpportunityHelper.clearTestLastActivityDates();
@@ -902,17 +1734,79 @@ private class EscalationMatrixEmailServiceTest {
     }
   }
 
+  // NEW: replaces both rendered overrides (Lead + Opportunity) with the given content.
+  private static void setRenderedOverrides(String subject, String htmlBody, String plainTextBody) {
+    LeadManagementEmailService.RenderedEmail leadRendered = new LeadManagementEmailService.RenderedEmail();
+    leadRendered.subject = subject;
+    leadRendered.htmlBody = htmlBody;
+    leadRendered.plainTextBody = plainTextBody;
+    EscalationMatrixEmailService.testLeadRenderedOverride = leadRendered;
+
+    DealerOpportunityEmailService.RenderedEmail oppRendered = new DealerOpportunityEmailService.RenderedEmail();
+    oppRendered.subject = subject;
+    oppRendered.htmlBody = htmlBody;
+    oppRendered.plainTextBody = plainTextBody;
+    EscalationMatrixEmailService.testOppRenderedOverride = oppRendered;
+  }
+
+  // NEW: builds one row of the consolidated Task digest.
+  private static EscalationMatrixEmailService.TaskDigestRow buildDigestRow(
+    Task taskRecord,
+    Lead leadRecord,
+    Opportunity opportunityRecord,
+    Long hoursSinceFirstOverdue
+  ) {
+    EscalationMatrixEmailService.TaskDigestRow row = new EscalationMatrixEmailService.TaskDigestRow();
+    row.taskRecord = taskRecord;
+    row.leadRecord = leadRecord;
+    row.opportunityRecord = opportunityRecord;
+    row.hoursSinceFirstOverdue = hoursSinceFirstOverdue;
+    return row;
+  }
+
+  // NEW: overdue Task related to a Lead, re-queried so Id / OwnerId / WhoId are populated.
+  private static Task createTaskForLead(Id leadId, String subject) {
+    Task taskRecord = new Task(
+      WhoId = leadId,
+      Subject = subject,
+      Status = 'Not Started',
+      ActivityDate = Date.today().addDays(-2)
+    );
+    insert as system taskRecord;
+    return queryTask(taskRecord.Id);
+  }
+
+  // NEW: overdue Task related to an Opportunity.
+  private static Task createTaskForOpportunity(Id opportunityId, String subject) {
+    Task taskRecord = new Task(
+      WhatId = opportunityId,
+      Subject = subject,
+      Status = 'Not Started',
+      ActivityDate = Date.today().addDays(-2)
+    );
+    insert as system taskRecord;
+    return queryTask(taskRecord.Id);
+  }
+
+  private static Task queryTask(Id taskId) {
+    return [
+      SELECT Id, WhoId, WhatId, OwnerId, Subject, ActivityDate
+      FROM Task
+      WHERE Id = :taskId
+    ];
+  }
+
   private static Lead createLead(String statusValue, String lastName) {
     Lead leadRecord = new Lead(
       LastName = lastName,
-      Company = 'Escalation Matrix Co',
+      Company = 'Escalation Matrix Co ' + String.valueOf(Math.abs(Crypto.getRandomInteger())),
       LeadSource = 'OUTBOUND PHONE CALL',
       Status = statusValue,
       Department_Name__c = 'Enquiry',
       Email = lastName.toLowerCase().replace(' ', '') + '@example.com',
-      Phone = '9876543210'
+      Phone = (String.valueOf(Math.abs(Crypto.getRandomInteger())) + '9123456789').right(10)
     );
-    insert leadRecord;
+    insert as system leadRecord;
     return leadRecord;
   }
 
@@ -923,7 +1817,7 @@ private class EscalationMatrixEmailServiceTest {
     Id recordTypeId
   ) {
     Account accountRecord = new Account(Name = opportunityName + ' Account');
-    insert accountRecord;
+    insert as system accountRecord;
 
     Opportunity opportunityRecord = new Opportunity(
       Name = opportunityName,
@@ -935,7 +1829,7 @@ private class EscalationMatrixEmailServiceTest {
     if (recordTypeId != null) {
       opportunityRecord.RecordTypeId = recordTypeId;
     }
-    insert opportunityRecord;
+    insert as system opportunityRecord;
     return opportunityRecord;
   }
 
@@ -972,6 +1866,24 @@ private class EscalationMatrixEmailServiceTest {
     ];
   }
 
+  // NEW: includes Owner.Name, which the consolidated tables read.
+  private static Lead queryLeadForDigest(Id leadId) {
+    return [
+      SELECT
+        Id,
+        Name,
+        OwnerId,
+        Owner.Name,
+        Owner.Email,
+        Status,
+        Department_Name__c,
+        Department_NameFormula__c,
+        CRM_User_Email_Formula__c
+      FROM Lead
+      WHERE Id = :leadId
+    ];
+  }
+
   private static Lead queryProspectLead(Id leadId) {
     return [
       SELECT
@@ -983,6 +1895,7 @@ private class EscalationMatrixEmailServiceTest {
         Prospect_Stage_Entry_Date__c,
         Escalation_48_Sent__c,
         Escalation_72_Sent__c,
+        Escalation_120_Sent__c,
         LastActivityDate,
         CRM_User_Email_Formula__c
       FROM Lead
@@ -1002,6 +1915,7 @@ private class EscalationMatrixEmailServiceTest {
         Prospecting_Escalation_24_Sent__c,
         Prospecting_Escalation_48_Sent__c,
         Prospecting_Escalation_72_Sent__c,
+        Prospecting_Escalation_168_Sent__c,
         CRM_User_Email_Formula__c
       FROM Lead
       WHERE Id = :leadId
@@ -1028,6 +1942,24 @@ private class EscalationMatrixEmailServiceTest {
     ];
   }
 
+  // NEW: includes Owner.Name, which the consolidated tables read.
+  private static Opportunity queryOpportunityForDigest(Id opportunityId) {
+    return [
+      SELECT
+        Id,
+        Name,
+        OwnerId,
+        Owner.Name,
+        Owner.Email,
+        StageName,
+        Department_Name__c,
+        Department_NameFormula__c,
+        CRM_User_Email_Formula__c
+      FROM Opportunity
+      WHERE Id = :opportunityId
+    ];
+  }
+
   private static Opportunity queryActiveNurtureOpportunity(Id opportunityId) {
     return [
       SELECT
@@ -1040,6 +1972,7 @@ private class EscalationMatrixEmailServiceTest {
         RecordType.DeveloperName,
         Department_NameFormula__c,
         CRM_User_Email_Formula__c,
+        Active_Task_Escalation_60_Sent__c,
         Active_Task_Escalation_72_Sent__c,
         Active_Task_Escalation_96_Sent__c,
         Active_Task_Escalation_120_Sent__c
@@ -1087,6 +2020,136 @@ private class EscalationMatrixEmailServiceTest {
       FROM Opportunity
       WHERE Id = :opportunityId
     ];
+  }
+
+  @IsTest
+  static void testResolveRecipientsWithoutOverridesCoversRoleLookups() {
+    Lead leadRecord = createLead('Prospect', 'NoOverrideLead');
+    Opportunity opportunityRecord = createOpportunity(
+      'Nurture',
+      'No Override Opp',
+      false,
+      null
+    );
+    leadRecord = queryLead(leadRecord.Id);
+    opportunityRecord = queryOpportunity(opportunityRecord.Id);
+
+    EscalationMatrixEmailService.clearTestState();
+
+    EscalationMatrixEmailService.resolveLeadRecipients(
+      leadRecord,
+      EscalationMatrixEmailService.RecipientGroup.OWNER
+    );
+    EscalationMatrixEmailService.resolveLeadRecipients(
+      leadRecord,
+      EscalationMatrixEmailService.RecipientGroup.OWNER_AND_CRM
+    );
+    EscalationMatrixEmailService.resolveLeadRecipients(
+      leadRecord,
+      EscalationMatrixEmailService.RecipientGroup.HOD_ONLY
+    );
+    EscalationMatrixEmailService.resolveLeadRecipients(
+      leadRecord,
+      EscalationMatrixEmailService.RecipientGroup.CRM_HEAD_ONLY
+    );
+    EscalationMatrixEmailService.resolveLeadRecipients(
+      leadRecord,
+      EscalationMatrixEmailService.RecipientGroup.HOD_AND_CRM_HEAD
+    );
+    EscalationMatrixEmailService.resolveLeadRecipients(
+      leadRecord,
+      EscalationMatrixEmailService.RecipientGroup.ED_SIR
+    );
+    EscalationMatrixEmailService.resolveOpportunityRecipients(
+      opportunityRecord,
+      EscalationMatrixEmailService.RecipientGroup.OWNER
+    );
+    EscalationMatrixEmailService.resolveOpportunityRecipients(
+      opportunityRecord,
+      EscalationMatrixEmailService.RecipientGroup.OWNER_AND_CRM
+    );
+    EscalationMatrixEmailService.resolveOpportunityRecipients(
+      opportunityRecord,
+      EscalationMatrixEmailService.RecipientGroup.HOD_ONLY
+    );
+    EscalationMatrixEmailService.resolveOpportunityRecipients(
+      opportunityRecord,
+      EscalationMatrixEmailService.RecipientGroup.CRM_HEAD_ONLY
+    );
+    EscalationMatrixEmailService.resolveOpportunityRecipients(
+      opportunityRecord,
+      EscalationMatrixEmailService.RecipientGroup.HOD_AND_CRM_HEAD
+    );
+    EscalationMatrixEmailService.resolveOpportunityRecipients(
+      opportunityRecord,
+      EscalationMatrixEmailService.RecipientGroup.ED_SIR
+    );
+
+    System.assertEquals(
+      false,
+      EscalationMatrixEmailService.sendLeadEmail(
+        leadRecord,
+        'Missing Template Name XYZ',
+        EscalationMatrixEmailService.RecipientGroup.OWNER
+      )
+    );
+  }
+
+  @IsTest
+  static void testSendTaskRelatedEmailRendersTaskTemplate() {
+    EscalationMatrixEmailService.clearTestState();
+    EscalationMatrixEmailService.testRecipientOverrides = new Set<String>{
+      UserInfo.getUserEmail()
+    };
+
+    Lead leadRecord = createLead('Prospect', 'TaskMerge');
+    Task taskRecord = new Task(
+      WhoId = leadRecord.Id,
+      Subject = 'Overdue follow-up',
+      Status = 'Not Started',
+      ActivityDate = Date.today().addDays(-1),
+      OwnerId = UserInfo.getUserId()
+    );
+    insert as system taskRecord;
+    taskRecord = [
+      SELECT Id, WhoId, OwnerId
+      FROM Task
+      WHERE Id = :taskRecord.Id
+    ];
+
+    List<EmailTemplate> templates = [
+      SELECT Id
+      FROM EmailTemplate
+      WHERE Name = 'Task Overdue Owner'
+      LIMIT 1
+    ];
+    if (templates.isEmpty()) {
+      System.assertEquals(
+        false,
+        EscalationMatrixEmailService.sendTaskRelatedEmail(
+          taskRecord,
+          'Task Overdue Owner',
+          EscalationMatrixEmailService.RecipientGroup.OWNER,
+          leadRecord,
+          null
+        )
+      );
+      return;
+    }
+
+    EscalationMatrixEmailService.setTestTemplateId('Task Overdue Owner', templates[0].Id);
+
+    Test.startTest();
+    Boolean sent = EscalationMatrixEmailService.sendTaskRelatedEmail(
+      taskRecord,
+      'Task Overdue Owner',
+      EscalationMatrixEmailService.RecipientGroup.OWNER,
+      leadRecord,
+      null
+    );
+    Test.stopTest();
+
+    System.assertNotEquals(null, sent);
   }
 
   private static Opportunity queryNegotiationActiveOpportunity(Id opportunityId) {

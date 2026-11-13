@@ -1,3 +1,9 @@
+/**
+ * @description   Shared settings and SOQL helpers used by campaign management object
+ *                services.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_CampaignRecordSupport {
   public static BWM_Messaging_Settings__mdt getMessagingSettings() {
     BWM_Messaging_Settings__mdt settings = BWM_SettingsService.getSettings();

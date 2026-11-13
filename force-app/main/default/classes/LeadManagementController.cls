@@ -1,7 +1,17 @@
+/**
+ * @description   AuraEnabled API for Lead campaign search and
+ *                Journey/WhatsApp/RCS/SMS/Email sends.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public with sharing class LeadManagementController {
     private static final String LEAD_MANAGEMENT_ORG_WIDE_EMAIL =
         'noreply@utkarshindialimited.in';
 
+    /**
+     * @description Returns active Lead Status picklist options for the Lead Management UI.
+     * @return List of PicklistOption values for Lead.Status.
+     */
     @AuraEnabled(cacheable=true)
     public static List<PicklistOption> getLeadStatusOptions() {
         List<PicklistOption> options = new List<PicklistOption>();
@@ -15,11 +25,56 @@ public with sharing class LeadManagementController {
         return options;
     }
 
+    /**
+     * @description Returns active Lead Lost Reason picklist options.
+     * @return List of PicklistOption values for Lead.Lost_Reason__c.
+     */
     @AuraEnabled(cacheable=true)
     public static List<PicklistOption> getLeadLostReasonOptions() {
         return getPicklistOptions(Lead.Lost_Reason__c);
     }
 
+    /**
+     * @description Returns active Lead Customer Category picklist options.
+     * @return List of PicklistOption values for Lead.Customer_Category__c.
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<PicklistOption> getLeadCustomerCategoryOptions() {
+        return getPicklistOptions(Lead.Customer_Category__c);
+    }
+
+    /**
+     * @description Returns active Lead Country picklist options.
+     * @return List of PicklistOption values for Lead.Country__c.
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<PicklistOption> getLeadCountryOptions() {
+        return getPicklistOptions(Lead.Country__c);
+    }
+
+    /**
+     * @description Returns active Lead State picklist options.
+     * @return List of PicklistOption values for Lead.State__c.
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<PicklistOption> getLeadStateOptions() {
+        return getPicklistOptions(Lead.State__c);
+    }
+
+    /**
+     * @description Searches Leads by name, stage, department, campaign, lost reason, and created date range.
+     * @param searchTerm Optional Lead Name LIKE filter.
+     * @param stages Optional list of Lead Status values to include.
+     * @param departmentFilter Optional Department_Name__c LIKE filter.
+     * @param campaignFilter Optional Campaign_Name__c LIKE filter.
+     * @param lostReasons Optional list of Lost_Reason__c values to include.
+     * @param fromDate Optional CreatedDate lower bound (inclusive).
+     * @param toDate Optional CreatedDate upper bound (inclusive through end of day).
+     * @param customerCategories Optional list of Customer_Category__c values to include.
+     * @param countryFilter Optional exact Country__c value filter.
+     * @param states Optional list of State__c values to include.
+     * @return Matching Lead records ordered by CreatedDate descending (max 5000).
+     */
     @AuraEnabled
     public static List<Lead> searchLeads(
         String searchTerm,
@@ -28,7 +83,10 @@ public with sharing class LeadManagementController {
         String campaignFilter,
         List<String> lostReasons,
         Date fromDate,
-        Date toDate
+        Date toDate,
+        List<String> customerCategories,
+        String countryFilter,
+        List<String> states
     ) {
         String namePattern = String.isNotBlank(searchTerm)
             ? '%' + searchTerm.trim() + '%'
@@ -52,7 +110,7 @@ public with sharing class LeadManagementController {
 
         String soql =
             'SELECT Id, Name, Status, Email, Phone, Department_Name__c, Lost_Reason__c, Campaign_Name__c, CreatedDate' +
-            ' FROM Lead WHERE Id != null AND Status != \'Qualified\'';
+            ' FROM Lead WHERE Id != null';
 
         if (namePattern != null) {
             soql += ' AND Name LIKE :namePattern';
@@ -75,21 +133,39 @@ public with sharing class LeadManagementController {
         if (toDateTime != null) {
             soql += ' AND CreatedDate <= :toDateTime';
         }
+        if (customerCategories != null && !customerCategories.isEmpty()) {
+            soql += ' AND Customer_Category__c IN :customerCategories';
+        }
+        if (String.isNotBlank(countryFilter)) {
+            soql += ' AND Country__c = :countryFilter';
+        }
+        if (states != null && !states.isEmpty()) {
+            soql += ' AND State__c IN :states';
+        }
 
         soql += ' ORDER BY CreatedDate DESC LIMIT 5000';
         return Database.query(soql);
     }
 
+    /**
+     * @description Returns Leads ordered by CreatedDate descending for the management grid.
+     * @return List of Lead records, including Qualified status.
+     */
     @AuraEnabled(cacheable=true)
     public static List<Lead> getLeads() {
         return [
             SELECT Id, Name, Status, Email, Phone, Department_Name__c, Lost_Reason__c, Campaign_Name__c, CreatedDate
             FROM Lead
-            WHERE Status != 'Qualified'
             ORDER BY CreatedDate DESC
         ];
     }
 
+    /**
+     * @description Sends Infobip campaign email to the selected Leads.
+     * @param leadIds Lead Ids to send email to.
+     * @param infobipTemplateId Infobip email template identifier.
+     * @return SendCampaignEmailResult from BWM_CampaignEmailService.
+     */
     @AuraEnabled
     public static BWM_CampaignEmailService.SendCampaignEmailResult sendLeadCampaignEmail(
         List<Id> leadIds,
@@ -103,6 +179,24 @@ public with sharing class LeadManagementController {
     }
 
     @AuraEnabled
+    public static BWM_CampaignEmailService.SendCampaignEmailResult sendLeadCampaignEmailScheduled(
+        List<Id> leadIds,
+        String infobipTemplateId,
+        String scheduledDateTime
+    ) {
+        BWM_CampaignScheduleContext.setScheduledDateTime(scheduledDateTime);
+        try {
+            return sendLeadCampaignEmail(leadIds, infobipTemplateId);
+        } finally {
+            BWM_CampaignScheduleContext.clear();
+        }
+    }
+
+    /**
+     * @description Loads Bluewave/Infobip email template options for the Lead campaign UI.
+     * @return List of TemplateOption values from BWM_InfobipEmailTemplateService.
+     */
+    @AuraEnabled
     public static List<BWM_InfobipEmailTemplateService.TemplateOption> getBluewaveEmailTemplates() {
         try {
             return BWM_InfobipEmailTemplateService.fetchTemplates();
@@ -111,11 +205,21 @@ public with sharing class LeadManagementController {
         }
     }
 
+    /**
+     * @description Returns active campaign journey options for Lead sends.
+     * @return List of JourneyOption values from BWM_JourneyDefinitionService.
+     */
     @AuraEnabled
     public static List<BWM_JourneyDefinitionService.JourneyOption> getCampaignJourneys() {
         return BWM_JourneyDefinitionService.fetchActiveJourneys();
     }
 
+    /**
+     * @description Starts the selected campaign journey for the given Leads.
+     * @param leadIds Lead Ids to enroll in the journey.
+     * @param journeyName Name of the journey definition to send.
+     * @return SendJourneyResult from BWM_CampaignJourneyService.
+     */
     @AuraEnabled
     public static BWM_JourneyDefinitionService.SendJourneyResult sendLeadJourney(
         List<Id> leadIds,
@@ -124,6 +228,30 @@ public with sharing class LeadManagementController {
         return BWM_CampaignJourneyService.sendToLeads(leadIds, journeyName);
     }
 
+    /**
+     * @description Starts the selected campaign journey at the given UTC schedule time.
+     * @param leadIds Lead Ids to enroll in the journey.
+     * @param journeyName Name of the journey definition to send.
+     * @param scheduledDateTime UTC timestamp yyyy-MM-ddTHH:mm:ssZ written to scheduledatetime.
+     * @return SendJourneyResult from BWM_CampaignJourneyService.
+     */
+    @AuraEnabled
+    public static BWM_JourneyDefinitionService.SendJourneyResult sendLeadJourneyScheduled(
+        List<Id> leadIds,
+        String journeyName,
+        String scheduledDateTime
+    ) {
+        return BWM_CampaignJourneyService.sendToLeads(
+            leadIds,
+            journeyName,
+            scheduledDateTime
+        );
+    }
+
+    /**
+     * @description Loads active custom Lightning EmailTemplate options for Salesforce email sends.
+     * @return List of EmailTemplateOption values ordered by folder and name.
+     */
     @AuraEnabled(cacheable=true)
     public static List<EmailTemplateOption> getEmailTemplates() {
         List<EmailTemplateOption> options = new List<EmailTemplateOption>();
@@ -146,24 +274,44 @@ public with sharing class LeadManagementController {
         return options;
     }
 
+    /**
+     * @description Loads approved WhatsApp template options for Lead campaign sends.
+     * @return List of WhatsAppTemplateOption values.
+     */
     @AuraEnabled
     public static List<LeadManagementWhatsAppService.WhatsAppTemplateOption> getWhatsAppTemplates() {
         return LeadManagementWhatsAppService.fetchApprovedTemplates();
     }
 
+    /**
+     * @description Sends a WhatsApp template message to the selected Leads.
+     * @param leadIds Lead Ids to message.
+     * @param templateName Approved WhatsApp template name.
+     * @return SendWhatsAppResult with send outcome details.
+     */
     @AuraEnabled
     public static LeadManagementWhatsAppService.SendWhatsAppResult sendLeadWhatsApp(
         List<Id> leadIds,
         String templateName
     ) {
-        return LeadManagementWhatsAppService.sendToLeads(leadIds, templateName);
+        return BWM_DirectWaCampaignSend.sendToLeads(leadIds, templateName);
     }
 
+    /**
+     * @description Loads approved RCS template options for Lead campaign sends.
+     * @return List of RcsTemplateOption values.
+     */
     @AuraEnabled
     public static List<LeadManagementRcsService.RcsTemplateOption> getRcsTemplates() {
         return LeadManagementRcsService.fetchApprovedTemplates();
     }
 
+    /**
+     * @description Sends an RCS template message to the selected Leads.
+     * @param leadIds Lead Ids to message.
+     * @param templateName Approved RCS template name.
+     * @return SendRcsResult with send outcome details.
+     */
     @AuraEnabled
     public static LeadManagementRcsService.SendRcsResult sendLeadRcs(
         List<Id> leadIds,
@@ -173,10 +321,34 @@ public with sharing class LeadManagementController {
     }
 
     @AuraEnabled
+    public static LeadManagementRcsService.SendRcsResult sendLeadRcsScheduled(
+        List<Id> leadIds,
+        String templateName,
+        String scheduledDateTime
+    ) {
+        BWM_CampaignScheduleContext.setScheduledDateTime(scheduledDateTime);
+        try {
+            return sendLeadRcs(leadIds, templateName);
+        } finally {
+            BWM_CampaignScheduleContext.clear();
+        }
+    }
+
+    /**
+     * @description Loads approved SMS template options for Lead campaign sends.
+     * @return List of SmsTemplateOption values.
+     */
+    @AuraEnabled
     public static List<BWM_SmsTemplateService.SmsTemplateOption> getSmsTemplates() {
         return BWM_SmsTemplateService.fetchApprovedTemplates();
     }
 
+    /**
+     * @description Sends an SMS template message to the selected Leads.
+     * @param leadIds Lead Ids to message.
+     * @param templateName Approved SMS template name.
+     * @return SendSmsResult with send outcome details.
+     */
     @AuraEnabled
     public static LeadManagementSmsService.SendSmsResult sendLeadSms(
         List<Id> leadIds,
@@ -185,6 +357,26 @@ public with sharing class LeadManagementController {
         return LeadManagementSmsService.sendToLeads(leadIds, templateName);
     }
 
+    @AuraEnabled
+    public static LeadManagementSmsService.SendSmsResult sendLeadSmsScheduled(
+        List<Id> leadIds,
+        String templateName,
+        String scheduledDateTime
+    ) {
+        BWM_CampaignScheduleContext.setScheduledDateTime(scheduledDateTime);
+        try {
+            return sendLeadSms(leadIds, templateName);
+        } finally {
+            BWM_CampaignScheduleContext.clear();
+        }
+    }
+
+    /**
+     * @description Renders and sends Salesforce email templates to Leads, applying org-wide from address and brochure attachments.
+     * @param leadIds Lead Ids to email.
+     * @param templateId Salesforce EmailTemplate Id to render and send.
+     * @return SendEmailResult with sent/skipped counts and per-lead messages.
+     */
     @AuraEnabled
     public static SendEmailResult sendLeadEmails(List<Id> leadIds, Id templateId) {
         SendEmailResult result = new SendEmailResult();
@@ -274,6 +466,10 @@ public with sharing class LeadManagementController {
         return result;
     }
 
+    /**
+     * @description Sets the Lead Management org-wide email address on the message when configured.
+     * @param message SingleEmailMessage to apply the org-wide from address to.
+     */
     private static void applyOrgWideEmail(Messaging.SingleEmailMessage message) {
         List<OrgWideEmailAddress> rows = [
             SELECT Id
@@ -286,6 +482,11 @@ public with sharing class LeadManagementController {
         }
     }
 
+    /**
+     * @description Builds active picklist options from a field describe token.
+     * @param fieldToken Schema field token whose picklist values are read.
+     * @return List of PicklistOption label/value pairs for active entries.
+     */
     private static List<PicklistOption> getPicklistOptions(Schema.SObjectField fieldToken) {
         List<PicklistOption> options = new List<PicklistOption>();
         for (Schema.PicklistEntry entry : fieldToken.getDescribe().getPicklistValues()) {
@@ -304,6 +505,12 @@ public with sharing class LeadManagementController {
         @AuraEnabled
         public String folderName;
 
+        /**
+         * @description Constructs an email template option for the Lead Management UI.
+         * @param templateId EmailTemplate Id stored as value.
+         * @param templateName Display name of the template.
+         * @param folder Folder name of the template.
+         */
         public EmailTemplateOption(Id templateId, String templateName, String folder) {
             value = templateId;
             label = templateName;
@@ -326,6 +533,11 @@ public with sharing class LeadManagementController {
         @AuraEnabled
         public String value;
 
+        /**
+         * @description Constructs a picklist option with label and API value.
+         * @param optionLabel Display label for the option.
+         * @param optionValue API value for the option.
+         */
         public PicklistOption(String optionLabel, String optionValue) {
             label = optionLabel;
             value = optionValue;

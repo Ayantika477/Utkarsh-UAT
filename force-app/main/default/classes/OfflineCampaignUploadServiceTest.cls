@@ -1,3 +1,9 @@
+/**
+ * @description   Test class for OfflineCampaignUploadService parse, validate, and
+ *                insert scenarios.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 @IsTest
 private class OfflineCampaignUploadServiceTest {
   @IsTest
@@ -24,7 +30,8 @@ private class OfflineCampaignUploadServiceTest {
 
     Test.startTest();
     OfflineCampaignUploadService.InsertSummary summary = OfflineCampaignUploadService.insertRows(
-      new List<OfflineCampaignUploadService.UploadRow>{ row }
+      new List<OfflineCampaignUploadService.UploadRow>{ row },
+      'North Region List'
     );
     Test.stopTest();
 
@@ -33,7 +40,7 @@ private class OfflineCampaignUploadServiceTest {
     System.assertEquals(0, summary.failedCount);
 
     Offline_Campaign__c record = [
-      SELECT Name, Email__c, Phone__c, Department__c, Active__c
+      SELECT Name, Email__c, Phone__c, Department__c, Active__c, Group_List__c
       FROM Offline_Campaign__c
       LIMIT 1
     ];
@@ -42,6 +49,31 @@ private class OfflineCampaignUploadServiceTest {
     System.assertEquals('9876543210', record.Phone__c);
     System.assertEquals('Enquiry', record.Department__c);
     System.assertEquals(true, record.Active__c);
+    System.assertEquals('North Region List', record.Group_List__c);
+  }
+
+  @IsTest
+  static void insertRowsRequiresGroupList() {
+    OfflineCampaignUploadService.UploadRow row = new OfflineCampaignUploadService.UploadRow();
+    row.rowKey = 'row-1';
+    row.recordName = 'Offline Campaign One';
+
+    Boolean threw = false;
+    Test.startTest();
+    try {
+      OfflineCampaignUploadService.insertRows(
+        new List<OfflineCampaignUploadService.UploadRow>{ row },
+        '   '
+      );
+    } catch (Exception ex) {
+      threw = true;
+      System.assert(
+        ex instanceof AuraHandledException,
+        'Expected AuraHandledException, got: ' + ex.getTypeName()
+      );
+    }
+    Test.stopTest();
+    System.assert(threw);
   }
 
   @IsTest
@@ -54,7 +86,8 @@ private class OfflineCampaignUploadServiceTest {
 
     Test.startTest();
     OfflineCampaignUploadService.InsertSummary summary = OfflineCampaignUploadService.insertRows(
-      new List<OfflineCampaignUploadService.UploadRow>{ row }
+      new List<OfflineCampaignUploadService.UploadRow>{ row },
+      'Validation Group'
     );
     Test.stopTest();
 
@@ -86,7 +119,8 @@ private class OfflineCampaignUploadServiceTest {
     Test.startTest();
     List<OfflineCampaignUploadService.PicklistOption> options = OfflineCampaignUploadController.getDepartmentOptions();
     OfflineCampaignUploadService.InsertSummary summary = OfflineCampaignUploadController.insertOfflineCampaignRows(
-      JSON.serialize(new List<OfflineCampaignUploadService.UploadRow>{ row })
+      JSON.serialize(new List<OfflineCampaignUploadService.UploadRow>{ row }),
+      'Controller Group'
     );
     Test.stopTest();
 
@@ -104,7 +138,10 @@ private class OfflineCampaignUploadServiceTest {
     List<OfflineCampaignUploadService.UploadRow> rows = OfflineCampaignUploadService.parseUploadRows(
       rowsJson
     );
-    OfflineCampaignUploadService.InsertSummary summary = OfflineCampaignUploadService.insertRows(rows);
+    OfflineCampaignUploadService.InsertSummary summary = OfflineCampaignUploadService.insertRows(
+      rows,
+      'Upload Group A'
+    );
     Test.stopTest();
 
     System.assertEquals(1, rows.size());

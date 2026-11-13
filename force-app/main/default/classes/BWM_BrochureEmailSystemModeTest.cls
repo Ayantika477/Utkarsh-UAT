@@ -1,3 +1,9 @@
+/**
+ * @description   Test class covering brochure attachment and system-mode email send
+ *                behavior.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 @IsTest
 private class BWM_BrochureEmailSystemModeTest {
   private class PdfCalloutMock implements HttpCalloutMock {

@@ -466,6 +466,37 @@ public without sharing class BWM_FieldValueResolver {
     return '';
   }
 
+  /**
+   * @description SMS phone-slot value: Owner Mobile/Phone only. If both are blank,
+   *              return blank — never Owner.Name. Non-name literals (static numbers)
+   *              are kept.
+   */
+  public static String resolveSmsOwnerPhoneSlot(
+    SObject record,
+    String currentValue
+  ) {
+    String ownerPhone = resolveRecord(record, 'Owner.Phone');
+    if (String.isNotBlank(ownerPhone)) {
+      return ownerPhone.trim();
+    }
+
+    if (String.isBlank(currentValue)) {
+      return '';
+    }
+
+    String trimmed = currentValue.trim();
+    String ownerName = resolveRecord(record, 'Owner.Name');
+    if (
+      String.isNotBlank(ownerName) &&
+      ownerName.trim().equalsIgnoreCase(trimmed)
+    ) {
+      return '';
+    }
+
+    String digitsOnly = trimmed.replaceAll('[^0-9]', '');
+    return digitsOnly.length() >= 10 ? trimmed : '';
+  }
+
   private static String safeGetField(SObject record, String fieldPath) {
     if (record == null || String.isBlank(fieldPath)) {
       return '';

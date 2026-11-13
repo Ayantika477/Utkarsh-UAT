@@ -1,3 +1,8 @@
+/**
+ * @description   Test class for ThirdPartyPayloadReceiver REST webhook handling.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 @IsTest
 private class ThirdPartyPayloadReceiverTest {
   @IsTest

@@ -1,4 +1,12 @@
-trigger TenderShareTrigger on Tender__c (after insert, after update) {
+trigger TenderShareTrigger on Tender__c (before update, after insert, after update) {
+
+    if (Trigger.isBefore && Trigger.isUpdate) {
+
+        TenderOwnerValidationHandler.validateOwnerChange(
+            Trigger.new,
+            Trigger.oldMap
+        );
+    }
 
     // Check if trigger is enabled in Custom Metadata
     Tender_Trigger_Controll__mdt  setting = Tender_Trigger_Controll__mdt.getInstance('Tender_Share_Trigger');
@@ -35,4 +43,34 @@ trigger TenderShareTrigger on Tender__c (after insert, after update) {
             }
         }
     }
+    
+   try {
+        if (System.isBatch() || System.isFuture() || System.isQueueable()) {
+            return;
+        }
+
+        if (Trigger.isAfter && Trigger.isInsert) {
+            // Use ONE of these for insert alerts — not both (avoids duplicate New Tender emails)
+            // Option A: existing notification handler
+            //TenderNotificationHandler.notifyNewTenders(Trigger.new);
+            
+            
+            // and other trigger work are not blocked by email SOQL.
+            // Do not call TenderStatusEmailHandler.handleAfterInsert here.
+            // Insert emails run in TenderNewTenderAlertEmailQueueable so sharing
+            TenderNewTenderAlertEmailQueueable.enqueue(Trigger.newMap.keySet());
+        }
+
+        if (Trigger.isAfter && Trigger.isUpdate) {
+            TenderStatusEmailHandler.handleAfterUpdate(Trigger.new, Trigger.oldMap);
+        }
+    } catch (Exception ex) {
+        System.debug(
+            LoggingLevel.ERROR,
+            'Tender email/notification failed: ' + ex.getMessage()
+            + '\n' + ex.getStackTraceString()
+        );
+    }
+
+        
 }

@@ -13,8 +13,7 @@
                 <p class="slds-text-body_regular slds-m-bottom_small">
                     Generate a Price Calculation from the <strong>Design Estimation.pdf</strong> uploaded to this
                     Opportunity. The section values are read from the estimation and mapped to the raw-material line
-                    items, any line items under <strong>Note</strong> are added as Special Items; you can then adjust
-                    weights, add accessories &amp; buyouts, select conversion costs and apply a margin.
+                    items; you can then adjust weights, add accessories &amp; buyouts, select conversion costs and apply a margin.
                 </p>
                 <lightning-button
                     variant="brand"
@@ -159,28 +158,29 @@
                                 <template for:each={accessories} for:item="row">
                                     <tr key={row.rowId}>
                                         <td>{row.description}</td>
-                                        <td>
-                                            <lightning-combobox variant="label-hidden" options={unitOptions}
-                                                value={row.unit} data-id={row.rowId} data-field="unit"
-                                                onchange={handleAccessoryChange}></lightning-combobox>
-                                        </td>
+                                        <td class="ctr">{row.unit}</td>
                                         <td>
                                             <lightning-input type="number" variant="label-hidden" min="0" step="any"
                                                 value={row.qty} data-id={row.rowId} data-field="qty"
                                                 onchange={handleAccessoryChange}></lightning-input>
                                         </td>
                                         <td>
-                                            <lightning-input type="number" variant="label-hidden" min="0" step="any"
-                                                value={row.unitWt} data-id={row.rowId} data-field="unitWt"
-                                                onchange={handleAccessoryChange}></lightning-input>
+                                            <template lwc:if={row.fixedUnitWt}>
+                                                <lightning-formatted-number value={row.unitWt}
+                                                    maximum-fraction-digits="2"></lightning-formatted-number>
+                                            </template>
+                                            <template lwc:else>
+                                                <lightning-input type="number" variant="label-hidden" min="0" step="any"
+                                                    value={row.unitWt} data-id={row.rowId} data-field="unitWt"
+                                                    onchange={handleAccessoryChange}></lightning-input>
+                                            </template>
                                         </td>
                                         <td class="rgt">
                                             <lightning-formatted-number value={row.totalWeight}
                                                 maximum-fraction-digits="2"></lightning-formatted-number>
                                         </td>
                                         <td class="rgt">
-                                            <lightning-formatted-number value={row.rate}
-                                                maximum-fraction-digits="2"></lightning-formatted-number>
+                                            <lightning-formatted-number value={row.rate} maximum-fraction-digits="2"></lightning-formatted-number>
                                         </td>
                                         <td class="rgt">
                                             <lightning-formatted-number value={row.cost}
@@ -234,7 +234,7 @@
                                     <th class="ctr" style="width:7rem">Qty</th>
                                     <th class="ctr" style="width:7rem">Unit Wt.</th>
                                     <th class="rgt" style="width:8rem">Total Weight</th>
-                                    <th class="ctr" style="width:7rem">Rate</th>
+                                    <th class="rgt" style="width:7rem">Rate</th>
                                     <th class="rgt" style="width:8rem">Cost (Rs.)</th>
                                     <th style="width:3rem"></th>
                                 </tr>
@@ -243,29 +243,21 @@
                                 <template for:each={buyouts} for:item="row">
                                     <tr key={row.rowId}>
                                         <td>{row.description}</td>
-                                        <td>
-                                            <lightning-combobox variant="label-hidden" options={unitOptions}
-                                                value={row.unit} data-id={row.rowId} data-field="unit"
-                                                onchange={handleBuyoutChange}></lightning-combobox>
-                                        </td>
+                                        <td class="ctr">{row.unit}</td>
                                         <td>
                                             <lightning-input type="number" variant="label-hidden" min="0" step="any"
                                                 value={row.qty} data-id={row.rowId} data-field="qty"
                                                 onchange={handleBuyoutChange}></lightning-input>
                                         </td>
-                                        <td>
-                                            <lightning-input type="number" variant="label-hidden" min="0" step="any"
-                                                value={row.unitWt} data-id={row.rowId} data-field="unitWt"
-                                                onchange={handleBuyoutChange}></lightning-input>
+                                        <td class="ctr">
+                                            <lightning-formatted-number value={row.unitWt} maximum-fraction-digits="2"></lightning-formatted-number>
                                         </td>
                                         <td class="rgt">
                                             <lightning-formatted-number value={row.totalWeight}
                                                 maximum-fraction-digits="2"></lightning-formatted-number>
                                         </td>
-                                        <td>
-                                            <lightning-input type="number" variant="label-hidden" min="0" step="any"
-                                                value={row.rate} data-id={row.rowId} data-field="rate"
-                                                onchange={handleBuyoutChange}></lightning-input>
+                                        <td class="rgt">
+                                            <lightning-formatted-number value={row.rate} maximum-fraction-digits="2"></lightning-formatted-number>
                                         </td>
                                         <td class="rgt">
                                             <lightning-formatted-number value={row.cost}
@@ -315,9 +307,11 @@
                                 <tr class="slds-line-height_reset">
                                     <th>Description</th>
                                     <th class="ctr" style="width:7rem">Unit</th>
-                                    <th class="ctr" style="width:9rem">Qty / Weight</th>
-                                    <th class="ctr" style="width:8rem">Rate (manual)</th>
-                                    <th class="rgt" style="width:8rem">Cost (Rs.)</th>
+                                    <th class="ctr" style="width:7rem">Quantity</th>
+                                    <th class="ctr" style="width:7rem">Unit Wt</th>
+                                    <th class="rgt" style="width:8rem">Total Wt</th>
+                                    <th class="ctr" style="width:8rem">Rate</th>
+                                    <th class="rgt" style="width:9rem">Cost (Rs.)</th>
                                     <th style="width:3rem"></th>
                                 </tr>
                             </thead>
@@ -342,6 +336,16 @@
                                         </td>
                                         <td>
                                             <lightning-input type="number" variant="label-hidden" min="0" step="any"
+                                                value={row.unitWt} data-id={row.rowId} data-field="unitWt"
+                                                placeholder="Unit Wt"
+                                                onchange={handleSpecialChange}></lightning-input>
+                                        </td>
+                                        <td class="rgt">
+                                            <lightning-formatted-number value={row.totalWeight}
+                                                maximum-fraction-digits="2"></lightning-formatted-number>
+                                        </td>
+                                        <td>
+                                            <lightning-input type="number" variant="label-hidden" min="0" step="any"
                                                 value={row.rate} data-id={row.rowId} data-field="rate"
                                                 placeholder="Enter rate"
                                                 onchange={handleSpecialChange}></lightning-input>
@@ -358,7 +362,7 @@
                                     </tr>
                                 </template>
                                 <tr class="subtotal">
-                                    <td colspan="2" class="rgt">Sub Total of Special Items</td>
+                                    <td colspan="4" class="rgt">Sub Total of Special Items</td>
                                     <td class="rgt">
                                         <lightning-formatted-number value={totals.specialItemsTotalWeight}
                                             maximum-fraction-digits="2"></lightning-formatted-number>
@@ -521,19 +525,35 @@
                             onchange={handlePaymentTermChange}></lightning-input>
                         <p class="terms-hint">Prints after &ldquo;entire consignment within a period of&rdquo;</p>
                     </div>
+                    <!--
                     <div class="terms-field">
                         <lightning-input type="text" label="Erection Period"
                             placeholder="e.g. 6 weeks" value={erectionPeriod}
                             data-field="erectionPeriod"
                             onchange={handlePaymentTermChange}></lightning-input>
                         <p class="terms-hint">Prints after &ldquo;erection shall be completed within another additional period of&rdquo;</p>
-                    </div>
+                    </div>-->
                     <div class="terms-field">
-                        <lightning-input type="text" label="Validity"
-                            placeholder="e.g. 30 days" value={offerValidity}
-                            data-field="offerValidity"
+                        <lightning-input type="number" label="Validity (days)"
+                            placeholder="e.g. 10" value={offerValidity}
+                            min="1" max="15" step="1" data-field="offerValidity"
+                            message-when-range-overflow="Validity cannot be more than 15 days"
                             onchange={handlePaymentTermChange}></lightning-input>
                         <p class="terms-hint">Prints after &ldquo;This offer shall remain valid for a period of&rdquo;</p>
+                    </div>
+                </div>
+                <div class="slds-box slds-box_x-small terms-box slds-m-top_small">
+                    <div class="terms-box__header">Transportation</div>
+                    <div class="terms-field">
+                        <lightning-combobox label="Delivery Term"
+                            options={deliveryTermOptions} value={deliveryTerm}
+                            onchange={handleDeliveryTermChange}></lightning-combobox>
+                    </div>
+                    <div class="terms-field">
+                        <lightning-input type="number" label="Transportation Rate" min="0" step="any"
+                            value={transportationValue} disabled={isExWorks}
+                            onchange={handleTransportationValueChange}></lightning-input>
+                        <p class="terms-hint">Counted in the cost totals only when Delivery Term is FOR</p>
                     </div>
                 </div>
                 </div>
@@ -562,6 +582,14 @@
                     <div class="tot-row strong">
                         <span>Total Price (Project Cost + Margin)</span>
                         <lightning-formatted-number value={totals.totalWithMargin} maximum-fraction-digits="0"></lightning-formatted-number>
+                    </div>
+                    <div class="tot-row">
+                        <span>Total Weight (Kg)</span>
+                        <lightning-formatted-number value={totals.totalWeightAll} maximum-fraction-digits="2"></lightning-formatted-number>
+                    </div>
+                    <div class="tot-row">
+                        <span>Benchmark Threshold Price (₹{benchmarkRate}/Kg)</span>
+                        <lightning-formatted-number value={totals.totalPriceCalc} maximum-fraction-digits="0"></lightning-formatted-number>
                     </div>
                     <div class="tot-row">
                         <span class="margin-label">

@@ -15,6 +15,20 @@ public without sharing class FieldForceDashboardController {
         @AuraEnabled public List<MapMarker> mapMarkers;
         @AuraEnabled public List<TrackLocationDTO> trackLocations;
         @AuraEnabled public List<VisitNodeDTO> visitNodes;
+        @AuraEnabled public List<PunchMarkerDTO> punchMarkers;
+    }
+
+    public class PunchMarkerDTO {
+        @AuraEnabled public String id;
+        @AuraEnabled public String punchType;
+        @AuraEnabled public String action;
+        @AuraEnabled public String label;
+        @AuraEnabled public String title;
+        @AuraEnabled public Double latitude;
+        @AuraEnabled public Double longitude;
+        @AuraEnabled public String address;
+        @AuraEnabled public String timeLabel;
+        @AuraEnabled public String color;
     }
 
     public class TrackLocationDTO {
@@ -30,6 +44,7 @@ public without sharing class FieldForceDashboardController {
         @AuraEnabled public String clientName;
         @AuraEnabled public String checkInTime;
         @AuraEnabled public String checkOutTime;
+        @AuraEnabled public String visitDuration;
         @AuraEnabled public String visitCategory;
         @AuraEnabled public String visitType;
         @AuraEnabled public Boolean isActive;
@@ -45,6 +60,16 @@ public without sharing class FieldForceDashboardController {
         @AuraEnabled public String status;
         @AuraEnabled public String type; // 'WFH' or 'WFO'
         @AuraEnabled public Id approverId;
+        @AuraEnabled public String approverName;
+        @AuraEnabled public String remarks;
+        @AuraEnabled public String requestNote;
+        // Day Activity Log captured when the approved WFH/WFO session was ended
+        @AuraEnabled public Boolean isCompleted = false;
+        @AuraEnabled public Decimal noOfEmails;
+        @AuraEnabled public Decimal noOfMeetings;
+        @AuraEnabled public Decimal noOfOffersSent;
+        @AuraEnabled public Decimal noOfPhoneCalls;
+        @AuraEnabled public String openNotes;
     }
 
     public class AttendanceSummary {
@@ -60,6 +85,12 @@ public without sharing class FieldForceDashboardController {
         @AuraEnabled public Decimal batteryLevel;
         @AuraEnabled public String gpsStatus;
         @AuraEnabled public Integer totalVisits;
+
+        //@AuraEnabled public Decimal startingExtractedOdometer;
+        //@AuraEnabled public Decimal endingExtractedOdometer;
+        @AuraEnabled public Decimal odometerDistanceKm;
+        @AuraEnabled public Decimal distanceDeviationKm;
+        @AuraEnabled public Decimal distanceDeviationPercent;
     }
 
     public class TimelineItem implements Comparable {
@@ -163,71 +194,71 @@ public without sharing class FieldForceDashboardController {
         List<SalespersonOption> options = new List<SalespersonOption>();
         Id currentUserId = UserInfo.getUserId();
 
-        // 1. Check if Admin
-        Boolean isAdmin = false;
-        try {
-            //isAdmin = [SELECT Name FROM Profile WHERE Id = :UserInfo.getProfileId()].Name == 'System Administrator';
-            String profileName = [SELECT Name FROM Profile WHERE Id = :UserInfo.getProfileId()].Name;
-            isAdmin = profileName == 'System Administrator' || profileName == 'Utkarsh Admin';
-        } catch (Exception e) {
-            // fallback
-        }
+        // 1. Admin and HR can view all users. HR cannot approve WFH/WFO.
+        Boolean canViewAll = canViewAllFieldForceUsers();
 
         // 2. Fetch subordinates if Manager or HOD
         Set<Id> subordinateUserIds = new Set<Id>();
-        
-        // standard Manager check
-        for (User u : [SELECT Id FROM User WHERE ManagerId = :currentUserId AND IsActive = true]) {
-            subordinateUserIds.add(u.Id);
-        }
-        
-        // HOD / CRM Head role prefix check
-        try {
-            User currentUser = [SELECT Id, UserRole.Name FROM User WHERE Id = :currentUserId LIMIT 1];
-            String currentRoleName = currentUser.UserRole != null ? currentUser.UserRole.Name : '';
-            String deptPrefix = '';
-            if (String.isNotBlank(currentRoleName)) {
-                if (currentRoleName.endsWith(' HOD')) {
-                    deptPrefix = currentRoleName.substringBefore(' HOD').trim();
-                } else if (currentRoleName.endsWith(' CRM Head')) {
-                    deptPrefix = currentRoleName.substringBefore(' CRM Head').trim();
-                }
+
+        // Utkarsh HOD / CRM Head: department based visibility (self + users of their department(s))
+        String currentProfileName = currentUserProfileName();
+        if (currentProfileName == HOD_PROFILE_NAME || currentProfileName == CRM_HEAD_PROFILE_NAME) {
+            subordinateUserIds.addAll(getDepartmentUserIds(currentUserId, currentProfileName == CRM_HEAD_PROFILE_NAME));
+        } else {
+            // standard Manager check
+            for (User u : [SELECT Id FROM User WHERE ManagerId = :currentUserId AND IsActive = true]) {
+                subordinateUserIds.add(u.Id);
             }
-            
-            if (String.isNotBlank(deptPrefix)) {
-                String likePattern = deptPrefix + '%';
-                for (User u : [
-                    SELECT Id FROM User 
-                    WHERE IsActive = true 
-                    AND UserRole.Name LIKE :likePattern
-                ]) {
-                    subordinateUserIds.add(u.Id);
-                }
-            }
-        } catch (Exception e) {
-            System.debug('Failed to query current user role or role-aligned subordinates: ' + e.getMessage());
         }
-        
-        // Custom Manager Assignment metadata check
-        try {
-            for (Manager_Assignment__mdt ma : [
-                SELECT Target_User_Id__c 
-                FROM Manager_Assignment__mdt 
-                WHERE Manager_User_Id__c = :String.valueOf(currentUserId)
-            ]) {
-                if (String.isNotBlank(ma.Target_User_Id__c)) {
-                    subordinateUserIds.add((Id)ma.Target_User_Id__c);
-                }
-            }
-        } catch (Exception e) {
-            System.debug('Manager_Assignment__mdt query failed: ' + e.getMessage());
-        }
+
+        // Role based matching replaced by department based matching for Utkarsh HOD / CRM Head profiles
+        // // HOD / CRM Head role prefix check
+        // try {
+        //     User currentUser = [SELECT Id, UserRole.Name FROM User WHERE Id = :currentUserId LIMIT 1];
+        //     String currentRoleName = currentUser.UserRole != null ? currentUser.UserRole.Name : '';
+        //     String deptPrefix = '';
+        //     if (String.isNotBlank(currentRoleName)) {
+        //         if (currentRoleName.endsWith(' HOD')) {
+        //             deptPrefix = currentRoleName.substringBefore(' HOD').trim();
+        //         } else if (currentRoleName.endsWith(' CRM Head')) {
+        //             deptPrefix = currentRoleName.substringBefore(' CRM Head').trim();
+        //         }
+        //     }
+        //
+        //     if (String.isNotBlank(deptPrefix)) {
+        //         String likePattern = deptPrefix + '%';
+        //         for (User u : [
+        //             SELECT Id FROM User
+        //             WHERE IsActive = true
+        //             AND UserRole.Name LIKE :likePattern
+        //         ]) {
+        //             subordinateUserIds.add(u.Id);
+        //         }
+        //     }
+        // } catch (Exception e) {
+        //     System.debug('Failed to query current user role or role-aligned subordinates: ' + e.getMessage());
+        // }
+
+        // // Custom Manager Assignment metadata check
+        // try {
+        //     for (Manager_Assignment__mdt ma : [
+        //         SELECT Target_User_Id__c
+        //         FROM Manager_Assignment__mdt
+        //         WHERE Manager_User_Id__c = :String.valueOf(currentUserId)
+        //     ]) {
+        //         if (String.isNotBlank(ma.Target_User_Id__c)) {
+        //             subordinateUserIds.add((Id)ma.Target_User_Id__c);
+        //         }
+        //     }
+        // } catch (Exception e) {
+        //     System.debug('Manager_Assignment__mdt query failed: ' + e.getMessage());
+        // }
 
         Boolean isManager = !subordinateUserIds.isEmpty();
 
         // 3. Query User records
         List<User> users = new List<User>();
-        if (isAdmin) {
+        if (canViewAll) {
             users = [
                 SELECT Id, Name, Phone FROM User 
                 WHERE IsActive = true 
@@ -263,17 +294,150 @@ public without sharing class FieldForceDashboardController {
         return options;
     }
 
+    public static final String HOD_PROFILE_NAME = 'Utkarsh HOD';
+    public static final String CRM_HEAD_PROFILE_NAME = 'CRM Head';
+
+    // Department name (User.Department, uppercased) -> User.Departments__c picklist value
+    private static final Map<String, String> DEPARTMENT_NORMALIZATION_MAP = new Map<String, String>{
+        'HIGH MAST & POLYGONAL'             => 'High_Mast_Department',
+        'CRASH BARRIER'                     => 'Crash_Barrier_Department',
+        'HDPE'                              => 'HDPE_Pipe_Department',
+        'STEEL TUBULAR POLES'               => 'Steel_Tubular_Pole_Department',
+        'POLYMER'                           => 'PVC',
+        'TRANSMISSION & TELECOM TOWER'      => 'Transmission_Tower_Department',
+        'PRE ENGINEERING BUILDING'          => 'PEB',
+        'SOLAR STRUCTURE'                   => 'Solar_Structure_Department',
+        'RAILWAY ELECTRIFICATION STRUCTURE' => 'Core_Department',
+        'STEEL PIPES'                       => 'Steel_Pipes_Department'
+    };
+
+    /**
+     * Users visible to an Utkarsh HOD / CRM Head (current user is added by the caller).
+     * - Utkarsh HOD: active users whose Department equals the HOD's Department.
+     * - CRM Head: active users whose Department is one of the CRM Head's Departments__c values
+     *   or that department's name (e.g. 'Crash Barrier' for 'Crash_Barrier_Department').
+     */
+    public static Set<Id> getDepartmentUserIds(Id currentUserId, Boolean isCrmHead) {
+        Set<Id> userIds = new Set<Id>();
+        try {
+            User currentUser = [SELECT Id, Department, Departments__c FROM User WHERE Id = :currentUserId LIMIT 1];
+
+            if (!isCrmHead) {
+                if (String.isBlank(currentUser.Department)) {
+                    return userIds;
+                }
+                for (User u : [
+                    SELECT Id FROM User
+                    WHERE IsActive = true
+                    AND Department = :currentUser.Department
+                ]) {
+                    userIds.add(u.Id);
+                }
+                return userIds;
+            }
+
+            if (String.isBlank(currentUser.Departments__c)) {
+                return userIds;
+            }
+            Set<String> crmHeadDepts = new Set<String>();
+            for (String rawDept : currentUser.Departments__c.split(';')) {
+                if (String.isNotBlank(rawDept)) {
+                    crmHeadDepts.add(rawDept.trim());
+                }
+            }
+            if (crmHeadDepts.isEmpty()) {
+                return userIds;
+            }
+
+            // Department names that map to the CRM Head's Departments__c values
+            Set<String> deptNames = new Set<String>(crmHeadDepts);
+            for (String deptName : DEPARTMENT_NORMALIZATION_MAP.keySet()) {
+                if (crmHeadDepts.contains(DEPARTMENT_NORMALIZATION_MAP.get(deptName))) {
+                    deptNames.add(deptName);
+                }
+            }
+
+            for (User u : [
+                SELECT Id FROM User
+                WHERE IsActive = true
+                AND Department IN :deptNames
+            ]) {
+                userIds.add(u.Id);
+            }
+        } catch (Exception e) {
+            System.debug('Failed to query department aligned users: ' + e.getMessage());
+        }
+        return userIds;
+    }
+
     @AuraEnabled(cacheable=true)
     public static Boolean isCurrentUserAdmin() {
+        String profileName = currentUserProfileName();
+        return profileName == 'System Administrator' || profileName == 'Utkarsh Admin';
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Boolean isCurrentUserHr() {
+        return currentUserProfileName() == 'Utkarsh HR';
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Boolean canViewAllFieldForceUsers() {
+        String profileName = currentUserProfileName();
+        return profileName == 'System Administrator'
+            || profileName == 'Utkarsh Admin'
+            || profileName == 'Utkarsh HR';
+    }
+
+    private static String currentUserProfileName() {
         List<Profile> pList = [SELECT Name FROM Profile WHERE Id = :UserInfo.getProfileId() LIMIT 1];
-        // return !pList.isEmpty() && pList[0].Name == 'System Administrator';
-        return !pList.isEmpty() && (pList[0].Name == 'System Administrator' || pList[0].Name == 'Utkarsh Admin');
+        return pList.isEmpty() ? '' : pList[0].Name;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Boolean isCurrentUserHod() {
+        User currentUser = [
+            SELECT Profile.Name, UserRole.Name
+            FROM User
+            WHERE Id = :UserInfo.getUserId()
+            LIMIT 1
+        ];
+        String profileName = currentUser.Profile != null ? currentUser.Profile.Name : '';
+        if (profileName == 'Utkarsh HOD' || profileName == 'CRM Head' || profileName == 'Utkarsh CRM Head') {
+            return true;
+        }
+        String roleName = currentUser.UserRole != null ? currentUser.UserRole.Name : '';
+        if (String.isBlank(roleName)) {
+            return false;
+        }
+        return roleName == 'CRM Head'
+            || roleName.endsWith(' HOD')
+            || roleName.endsWith(' CRM Head');
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Boolean canCurrentUserApproveWfh() {
+        if (isCurrentUserAdmin()) {
+            return true;
+        }
+        User currentUser = [
+            SELECT Profile.Name, UserRole.Name
+            FROM User
+            WHERE Id = :UserInfo.getUserId()
+            LIMIT 1
+        ];
+        String profileName = currentUser.Profile != null ? currentUser.Profile.Name : '';
+        if (profileName == 'Utkarsh HOD') {
+            return true;
+        }
+        String roleName = currentUser.UserRole != null ? currentUser.UserRole.Name : '';
+        return String.isNotBlank(roleName) && roleName.endsWith(' HOD');
     }
 
     /**
      * Retrieves WFH and WFO request applications for all provided team users in the department.
      */
-    @AuraEnabled(cacheable=true)
+    @AuraEnabled
     public static List<DepartmentWFHRequestDTO> getTeamWFHRequests(List<Id> userIds) {
         List<DepartmentWFHRequestDTO> results = new List<DepartmentWFHRequestDTO>();
         if (userIds == null || userIds.isEmpty()) {
@@ -281,8 +445,9 @@ public without sharing class FieldForceDashboardController {
         }
 
         for (Punch_Record__c pr : [
-            SELECT Id, WFH_Request_Date__c, WFH_Request_Start_Time__c, WFH_Request_End_Time__c, 
-                   WFH_Approval_Status__c, Is_WFH_Request__c, Is_WFO_Request__c, User__c, User__r.Name, WFH_Approver__c
+            SELECT Id, WFH_Request_Date__c, WFH_Request_Start_Time__c, WFH_Request_End_Time__c,
+                   WFH_Approval_Status__c, Is_WFH_Request__c, Is_WFO_Request__c, User__c, User__r.Name,
+                   WFH_Approver__c, WFH_Approver__r.Name, Approver_Remarks__c, WFH_Activity__c
             FROM Punch_Record__c
             WHERE User__c IN :userIds
             AND (Is_WFH_Request__c = true OR Is_WFO_Request__c = true)
@@ -292,6 +457,7 @@ public without sharing class FieldForceDashboardController {
             DepartmentWFHRequestDTO dto = new DepartmentWFHRequestDTO();
             dto.requestId = pr.Id;
             dto.approverId = pr.WFH_Approver__c;
+            dto.approverName = pr.WFH_Approver__r != null ? pr.WFH_Approver__r.Name : null;
             dto.userName = pr.User__r.Name;
             dto.userId = pr.User__c;
             dto.requestDate = pr.WFH_Request_Date__c;
@@ -305,9 +471,87 @@ public without sharing class FieldForceDashboardController {
             }
             dto.status = pr.WFH_Approval_Status__c;
             dto.type = pr.Is_WFH_Request__c ? 'WFH' : 'WFO';
+            dto.remarks = pr.Approver_Remarks__c;
+            dto.requestNote = pr.WFH_Activity__c;
             results.add(dto);
         }
+
+        attachCompletedSessionActivity(results);
         return results;
+    }
+
+    /**
+     * For approved WFH/WFO requests, finds the matching session OUT punch(es) (same user, same type,
+     * on the request date) and attaches the Day Activity Log captured when the session was ended.
+     */
+    private static void attachCompletedSessionActivity(List<DepartmentWFHRequestDTO> requests) {
+        Set<Id> userIds = new Set<Id>();
+        Date minDate;
+        Date maxDate;
+        for (DepartmentWFHRequestDTO dto : requests) {
+            if (dto.status != 'Approved' || dto.requestDate == null) {
+                continue;
+            }
+            userIds.add(dto.userId);
+            if (minDate == null || dto.requestDate < minDate) minDate = dto.requestDate;
+            if (maxDate == null || dto.requestDate > maxDate) maxDate = dto.requestDate;
+        }
+        if (userIds.isEmpty()) {
+            return;
+        }
+
+        Datetime rangeStart = Datetime.newInstance(minDate, Time.newInstance(0, 0, 0, 0));
+        Datetime rangeEnd = Datetime.newInstance(maxDate.addDays(1), Time.newInstance(0, 0, 0, 0));
+
+        // Key: userId|type|date -> OUT punches for that session day
+        Map<String, List<Punch_Record__c>> outsByKey = new Map<String, List<Punch_Record__c>>();
+        for (Punch_Record__c outRec : [
+            SELECT Id, User__c, Punch_Type__c, Punch_Time__c,
+                   No_of_Emails__c, No_of_Meetings__c, No_of_Offers_Sent__c, No_of_Phone_Calls__c, Open_Notes__c
+            FROM Punch_Record__c
+            WHERE User__c IN :userIds
+              AND Action__c = 'OUT'
+              AND Punch_Type__c IN ('WFH', 'WFO')
+              AND Is_WFH_Request__c = false
+              AND Is_WFO_Request__c = false
+              AND Punch_Time__c >= :rangeStart
+              AND Punch_Time__c < :rangeEnd
+            ORDER BY Punch_Time__c ASC
+        ]) {
+            String key = outRec.User__c + '|' + outRec.Punch_Type__c + '|' + String.valueOf(outRec.Punch_Time__c.date());
+            if (!outsByKey.containsKey(key)) {
+                outsByKey.put(key, new List<Punch_Record__c>());
+            }
+            outsByKey.get(key).add(outRec);
+        }
+
+        for (DepartmentWFHRequestDTO dto : requests) {
+            if (dto.status != 'Approved' || dto.requestDate == null) {
+                continue;
+            }
+            List<Punch_Record__c> outs = outsByKey.get(dto.userId + '|' + dto.type + '|' + String.valueOf(dto.requestDate));
+            if (outs == null || outs.isEmpty()) {
+                continue;
+            }
+            dto.isCompleted = true;
+            // If the user ran more than one session that day, roll the counts up and join the notes
+            List<String> notes = new List<String>();
+            for (Punch_Record__c outRec : outs) {
+                dto.noOfEmails = addNullable(dto.noOfEmails, outRec.No_of_Emails__c);
+                dto.noOfMeetings = addNullable(dto.noOfMeetings, outRec.No_of_Meetings__c);
+                dto.noOfOffersSent = addNullable(dto.noOfOffersSent, outRec.No_of_Offers_Sent__c);
+                dto.noOfPhoneCalls = addNullable(dto.noOfPhoneCalls, outRec.No_of_Phone_Calls__c);
+                if (String.isNotBlank(outRec.Open_Notes__c)) {
+                    notes.add(outRec.Open_Notes__c.trim());
+                }
+            }
+            dto.openNotes = notes.isEmpty() ? null : String.join(notes, '\n\n');
+        }
+    }
+
+    private static Decimal addNullable(Decimal total, Decimal value) {
+        if (value == null) return total;
+        return total == null ? value : total + value;
     }
 
     /**
@@ -348,25 +592,27 @@ public without sharing class FieldForceDashboardController {
         if (hasDayInToday) {
             effectiveStart = todaysShiftStarts[0].Punch_Time__c;
         } else {
-            effectiveStart = endOfDay;
+            effectiveStart = startOfDay;
         }
 
         // 2. Fetch data directly using User ID
         List<Punch_Record__c> punches = [
             SELECT Id, Action__c, Status__c, Punch_Time__c, Latitude__c, Longitude__c, Address__c, Battery__c, Punch_Type__c,
-                   Transportation_Type__c, Vehicle_Type__c, Odometer_Reading__c,
+                   Transportation_Type__c, Vehicle_Type__c, Odometer_Reading__c, Extracted_Odometer_Reading__c, Odometer_Distance__c,
                    WFH_Activity__c, WFH_Approval_Status__c, Device_Model__c, Device_OS__c
             FROM Punch_Record__c
             WHERE User__c = :userId
               AND Punch_Time__c >= :effectiveStart
               AND Punch_Time__c <= :endOfDay
+              AND Is_WFH_Request__c = false
+              AND Is_WFO_Request__c = false
             ORDER BY Punch_Time__c ASC
         ];
 
         // Fetch prior check-in (limit to last 7 days to keep query volume small)
         List<Punch_Record__c> priorPunches = [
             SELECT Id, Action__c, Status__c, Punch_Time__c, Latitude__c, Longitude__c, Address__c, Battery__c, Punch_Type__c,
-                   Transportation_Type__c, Vehicle_Type__c, Odometer_Reading__c,
+                   Transportation_Type__c, Vehicle_Type__c, Odometer_Reading__c, Extracted_Odometer_Reading__c, Odometer_Distance__c,
                    WFH_Activity__c, WFH_Approval_Status__c, Device_Model__c, Device_OS__c
             FROM Punch_Record__c
             WHERE User__c = :userId
@@ -382,6 +628,8 @@ public without sharing class FieldForceDashboardController {
             if (!priorPunches.isEmpty() && priorPunches[0].Action__c == 'IN') {
                 allPunchesForSummary.add(priorPunches[0]);
             }
+            allPunchesForSummary.addAll(punches);
+        } else if (!punches.isEmpty()) {
             allPunchesForSummary.addAll(punches);
         }
 
@@ -520,7 +768,7 @@ public without sharing class FieldForceDashboardController {
                 ? (p.Punch_Type__c == 'Day In / Out' ? 'Shift Day In' : 'Shift Punch In (' + p.Punch_Type__c + ')') 
                 : (p.Punch_Type__c == 'Day In / Out' ? 'Shift Day Out' : 'Shift Punch Out (' + p.Punch_Type__c + ')');
             item.description = (p.Action__c == 'IN') 
-                ? 'Started work shift using ' + p.Transportation_Type__c + (p.Odometer_Reading__c != null ? ' (Odometer: ' + p.Odometer_Reading__c + ')' : '')
+                ? 'Started work shift ' + (p.Transportation_Type__c != null ? 'using ' + p.Transportation_Type__c : '') + (p.Odometer_Reading__c != null ? ' (Odometer: ' + p.Odometer_Reading__c + ')' : '')
                 : 'Ended work shift' + (p.Odometer_Reading__c != null ? ' (Odometer: ' + p.Odometer_Reading__c + ')' : '');
             item.latitude = p.Latitude__c;
             item.longitude = p.Longitude__c;
@@ -603,28 +851,60 @@ public without sharing class FieldForceDashboardController {
         // Sort chronologically
         timelineList.sort();
 
-        // Calculate point-to-point distances for the timeline dots
-        Decimal lastLat = null;
-        Decimal lastLng = null;
+        // Actual traveled KM per timeline point: sum GPS breadcrumbs between events
+        List<TravelPoint> trackPoints = travelPointsFromTracks(tracks);
+        TimelineItem prevItem = null;
         Boolean isFirst = true;
-
+        Decimal totalTimelineKm = 0;
         for (TimelineItem item : timelineList) {
             if (isFirst) {
                 item.nodeDistance = 'Start';
                 isFirst = false;
-            } else {
-                if (item.latitude != null && item.longitude != null && lastLat != null && lastLng != null) {
-                    Decimal dist = calculateDistance(lastLat, lastLng, item.latitude, item.longitude);
-                    item.nodeDistance = dist.setScale(1) + ' KM';
-                } else {
-                    item.nodeDistance = '0 KM';
+            } else if (item.latitude != null && item.longitude != null
+                    && prevItem != null && prevItem.latitude != null && prevItem.longitude != null) {
+                Decimal dist = sumActualTravelKm(
+                    prevItem.latitude, prevItem.longitude, prevItem.eventTime,
+                    item.latitude, item.longitude, item.eventTime,
+                    trackPoints
+                );
+                item.nodeDistance = formatNodeKm(dist);
+                if (dist != null) {
+                    totalTimelineKm += dist;
                 }
+            } else {
+                item.nodeDistance = '0 KM';
             }
 
-            // Update last coordinates for next comparison if this item has valid coordinates
             if (item.latitude != null && item.longitude != null) {
-                lastLat = item.latitude;
-                lastLng = item.longitude;
+                prevItem = item;
+            }
+        }
+
+        // Trailing travel: GPS breadcrumbs recorded after the last timeline node
+        // (e.g. travelling while still checked in to the last visit) are not covered
+        // by any node-to-node segment above. Add them to the total only — no new timeline node.
+        // Skipped when the last node is a Day Out (shift ended).
+        if (prevItem != null && prevItem.eventTime != null
+                && !(prevItem.type == 'PUNCH_OUT' && prevItem.punchTypeOfRecord == 'Day In / Out')) {
+            TravelPoint lastTrailing = null;
+            for (TravelPoint t : trackPoints) {
+                if (t == null || t.eventTime == null || t.lat == null || t.lng == null) {
+                    continue;
+                }
+                if (t.eventTime > prevItem.eventTime && t.eventTime <= endOfDay
+                        && (lastTrailing == null || t.eventTime > lastTrailing.eventTime)) {
+                    lastTrailing = t;
+                }
+            }
+            if (lastTrailing != null) {
+                Decimal trailingKm = sumActualTravelKm(
+                    prevItem.latitude, prevItem.longitude, prevItem.eventTime,
+                    lastTrailing.lat, lastTrailing.lng, lastTrailing.eventTime,
+                    trackPoints
+                );
+                if (trailingKm != null) {
+                    totalTimelineKm += trailingKm;
+                }
             }
         }
 
@@ -634,12 +914,23 @@ public without sharing class FieldForceDashboardController {
         summary.attendanceStatus = 'Absent';
         summary.gpsStatus = 'Offline';
 
+        Decimal odometerDistance = 0;
+
+        for (Punch_Record__c p : punches) {
+            if (p.Odometer_Distance__c != null) {
+                odometerDistance += p.Odometer_Distance__c;
+            }
+        }
+
+        summary.odometerDistanceKm = odometerDistance.setScale(2);
+
         if (!allPunchesForSummary.isEmpty()) {
             // Find Punch In
             for (Punch_Record__c p : allPunchesForSummary) {
                 if (p.Action__c == 'IN') {
                     summary.punchInTime = p.Punch_Time__c != null ? p.Punch_Time__c.format('hh:mm a') : '';
                     summary.startingOdometer = p.Odometer_Reading__c;
+                    //summary.startingExtractedOdometer = p.Extracted_Odometer_Reading__c;
                     summary.inLocation = p.Address__c;
                     if (p.Battery__c != null) {
                         summary.batteryLevel = p.Battery__c;
@@ -654,6 +945,7 @@ public without sharing class FieldForceDashboardController {
                 if (p.Action__c == 'OUT' && p.Punch_Type__c == 'Day In / Out') {
                     summary.punchOutTime = p.Punch_Time__c != null ? p.Punch_Time__c.format('hh:mm a') : '';
                     summary.endingOdometer = p.Odometer_Reading__c;
+                    //summary.endingExtractedOdometer = p.Extracted_Odometer_Reading__c;
                     summary.outLocation = p.Address__c;
                     if (p.Battery__c != null) {
                         summary.batteryLevel = p.Battery__c;
@@ -743,6 +1035,11 @@ public without sharing class FieldForceDashboardController {
             if (summary.startingOdometer != null && summary.endingOdometer != null) {
                 summary.totalDistanceKm = summary.endingOdometer - summary.startingOdometer;
             }
+
+            // Calculate Extracted Odometer diff
+            /*if (summary.startingExtractedOdometer != null && summary.endingExtractedOdometer != null) {
+                summary.odometerDistanceKm = summary.endingExtractedOdometer - summary.startingExtractedOdometer;
+            }*/
         }
 
         // Calculate GPS route distance using periodic track breadcrumbs (primary — most accurate)
@@ -792,7 +1089,24 @@ public without sharing class FieldForceDashboardController {
         }
 
         if (summary.totalDistanceKm == null || summary.totalDistanceKm <= 0) {
-            summary.totalDistanceKm = gpsDistance.setScale(2);
+            if (totalTimelineKm > 0) {
+                summary.totalDistanceKm = totalTimelineKm.setScale(2);
+            } else {
+                summary.totalDistanceKm = gpsDistance.setScale(2);
+            }
+        }
+
+        // Calculate distance deviation
+        if (summary.totalDistanceKm != null && summary.odometerDistanceKm != null) {
+            summary.distanceDeviationKm =
+                (summary.totalDistanceKm - summary.odometerDistanceKm).setScale(2);
+
+            if (summary.odometerDistanceKm != 0) {
+                summary.distanceDeviationPercent =
+                    ((summary.distanceDeviationKm / summary.odometerDistanceKm) * 100).setScale(2);
+            } else {
+                summary.distanceDeviationPercent = 0;
+            }
         }
 
 
@@ -847,10 +1161,85 @@ public without sharing class FieldForceDashboardController {
             vn.checkInTime  = l.Logged_At__c != null ? l.Logged_At__c.format('hh:mm a') : 'N/A';
             vn.checkOutTime = (l.IsCheckout__c && l.Logged_Out_At__c != null)
                               ? l.Logged_Out_At__c.format('hh:mm a') : 'Active';
+            if (l.Logged_At__c != null && l.Logged_Out_At__c != null) {
+                Long durationMin = (l.Logged_Out_At__c.getTime() - l.Logged_At__c.getTime()) / (1000 * 60);
+                if (durationMin < 0) durationMin = 0;
+                if (durationMin < 60) {
+                    vn.visitDuration = durationMin + ' mins';
+                } else {
+                    Long hours = durationMin / 60;
+                    Long mins = Math.mod(durationMin, 60);
+                    vn.visitDuration = hours + ' hr ' + mins + ' mins';
+                }
+            } else if (!l.IsCheckout__c) {
+                vn.visitDuration = 'In Progress';
+            }
             vn.visitCategory = l.Visit_Category__c;
             vn.visitType     = l.Visit_Type__c;
             vn.isActive      = !l.IsCheckout__c;
             visitNodesList.add(vn);
+        }
+
+        // 8. Build Punch Markers for map (Day In -> DI, Day Out -> DO, Market Visit Start -> S, Market Visit End -> E)
+        List<PunchMarkerDTO> punchMarkersList = new List<PunchMarkerDTO>();
+        for (Punch_Record__c p : punches) {
+            Double lat = null;
+            Double lng = null;
+            if (p.Latitude__c != null && p.Longitude__c != null) {
+                lat = (Double)p.Latitude__c;
+                lng = (Double)p.Longitude__c;
+            } else if (!tracks.isEmpty()) {
+                if (p.Action__c == 'IN') {
+                    try {
+                        lat = Double.valueOf(tracks[0].Latitude__c);
+                        lng = Double.valueOf(tracks[0].Longitude__c);
+                    } catch (Exception e) {}
+                } else if (p.Action__c == 'OUT') {
+                    try {
+                        lat = Double.valueOf(tracks[tracks.size() - 1].Latitude__c);
+                        lng = Double.valueOf(tracks[tracks.size() - 1].Longitude__c);
+                    } catch (Exception e) {}
+                }
+            }
+
+            if (lat == null || lng == null) {
+                continue;
+            }
+
+            PunchMarkerDTO pm = new PunchMarkerDTO();
+            pm.id = p.Id;
+            pm.punchType = p.Punch_Type__c;
+            pm.action = p.Action__c;
+            pm.latitude = lat;
+            pm.longitude = lng;
+            pm.address = p.Address__c;
+            pm.timeLabel = p.Punch_Time__c != null ? p.Punch_Time__c.format('hh:mm a') : '';
+
+            if (p.Punch_Type__c == 'Day In / Out') {
+                if (p.Action__c == 'IN') {
+                    pm.label = 'DI';
+                    pm.title = 'Day In';
+                    pm.color = '#10B981';
+                } else if (p.Action__c == 'OUT') {
+                    pm.label = 'DO';
+                    pm.title = 'Day Out';
+                    pm.color = '#EF4444';
+                }
+            } else if (p.Punch_Type__c == 'Market Visit') {
+                if (p.Action__c == 'IN') {
+                    pm.label = 'S';
+                    pm.title = 'Market Visit Start';
+                    pm.color = '#2563EB';
+                } else if (p.Action__c == 'OUT') {
+                    pm.label = 'E';
+                    pm.title = 'Market Visit End';
+                    pm.color = '#DC2626';
+                }
+            }
+
+            if (pm.label != null) {
+                punchMarkersList.add(pm);
+            }
         }
 
         DashboardData data = new DashboardData();
@@ -859,7 +1248,100 @@ public without sharing class FieldForceDashboardController {
         data.mapMarkers = markers;
         data.trackLocations = trackLocationsList;
         data.visitNodes = visitNodesList;
+        data.punchMarkers = punchMarkersList;
         return data;
+    }
+
+    public class TravelPoint {
+        public Decimal lat;
+        public Decimal lng;
+        public Datetime eventTime;
+    }
+
+    public static List<TravelPoint> travelPointsFromTracks(List<Track_Location__c> tracks) {
+        List<TravelPoint> points = new List<TravelPoint>();
+        if (tracks == null) {
+            return points;
+        }
+        for (Track_Location__c tl : tracks) {
+            if (String.isBlank(tl.Latitude__c) || String.isBlank(tl.Longitude__c)) {
+                continue;
+            }
+            TravelPoint p = new TravelPoint();
+            try {
+                p.lat = Decimal.valueOf(tl.Latitude__c);
+                p.lng = Decimal.valueOf(tl.Longitude__c);
+            } catch (Exception e) {
+                continue;
+            }
+            p.eventTime = tl.Recorded_At__c != null ? tl.Recorded_At__c : tl.CreatedDate;
+            points.add(p);
+        }
+        return points;
+    }
+
+    public static Decimal sumActualTravelKm(
+        Decimal startLat, Decimal startLng, Datetime startTime,
+        Decimal endLat, Decimal endLng, Datetime endTime,
+        List<TravelPoint> tracks
+    ) {
+        if (startLat == null || startLng == null || endLat == null || endLng == null) {
+            return 0;
+        }
+
+        List<TravelPoint> path = new List<TravelPoint>();
+        TravelPoint start = new TravelPoint();
+        start.lat = startLat;
+        start.lng = startLng;
+        start.eventTime = startTime;
+        path.add(start);
+
+        if (tracks != null && startTime != null && endTime != null) {
+            for (TravelPoint t : tracks) {
+                if (t == null || t.eventTime == null || t.lat == null || t.lng == null) {
+                    continue;
+                }
+                if (t.eventTime > startTime && t.eventTime <= endTime) {
+                    path.add(t);
+                }
+            }
+        }
+
+        TravelPoint finish = new TravelPoint();
+        finish.lat = endLat;
+        finish.lng = endLng;
+        finish.eventTime = endTime;
+        path.add(finish);
+
+        return sumPathKm(path);
+    }
+
+    public static String formatNodeKm(Decimal km) {
+        if (km == null) {
+            return '0 KM';
+        }
+        return km.setScale(1) + ' KM';
+    }
+
+    private static Decimal sumPathKm(List<TravelPoint> path) {
+        Decimal total = 0;
+        Decimal prevLat = null;
+        Decimal prevLng = null;
+        for (TravelPoint p : path) {
+            if (p == null || p.lat == null || p.lng == null) {
+                continue;
+            }
+            if (prevLat != null && prevLng != null) {
+                Decimal seg = calculateDistanceKm(prevLat, prevLng, p.lat, p.lng);
+                if (seg < 0.03) {
+                    continue; // skip jitter < 30m
+                }
+                total += seg;
+            }
+            prevLat = p.lat;
+            prevLng = p.lng;
+        }
+        return total;
     }
 
     private static Decimal calculateDistanceKm(Decimal lat1, Decimal lon1, Decimal lat2, Decimal lon2) {
@@ -900,6 +1382,7 @@ public without sharing class FieldForceDashboardController {
         @AuraEnabled public Integer visitsCount;
         @AuraEnabled public String lastAddress;
         @AuraEnabled public String lastActivityTime;
+        @AuraEnabled public String activeSinceTime;
     }
 
     @AuraEnabled(cacheable=true)
@@ -918,11 +1401,13 @@ public without sharing class FieldForceDashboardController {
             userPunches.put(uid, new List<Punch_Record__c>());
         }
         for (Punch_Record__c p : [
-            SELECT Id, User__c, Action__c, Status__c, Punch_Time__c, Battery__c, Punch_Type__c, Odometer_Reading__c, Address__c
+            SELECT Id, User__c, Action__c, Status__c, Punch_Time__c, Battery__c, Punch_Type__c, Odometer_Reading__c, Extracted_Odometer_Reading__c, Odometer_Distance__c, Address__c, Latitude__c, Longitude__c
             FROM Punch_Record__c
             WHERE User__c IN :userIds
               AND Punch_Time__c >= :startOfDay
               AND Punch_Time__c <= :endOfDay
+              AND Is_WFH_Request__c = false
+              AND Is_WFO_Request__c = false
             ORDER BY Punch_Time__c ASC
         ]) {
             userPunches.get(p.User__c).add(p);
@@ -932,12 +1417,14 @@ public without sharing class FieldForceDashboardController {
         Map<Id, Punch_Record__c> priorPunchesMap = new Map<Id, Punch_Record__c>();
         Datetime limitDate = startOfDay.addDays(-7);
         for (Punch_Record__c p : [
-            SELECT Id, User__c, Action__c, Status__c, Punch_Time__c, Battery__c, Punch_Type__c, Odometer_Reading__c, Address__c
+            SELECT Id, User__c, Action__c, Status__c, Punch_Time__c, Battery__c, Punch_Type__c, Odometer_Reading__c, Extracted_Odometer_Reading__c, Odometer_Distance__c, Address__c, Latitude__c, Longitude__c
             FROM Punch_Record__c
             WHERE User__c IN :userIds
               AND Punch_Time__c < :startOfDay
               AND Punch_Time__c >= :limitDate
               AND Is_WFH_Request__c = false AND Is_WFO_Request__c = false
+              // ---------------------------------------------------------
+              AND Punch_Type__c = 'Day In / Out'
             ORDER BY User__c, Punch_Time__c DESC
         ]) {
             if (!priorPunchesMap.containsKey(p.User__c)) {
@@ -945,35 +1432,40 @@ public without sharing class FieldForceDashboardController {
             }
         }
 
-        // 2. Query visit logs count for all target users
+        // 2. Query visit logs for all target users
         Map<Id, Integer> userVisits = new Map<Id, Integer>();
+        Map<Id, List<Task_Log__c>> userLogsMap = new Map<Id, List<Task_Log__c>>();
         for (Id uid : userIds) {
             userVisits.put(uid, 0);
+            userLogsMap.put(uid, new List<Task_Log__c>());
         }
-        for (AggregateResult ar : [
-            SELECT CreatedById, COUNT(Id) cnt
+        for (Task_Log__c tl : [
+            SELECT Id, CreatedById, Logged_At__c, Latitude__c, Longitude__c
             FROM Task_Log__c
             WHERE CreatedById IN :userIds
               AND Logged_At__c >= :startOfDay
               AND Logged_At__c <= :endOfDay
-            GROUP BY CreatedById
+            ORDER BY Logged_At__c ASC
         ]) {
-            userVisits.put((Id)ar.get('CreatedById'), (Integer)ar.get('cnt'));
+            userVisits.put(tl.CreatedById, userVisits.get(tl.CreatedById) + 1);
+            userLogsMap.get(tl.CreatedById).add(tl);
         }
 
         // 3. Query track locations to calculate GPS fallback distances in bulk
         Map<Id, Decimal> gpsDistances = new Map<Id, Decimal>();
         Map<Id, String> lastGpsStatuses = new Map<Id, String>();
+        Map<Id, List<Track_Location__c>> userTracksMap = new Map<Id, List<Track_Location__c>>();
         for (Id uid : userIds) {
             gpsDistances.put(uid, 0.0);
             lastGpsStatuses.put(uid, 'Offline');
+            userTracksMap.put(uid, new List<Track_Location__c>());
         }
 
         Map<Id, Decimal> prevLats = new Map<Id, Decimal>();
         Map<Id, Decimal> prevLngs = new Map<Id, Decimal>();
 
         for (Track_Location__c t : [
-            SELECT Latitude__c, Longitude__c, Source__c, Punch_Record__r.User__c
+            SELECT Latitude__c, Longitude__c, Source__c, Punch_Record__r.User__c, Recorded_At__c, CreatedDate
             FROM Track_Location__c
             WHERE Punch_Record__r.User__c IN :userIds
               AND (
@@ -985,6 +1477,7 @@ public without sharing class FieldForceDashboardController {
             ORDER BY Punch_Record__r.User__c, Recorded_At__c ASC NULLS LAST, CreatedDate ASC
         ]) {
             Id uid = t.Punch_Record__r.User__c;
+            userTracksMap.get(uid).add(t);
             Decimal lat = null;
             Decimal lng = null;
             try {
@@ -1012,7 +1505,10 @@ public without sharing class FieldForceDashboardController {
 
             List<Punch_Record__c> punches = userPunches.get(u.Id);
             List<Punch_Record__c> allPunchesForSummary = new List<Punch_Record__c>();
-            if (priorPunchesMap.containsKey(u.Id) && priorPunchesMap.get(u.Id).Action__c == 'IN') {
+            if (priorPunchesMap.containsKey(u.Id) && priorPunchesMap.get(u.Id).Action__c == 'IN'
+            // ---------------------------------------------------------
+            && priorPunchesMap.get(u.Id).Punch_Type__c == 'Day In / Out'
+            ) {
                 allPunchesForSummary.add(priorPunchesMap.get(u.Id));
             }
             allPunchesForSummary.addAll(punches);
@@ -1043,7 +1539,7 @@ public without sharing class FieldForceDashboardController {
                 Decimal endingOdo = null;
                 
                 // Find Punch In / Punch Out times for display
-                for (Punch_Record__c p : allPunchesForSummary) {
+                /* for (Punch_Record__c p : allPunchesForSummary) {
                     if (p.Action__c == 'IN') {
                         if (summary.punchInTime == 'N/A') {
                             summary.punchInTime = p.Punch_Time__c != null ? p.Punch_Time__c.format('hh:mm a') : 'N/A';
@@ -1059,10 +1555,64 @@ public without sharing class FieldForceDashboardController {
                             summary.batteryLevel = String.valueOf(p.Battery__c.intValue()) + '%';
                         }
                     }
+                } */
+                // ---------------------------------------------------------
+                // Punch In / Punch Out display logic
+                // Only DAY IN / OUT records from the selected date are used.
+                // ---------------------------------------------------------
+
+                Punch_Record__c firstDayIn = null;
+                Punch_Record__c latestDayRecord = null;
+
+                // Find the first DAY IN and latest DAY IN/OUT record
+                for (Punch_Record__c p : punches) {
+
+                    if (p.Punch_Type__c != 'Day In / Out') {
+                        continue;
+                    }
+
+                    // First DAY IN of the selected day
+                    if (p.Action__c == 'IN' && firstDayIn == null) {
+                        firstDayIn = p;
+                    }
+
+                    // Latest DAY IN/OUT record for the selected day
+                    if (latestDayRecord == null ||
+                        p.Punch_Time__c > latestDayRecord.Punch_Time__c) {
+                        latestDayRecord = p;
+                    }
+                }
+
+                // Punch In = first DAY IN of selected date
+                if (firstDayIn != null) {
+                    summary.punchInTime = firstDayIn.Punch_Time__c != null
+                        ? firstDayIn.Punch_Time__c.format('hh:mm a')
+                        : 'N/A';
+
+                    startingOdo = firstDayIn.Odometer_Reading__c;
+
+                    if (firstDayIn.Battery__c != null) {
+                        summary.batteryLevel = String.valueOf(firstDayIn.Battery__c.intValue()) + '%';
+                    }
+                }
+
+                // Punch Out = latest record ONLY if the latest record is OUT
+                // This prevents showing an old OUT when the user is currently punched in.
+                if (latestDayRecord != null && latestDayRecord.Action__c == 'OUT') {
+
+                    summary.punchOutTime = latestDayRecord.Punch_Time__c != null
+                        ? latestDayRecord.Punch_Time__c.format('hh:mm a')
+                        : 'N/A';
+
+                    endingOdo = latestDayRecord.Odometer_Reading__c;
+
+                    if (latestDayRecord.Battery__c != null) {
+                        summary.batteryLevel = String.valueOf(latestDayRecord.Battery__c.intValue()) + '%';
+                    }
                 }
 
                 // Sum all punched-in intervals
-                Datetime firstIn = null;
+                /* Datetime firstIn = null;
                 Datetime lastOut = null;
                 Long totalStayMs = 0;
                 Datetime currentIn = null;
@@ -1095,10 +1645,93 @@ public without sharing class FieldForceDashboardController {
 
                 // Calculate total stay hours
                 Decimal stayHrs = Decimal.valueOf(totalStayMs) / (1000.0 * 60.0 * 60.0);
-                summary.totalHours = stayHrs.setScale(2) + ' hrs' + (isCurrentlyActive ? ' (Active)' : '');
+                summary.totalHours = stayHrs.setScale(2) + ' hrs' + (isCurrentlyActive ? ' (Active)' : ''); */
+
+
+                // ---------------------------------------------------------
+                // Calculate total active hours for the selected date
+                // Only Day In / Out punches are considered.
+                // ---------------------------------------------------------
+                Datetime firstIn = null;
+                Datetime lastOut = null;
+                Long totalStayMs = 0;
+                Datetime currentIn = null;
+
+                // Process the effective punch sequence
+                for (Punch_Record__c p : allPunchesForSummary) {
+
+                    // Only Day In / Out punches count towards Active Hours
+                    if (p.Punch_Type__c != 'Day In / Out') {
+                        continue;
+                    }
+
+                    if (p.Action__c == 'IN') {
+
+                        if (firstIn == null) {
+                            firstIn = p.Punch_Time__c;
+                        }
+
+                        if (currentIn == null) {
+                            // If the IN happened before the selected day,
+                            // start counting from midnight of the selected day.
+                            currentIn = (p.Punch_Time__c < startOfDay)
+                                ? startOfDay
+                                : p.Punch_Time__c;
+                        }
+
+                    } else if (p.Action__c == 'OUT') {
+
+                        lastOut = p.Punch_Time__c;
+
+                        if (currentIn != null) {
+                            totalStayMs +=
+                                p.Punch_Time__c.getTime() - currentIn.getTime();
+
+                            currentIn = null;
+                        }
+                    }
+                }
+
+                // If still logged in, count until now/end of selected day
+                if (currentIn != null) {
+
+                    Datetime compareTime =
+                        (statusDate == Date.today())
+                            ? System.now()
+                            : endOfDay;
+
+                    if (compareTime > currentIn) {
+                        totalStayMs +=
+                            compareTime.getTime() - currentIn.getTime();
+                    }
+                }
+
+                // Determine whether the user is currently logged in
+                Boolean isCurrentlyActive = false;
+
+                for (Integer i = allPunchesForSummary.size() - 1; i >= 0; i--) {
+
+                    Punch_Record__c p = allPunchesForSummary[i];
+
+                    if (p.Punch_Type__c == 'Day In / Out') {
+                        isCurrentlyActive =
+                            p.Action__c == 'IN' &&
+                            statusDate == Date.today();
+                        break;
+                    }
+                }
+
+                // Calculate total hours
+                Decimal stayHrs =
+                    Decimal.valueOf(totalStayMs) /
+                    (1000.0 * 60.0 * 60.0);
+
+                summary.totalHours =
+                    stayHrs.setScale(2) + ' hrs' +
+                    (isCurrentlyActive ? ' (Active)' : '');
 
                 // Attendance Status Logic based on first Punch in and last Punch out
-                Datetime attCompareTime = (lastOut != null) ? lastOut : (statusDate == Date.today() ? System.now() : endOfDay);
+                /* Datetime attCompareTime = (lastOut != null) ? lastOut : (statusDate == Date.today() ? System.now() : endOfDay);
                 if (firstIn != null) {
                     Long elapsedMs = attCompareTime.getTime() - firstIn.getTime();
                     Decimal elapsedHrs = Decimal.valueOf(elapsedMs) / (1000.0 * 60.0 * 60.0);
@@ -1109,12 +1742,154 @@ public without sharing class FieldForceDashboardController {
                         summary.attendanceStatus = 'Offline';
                     } else {
                         Punch_Record__c latestPunch = allPunchesForSummary[allPunchesForSummary.size() - 1];
-                        summary.attendanceStatus = latestPunch.Punch_Type__c != null ? latestPunch.Punch_Type__c : 'Present';
+                        String activeMode = 'Present';
+                        if (latestPunch.Action__c == 'IN'
+                                && latestPunch.Punch_Type__c != 'Day In / Out'
+                                && latestPunch.Punch_Type__c != null) {
+                            activeMode = latestPunch.Punch_Type__c;
+                        }
+                        summary.attendanceStatus = activeMode;
+                        if (latestPunch.Action__c == 'IN' && latestPunch.Punch_Time__c != null
+                                && latestPunch.Punch_Type__c != 'Day In / Out') {
+                            summary.activeSinceTime = latestPunch.Punch_Time__c.format('hh:mm a');
+                        } else {
+                            summary.activeSinceTime = summary.punchInTime;
+                        }
+                    }
+                } */
+
+                // ---------------------------------------------------------
+                // Attendance Status
+                // Based only on Day In / Out punches and selected date
+                // ---------------------------------------------------------
+
+                if (firstIn != null || lastOut != null || isCurrentlyActive) {
+
+                    if (isCurrentlyActive) {
+
+                        // User is currently logged in through Day In / Out
+                        summary.attendanceStatus = 'Active';
+
+                        // Keep the active-since time logic
+                        if (currentIn != null) {
+                            summary.activeSinceTime = currentIn.format('hh:mm a');
+                        } else {
+                            summary.activeSinceTime = summary.punchInTime;
+                        }
+
+                    } else {
+
+                        // Completed attendance for the selected date
+                        Decimal loggedHours =
+                            Decimal.valueOf(totalStayMs) /
+                            (1000.0 * 60.0 * 60.0);
+
+                        if (loggedHours < 9.0) {
+                            summary.attendanceStatus = 'Short Hours';
+                        } else {
+                            summary.attendanceStatus = 'Offline';
+                        }
+
+                        summary.activeSinceTime = null;
+                    }
+                }
+
+                // Build chronological event timeline points for user
+                List<TravelPoint> userEvents = new List<TravelPoint>();
+                List<TravelPoint> dayOutEvents = new List<TravelPoint>();
+                for (Punch_Record__c p : punches) {
+                    if (p.Latitude__c != null && p.Longitude__c != null && p.Punch_Time__c != null) {
+                        TravelPoint tp = new TravelPoint();
+                        tp.lat = p.Latitude__c;
+                        tp.lng = p.Longitude__c;
+                        tp.eventTime = p.Punch_Time__c;
+                        userEvents.add(tp);
+                        if (p.Action__c == 'OUT' && p.Punch_Type__c == 'Day In / Out') {
+                            dayOutEvents.add(tp);
+                        }
+                    }
+                }
+                if (userLogsMap.containsKey(u.Id)) {
+                    for (Task_Log__c tl : userLogsMap.get(u.Id)) {
+                        if (tl.Latitude__c != null && tl.Longitude__c != null && tl.Logged_At__c != null) {
+                            TravelPoint tp = new TravelPoint();
+                            tp.lat = tl.Latitude__c;
+                            tp.lng = tl.Longitude__c;
+                            tp.eventTime = tl.Logged_At__c;
+                            userEvents.add(tp);
+                        }
+                    }
+                }
+                // Sort userEvents chronologically
+                for (Integer i = 0; i < userEvents.size(); i++) {
+                    for (Integer j = i + 1; j < userEvents.size(); j++) {
+                        if (userEvents[i].eventTime > userEvents[j].eventTime) {
+                            TravelPoint temp = userEvents[i];
+                            userEvents[i] = userEvents[j];
+                            userEvents[j] = temp;
+                        }
+                    }
+                }
+
+                // Sum actual travel KM across events
+                List<TravelPoint> trackPoints = travelPointsFromTracks(userTracksMap.get(u.Id));
+                TravelPoint prevPoint = null;
+                Boolean isFirstPoint = true;
+                Decimal totalTimelineKm = 0;
+                for (TravelPoint pt : userEvents) {
+                    if (isFirstPoint) {
+                        isFirstPoint = false;
+                    } else if (prevPoint != null) {
+                        Decimal dist = sumActualTravelKm(
+                            prevPoint.lat, prevPoint.lng, prevPoint.eventTime,
+                            pt.lat, pt.lng, pt.eventTime,
+                            trackPoints
+                        );
+                        if (dist != null) {
+                            totalTimelineKm += dist;
+                        }
+                    }
+                    prevPoint = pt;
+                }
+
+                // Trailing travel after the last event (same logic as getDailyDashboardData):
+                // add GPS breadcrumbs recorded after the last event, unless it is a Day Out.
+                if (prevPoint != null && prevPoint.eventTime != null) {
+                    Boolean lastIsDayOut = false;
+                    for (TravelPoint dp : dayOutEvents) {
+                        if (dp === prevPoint) {
+                            lastIsDayOut = true;
+                            break;
+                        }
+                    }
+                    if (!lastIsDayOut) {
+                        TravelPoint lastTrailing = null;
+                        for (TravelPoint t : trackPoints) {
+                            if (t == null || t.eventTime == null || t.lat == null || t.lng == null) {
+                                continue;
+                            }
+                            if (t.eventTime > prevPoint.eventTime && t.eventTime <= endOfDay
+                                    && (lastTrailing == null || t.eventTime > lastTrailing.eventTime)) {
+                                lastTrailing = t;
+                            }
+                        }
+                        if (lastTrailing != null) {
+                            Decimal trailingKm = sumActualTravelKm(
+                                prevPoint.lat, prevPoint.lng, prevPoint.eventTime,
+                                lastTrailing.lat, lastTrailing.lng, lastTrailing.eventTime,
+                                trackPoints
+                            );
+                            if (trailingKm != null) {
+                                totalTimelineKm += trailingKm;
+                            }
+                        }
                     }
                 }
 
                 if (startingOdo != null && endingOdo != null) {
                     summary.distanceKm = (endingOdo - startingOdo).setScale(2);
+                } else if (totalTimelineKm > 0) {
+                    summary.distanceKm = totalTimelineKm.setScale(2);
                 } else {
                     summary.distanceKm = gpsDistances.get(u.Id).setScale(2);
                 }

@@ -21,6 +21,7 @@ public with sharing class BWM_MessagingConstants {
   public static final String STAGE_NURTURE = 'Nurture';
   public static final String STAGE_CLOSED_LOST = 'Closed Lost';
   public static final String STAGE_NEGOTIATION = 'Negotiation';
+  public static final String STAGE_CLOSED_WON = 'Closed Won';
   public static final String STAGE_LOST = 'Lost';
   public static final String WHATSAPP_HEADER_DOCUMENT = 'DOCUMENT';
   public static final String WHATSAPP_HEADER_TEXT = 'TEXT';
@@ -45,6 +46,7 @@ public with sharing class BWM_MessagingConstants {
   public static final String RECIPIENT_OWNER = 'Owner';
   public static final String FIELD_OPPORTUNITY_LINK = 'OPPORTUNITY_LINK';
   public static final String CUSTOMER_JOURNEY_REFER_DEALER = 'Refer to Dealer';
+  public static final String CUSTOMER_JOURNEY_DIRECT = 'Direct Business';
   public static final String OPP_SOURCE_INBOUND_EMAIL = 'INBOUND EMAIL';
   public static final String OPP_SOURCE_OUTBOUND_PHONE = 'OUTBOUND PHONE CALL';
   public static final String OPP_SOURCE_INBOUND_PHONE = 'INBOUND PHONE CALL';
@@ -79,6 +81,10 @@ public with sharing class BWM_MessagingConstants {
   public static final String TRIGGER_LEAD_TASK_CALLBACK_PROSPECTING = 'Lead_Task_Callback_Prospecting';
   public static final String TRIGGER_LEAD_TASK_LOST_DETAILS_PROSPECTING = 'Lead_Task_Lost_DetailsNotReceived_Prospecting';
   public static final String TRIGGER_LEAD_TASK_LOST_NOT_RESPONDING_PROSPECTING = 'Lead_Task_Lost_NotResponding_Prospecting';
+  public static final String TRIGGER_LEAD_DETAILS_NOT_RECEIVED_PROSPECTING =
+    'Lead_Details_Not_Received_Prospecting';
+  public static final String TRIGGER_OPPORTUNITY_DETAILS_NOT_RECEIVED_NURTURE =
+    'Opportunity_Details_Not_Received_Nurture';
   public static final String TRIGGER_OPPORTUNITY_TASK_CALLBACK_NURTURE = 'Opportunity_Task_Callback_Nurture';
   public static final String TRIGGER_OPPORTUNITY_QUALIFY_NURTURE = 'Opportunity_Qualify_Nurture';
   public static final String TRIGGER_OPP_LOST_DETAILS_NURTURE = 'Opportunity_Lost_DetailsNotReceived_Nurture';
@@ -87,6 +93,10 @@ public with sharing class BWM_MessagingConstants {
     'Opportunity_Lost_NotResponding_Negotiation';
   public static final String TRIGGER_OPPORTUNITY_NEGOTIATION_STALE_30_DAYS = 'Opportunity_Negotiation_Stale_30_Days';
   public static final String TRIGGER_OPPORTUNITY_REFER_TO_DEALER = 'Opportunity_Refer_To_Dealer';
+  public static final String TRIGGER_OPP_CLOSED_WON_REFER_DEALER =
+    'Opportunity_ClosedWon_ReferDealer';
+  public static final String TRIGGER_OPP_CLOSED_WON_DIRECT_BUSINESS =
+    'Opportunity_ClosedWon_DirectBusiness';
   public static final String TRIGGER_OPPORTUNITY_DEALER_ENQUIRY = 'Opportunity_Dealer_Enquiry';
   public static final String TRIGGER_OPPORTUNITY_QUOTE_EXPIRY_REMINDER = 'Opportunity_Quote_Expiry_Reminder';
   public static final String TRIGGER_OPPORTUNITY_SEND_QUOTE_TO_CUSTOMER =
@@ -98,6 +108,7 @@ public with sharing class BWM_MessagingConstants {
   public static final String TRIGGER_OFFLINE_CAMPAIGN = 'Offline_Campaign';
   public static final String CAMPAIGN_OWNER_CRM_MATCH_PHONE = '+91 33 4190 0001';
   public static final String CAMPAIGN_OWNER_CRM_MATCH_EMAIL = 'info@utkarshindia.in';
+  public static final String JOURNEY_PROSPECT_ENQ_DEPT = 'prospect_enq_dept';
 
   /** Product / department-wise WhatsApp journeys (_dept). */
   public static final Set<String> PRODUCT_DEPARTMENTS = new Set<String>{
@@ -110,8 +121,9 @@ public with sharing class BWM_MessagingConstants {
     'Steel Tubular Poles'
   };
 
-  /** Tower / structure departments used by general (_gen) journeys. */
+  /** Tower / structure departments used by general (_gen) journeys (+ Enquiry). */
   public static final Set<String> GEN_TOWER_DEPARTMENTS = new Set<String>{
+    DEPT_ENQUIRY,
     'Transmission & Telecom Tower',
     'Pre Engineering Building',
     'Railway Electrification Structure'
@@ -129,7 +141,7 @@ public with sharing class BWM_MessagingConstants {
     'Enquiry,Transmission & Telecom Tower,Pre Engineering Building,Railway Electrification Structure';
 
   public static final String GEN_TOWER_DEPARTMENTS_CSV =
-    'Transmission & Telecom Tower,Pre Engineering Building,Railway Electrification Structure';
+    'Enquiry,Transmission & Telecom Tower,Pre Engineering Building,Railway Electrification Structure';
 
   public static final Set<String> PHONE_OPPORTUNITY_SOURCES = new Set<String>{
     OPP_SOURCE_OUTBOUND_PHONE,

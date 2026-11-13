@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomNotificationType xmlns="http://soap.sforce.com/2006/04/metadata">
+    <customNotifTypeName>Project_Update_Notification</customNotifTypeName>
+    <description>Push to the project owner when project fields change or a new bidder is added.</description>
+    <desktop>true</desktop>
+    <masterLabel>Project Update Notification</masterLabel>
+    <mobile>true</mobile>
+    <slack>false</slack>
+</CustomNotificationType>

@@ -2,18 +2,36 @@
 private class TenderDepartmentControllerTest {
 
     // ============================================================
+    //
+    // 'Steel Pipes' and 'Railway Electrification Structure' are used
+    // below because they are both confirmed active picklist values AND
+    // correspond to real departments with active Utkarsh Sales /
+    // Utkarsh Tender profile users in this org.
+    // ============================================================
+
+    private static final String DEPARTMENT_1 = 'Steel Pipes';
+    private static final String DEPARTMENT_2 = 'Railway Electrification Structure';
+
+    // ============================================================
     // TEST DATA
     // ============================================================
 
     @TestSetup
     static void setup() {
 
-        Profile p = [
+        List<Profile> profiles = [
             SELECT Id
             FROM Profile
-            WHERE Id = :UserInfo.getProfileId()
+            WHERE Name = 'Utkarsh Sales' WITH SYSTEM_MODE
             LIMIT 1
         ];
+
+        System.assert(
+            !profiles.isEmpty(),
+            'Profile "Utkarsh Sales" must exist for this test to run.'
+        );
+
+        Profile p = profiles[0];
 
         String uniqueValue = String.valueOf(DateTime.now().getTime());
 
@@ -32,11 +50,11 @@ private class TenderDepartmentControllerTest {
             EmailEncodingKey  = 'UTF-8',
             LanguageLocaleKey = 'en_US',
             Department        = 'Finance; Procurement/Legal',
-            TenderUser__c     = true,
+            Tender_Access_User__c = true,
             IsActive          = true
         );
 
-        insert tenderUser;
+        Database.insert(tenderUser, AccessLevel.SYSTEM_MODE);
 
 
         // --------------------------------------------------------
@@ -54,11 +72,11 @@ private class TenderDepartmentControllerTest {
             EmailEncodingKey  = 'UTF-8',
             LanguageLocaleKey = 'en_US',
             Department        = 'Finance',
-            TenderUser__c     = false,
+            Tender_Access_User__c = false,
             IsActive          = true
         );
 
-        insert nonTenderUser;
+        Database.insert(nonTenderUser, AccessLevel.SYSTEM_MODE);
 
 
         // --------------------------------------------------------
@@ -77,33 +95,21 @@ private class TenderDepartmentControllerTest {
             EmailEncodingKey  = 'UTF-8',
             LanguageLocaleKey = 'en_US',
             Department        = null,
-            TenderUser__c     = true,
+            Tender_Access_User__c = true,
             IsActive          = true
         );
 
-        insert blankDepartmentUser;
+        Database.insert(blankDepartmentUser, AccessLevel.SYSTEM_MODE);
 
 
         // --------------------------------------------------------
-        // Find valid Tender Department
-        // --------------------------------------------------------
-        String department = getFirstValidDepartment();
-
-        System.assertNotEquals(
-            null,
-            department,
-            'At least one valid Tender Department is required.'
-        );
-
-
-        // --------------------------------------------------------
-        // Main Tender
+        // Main Tender - uses a fixed, known-good department
         // --------------------------------------------------------
         Tender__c tender = new Tender__c(
-            Department_Name__c = department
+            Department_Name__c = DEPARTMENT_1
         );
 
-        insert tender;
+        Database.insert(tender, AccessLevel.SYSTEM_MODE);
 
 
         // --------------------------------------------------------
@@ -114,7 +120,7 @@ private class TenderDepartmentControllerTest {
             Tender__c = tender.Id
         );
 
-        insert bidder;
+        Database.insert(bidder, AccessLevel.SYSTEM_MODE);
 
 
         // --------------------------------------------------------
@@ -126,7 +132,7 @@ private class TenderDepartmentControllerTest {
                 Tender__c = tender.Id
             );
 
-        insert contact;
+        Database.insert(contact, AccessLevel.SYSTEM_MODE);
 
 
         // --------------------------------------------------------
@@ -137,7 +143,7 @@ private class TenderDepartmentControllerTest {
                 Tender__c = tender.Id
             );
 
-        insert summary;
+        Database.insert(summary, AccessLevel.SYSTEM_MODE);
 
 
         // --------------------------------------------------------
@@ -148,82 +154,73 @@ private class TenderDepartmentControllerTest {
                 Tender__c = tender.Id
             );
 
-        insert document;
+        Database.insert(document, AccessLevel.SYSTEM_MODE);
     }
 
 
     // ============================================================
-    // HELPER - FIRST VALID DEPARTMENT
+    // HELPER - TENDER DEPARTMENT -> USER Departments__c MAPPING
+    //
+    // Mirrors TenderOwnerValidationHandler.getDepartmentMapping().
+    // TenderOwnerValidationHandler validates the Owner's Departments__c
+    // (custom multi-select picklist) against the Tender's
+    // Department_Name__c after passing it through this exact mapping -
+    // NOT the standard User.Department field. Both fields are set below
+    // so tests covering TenderDepartmentController.getDepartmentUsers()
+    // (which reads User.Department) and the trigger validation (which
+    // reads User.Departments__c) both work correctly.
     // ============================================================
 
-    private static String getFirstValidDepartment() {
+    private static Map<String, String> getUserDepartmentMapping() {
 
-        for (
-            Schema.PicklistEntry pe :
-            Tender__c.Department_Name__c
-                .getDescribe()
-                .getPicklistValues()
-        ) {
-
-            if (
-                pe.isActive() &&
-                !pe.getValue().equalsIgnoreCase('Enquiry')
-            ) {
-                return pe.getValue();
-            }
-        }
-
-        return null;
+        return new Map<String, String>{
+            'HIGH MAST & POLYGONAL'             => 'High_Mast_Department',
+            'CRASH BARRIER'                     => 'Crash_Barrier_Department',
+            'HDPE'                               => 'HDPE_Pipe_Department',
+            'STEEL TUBULAR POLES'               => 'Steel_Tubular_Pole_Department',
+            'POLYMER'                            => 'PVC',
+            'TRANSMISSION & TELECOM TOWER'      => 'Transmission_Tower_Department',
+            'PRE ENGINEERING BUILDING'          => 'PEB',
+            'SOLAR STRUCTURE'                   => 'Solar_Structure_Department',
+            'RAILWAY ELECTRIFICATION STRUCTURE' => 'Core_Department',
+            'STEEL PIPES'                        => 'Steel_Pipes_Department'
+        };
     }
 
-
-    // ============================================================
-    // HELPER - GET DIFFERENT VALID DEPARTMENT
-    // ============================================================
-
-    private static String getValidDepartment(
-        String currentDepartment
-    ) {
-
-        for (
-            Schema.PicklistEntry pe :
-            Tender__c.Department_Name__c
-                .getDescribe()
-                .getPicklistValues()
-        ) {
-
-            if (
-                pe.isActive() &&
-                !pe.getValue().equalsIgnoreCase('Enquiry') &&
-                pe.getValue() != currentDepartment
-            ) {
-                return pe.getValue();
-            }
-        }
-
-        // If only one valid department exists,
-        // use the same one.
-        return currentDepartment;
-    }
-
-
-    // ============================================================
-    // HELPER - CREATE TENDER USER
-    // ============================================================
+// helper create tender user
 
     private static User createTenderUser(
         String department
     ) {
 
-        Profile p = [
+       
+        List<Profile> profiles = [
             SELECT Id
             FROM Profile
-            WHERE Id = :UserInfo.getProfileId()
+            WHERE Name = 'Utkarsh Tender' WITH SYSTEM_MODE
             LIMIT 1
         ];
 
+        System.assert(
+            !profiles.isEmpty(),
+            'Profile "Utkarsh Tender" must exist for this test to run.'
+        );
+
+        Id profileId = profiles[0].Id;
+
         String uniqueValue =
             String.valueOf(DateTime.now().getTime());
+
+        String mappedDepartment =
+            getUserDepartmentMapping().get(
+                department.trim().toUpperCase()
+            );
+
+        System.assertNotEquals(
+            null,
+            mappedDepartment,
+            'No Departments__c mapping found for Tender department: ' + department
+        );
 
         User u = new User(
             FirstName         = 'New',
@@ -235,17 +232,27 @@ private class TenderDepartmentControllerTest {
             Username          = 'new.owner.' +
                                 uniqueValue +
                                 '@example.com',
-            ProfileId         = p.Id,
+            ProfileId         = profileId,
             TimeZoneSidKey    = 'Asia/Kolkata',
             LocaleSidKey      = 'en_US',
             EmailEncodingKey  = 'UTF-8',
             LanguageLocaleKey = 'en_US',
             Department        = department,
-            TenderUser__c     = true,
+            Departments__c    = mappedDepartment,
+            Tender_Access_User__c = true,
             IsActive          = true
         );
 
-        insert u;
+        // Isolate the setup-object (User) DML into its own transaction
+        // so it cannot collide with the non-setup object DML performed
+        // later in the calling test method.
+        // Uses SYSTEM_MODE because Departments__c / Tender_Access_User__c
+        // FLS on User is not guaranteed for every running/deploying user
+        // (metadata deployments do not auto-grant FLS) - this is test
+        // setup data, not a real security-sensitive operation.
+        System.runAs(new User(Id = UserInfo.getUserId())) {
+            Database.insert(u, AccessLevel.SYSTEM_MODE);
+        }
 
         return u;
     }
@@ -263,7 +270,7 @@ private class TenderDepartmentControllerTest {
                 Id,
                 Department_Name__c,
                 OwnerId
-            FROM Tender__c
+            FROM Tender__c WITH SYSTEM_MODE
             LIMIT 1
         ];
 
@@ -519,7 +526,7 @@ private class TenderDepartmentControllerTest {
         User owner = [
             SELECT Id
             FROM User
-            WHERE LastName = 'TenderUser'
+            WHERE LastName = 'TenderUser' WITH SYSTEM_MODE
             LIMIT 1
         ];
 
@@ -559,14 +566,14 @@ private class TenderDepartmentControllerTest {
 
         Tender__c tender = [
             SELECT Id
-            FROM Tender__c
+            FROM Tender__c WITH SYSTEM_MODE
             LIMIT 1
         ];
 
         User owner = [
             SELECT Id
             FROM User
-            WHERE LastName = 'TenderUser'
+            WHERE LastName = 'TenderUser' WITH SYSTEM_MODE
             LIMIT 1
         ];
 
@@ -599,10 +606,6 @@ private class TenderDepartmentControllerTest {
     // ============================================================
     // updateDepartmentAndOwner
     // NULL OWNER
-    //
-    // IMPORTANT:
-    // Department_Name__c MUST be selected.
-    // This fixes your SObject row error.
     // ============================================================
 
     @isTest
@@ -612,7 +615,7 @@ private class TenderDepartmentControllerTest {
             SELECT
                 Id,
                 Department_Name__c
-            FROM Tender__c
+            FROM Tender__c WITH SYSTEM_MODE
             LIMIT 1
         ];
 
@@ -654,19 +657,12 @@ private class TenderDepartmentControllerTest {
                 Id,
                 Department_Name__c,
                 OwnerId
-            FROM Tender__c
+            FROM Tender__c WITH SYSTEM_MODE
             LIMIT 1
         ];
 
-        String newDepartment =
-            getValidDepartment(
-                tender.Department_Name__c
-            );
-
-        System.assertNotEquals(
-            null,
-            newDepartment
-        );
+       
+        String newDepartment = DEPARTMENT_2;
 
         User newOwner =
             createTenderUser(newDepartment);
@@ -691,8 +687,8 @@ private class TenderDepartmentControllerTest {
                 Id,
                 Department_Name__c,
                 OwnerId
-            FROM Tender__c
-            WHERE Id = :tender.Id
+            FROM Tender__c 
+            WHERE Id = :tender.Id WITH SYSTEM_MODE
         ];
 
         System.assertEquals(
@@ -715,7 +711,7 @@ private class TenderDepartmentControllerTest {
                 Id,
                 OwnerId
             FROM Bidders__c
-            WHERE Tender__c = :tender.Id
+            WHERE Tender__c = :tender.Id WITH SYSTEM_MODE
         ];
 
         System.assertEquals(
@@ -740,8 +736,8 @@ private class TenderDepartmentControllerTest {
             SELECT
                 Id,
                 OwnerId
-            FROM Bidders_Contact_Details__c
-            WHERE Tender__c = :tender.Id
+            FROM Bidders_Contact_Details__c 
+            WHERE Tender__c = :tender.Id WITH SYSTEM_MODE
         ];
 
         System.assertEquals(
@@ -770,7 +766,7 @@ private class TenderDepartmentControllerTest {
                 Id,
                 OwnerId
             FROM Tender_Ai_Summary_Json__c
-            WHERE Tender__c = :tender.Id
+            WHERE Tender__c = :tender.Id WITH SYSTEM_MODE
         ];
 
         System.assertEquals(
@@ -799,7 +795,7 @@ private class TenderDepartmentControllerTest {
                 Id,
                 OwnerId
             FROM Tender_Docoment_Details__c
-            WHERE Tender__c = :tender.Id
+            WHERE Tender__c = :tender.Id WITH SYSTEM_MODE
         ];
 
         System.assertEquals(
@@ -827,25 +823,16 @@ private class TenderDepartmentControllerTest {
     @isTest
     static void testUpdateDepartmentAndOwner_NoRelatedRecords() {
 
-        Tender__c originalTender = [
-            SELECT
-                Id,
-                Department_Name__c
-            FROM Tender__c
-            LIMIT 1
-        ];
-
-        String department =
-            getValidDepartment(
-                originalTender.Department_Name__c
-            );
+        // owner reassignment on a record with no child records).
+        String department = DEPARTMENT_1;
 
         Tender__c tenderWithoutChildren =
             new Tender__c(
                 Department_Name__c = department
             );
 
-        insert tenderWithoutChildren;
+        Database.insert(tenderWithoutChildren, AccessLevel.SYSTEM_MODE);
+        
 
         User newOwner =
             createTenderUser(department);
@@ -870,8 +857,8 @@ private class TenderDepartmentControllerTest {
                 Id,
                 Department_Name__c,
                 OwnerId
-            FROM Tender__c
-            WHERE Id = :tenderWithoutChildren.Id
+            FROM Tender__c 
+            WHERE Id = :tenderWithoutChildren.Id WITH SYSTEM_MODE
         ];
 
         System.assertEquals(

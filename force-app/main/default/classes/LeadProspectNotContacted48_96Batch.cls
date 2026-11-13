@@ -1,5 +1,5 @@
 /**
- * @description   Prospect-stage 48h and 96h not-contacted escalation emails.
+ * @description   Prospect-stage 48h, 96h, and 120h not-contacted escalation emails.
  *                The 24h automation remains in LeadProspectNotContacted24Batch because
  *                it uses a different sent flag, template, and recipient set.
  * @author        Anshita Chanda
@@ -7,7 +7,9 @@
  */
 public without sharing class LeadProspectNotContacted48_96Batch implements Database.Batchable<SObject> {
   private static final String TEMPLATE_48H = 'Lead Not Contacted 48h HOD';
+  Private static final string TEMPLATE_48HC = 'Lead Not Contacted 48h CRM Head';
   private static final String TEMPLATE_96H = 'Lead Not Contacted 96h Sir';
+  private static final String TEMPLATE_120H = 'Lead Not Contacted 120h Sir';
 
   public Database.QueryLocator start(Database.BatchableContext context) {
     Datetime cutoff48 = System.now().addHours(-48);
@@ -20,10 +22,12 @@ public without sharing class LeadProspectNotContacted48_96Batch implements Datab
           OwnerId,
           Owner.Email,
           Status,
+          Department_Name__c,
           Department_NameFormula__c,
           Prospect_Stage_Entry_Date__c,
           Escalation_48_Sent__c,
           Escalation_72_Sent__c,
+          Escalation_120_Sent__c,
           LastActivityDate,
           CRM_User_Email_Formula__c
         FROM Lead
@@ -35,14 +39,78 @@ public without sharing class LeadProspectNotContacted48_96Batch implements Datab
           AND (
             Escalation_48_Sent__c = FALSE
             OR Escalation_72_Sent__c = FALSE
+            OR Escalation_120_Sent__c = FALSE
           )
       ]
     );
   }
 
   public void execute(Database.BatchableContext context, List<Lead> scope) {
-    List<Lead> leadsToUpdate = new List<Lead>();
+    for (Lead leadRecord : scope) {
+      if (
+        !EscalationMatrixEmailService.hasNoActivitySince(
+          leadRecord.Prospect_Stage_Entry_Date__c,
+          leadRecord.LastActivityDate
+        )
+      ) {
+        continue;
+      }
 
+      if (
+        !leadRecord.Escalation_48_Sent__c &&
+        EscalationMatrixEmailService.hoursSince(
+          leadRecord.Prospect_Stage_Entry_Date__c
+        ) >= 48
+      ) {
+        EscalationMatrixEmailService.sendLeadEmail(
+          leadRecord,
+          TEMPLATE_48H,
+          EscalationMatrixEmailService.RecipientGroup.HOD_BY_PROFILE_DEPARTMENT
+        );
+      }
+              if (
+        !leadRecord.Escalation_48_Sent__c &&
+        EscalationMatrixEmailService.hoursSince(
+          leadRecord.Prospect_Stage_Entry_Date__c
+        ) >= 48
+      ) {
+        EscalationMatrixEmailService.sendLeadEmail(
+          leadRecord,
+          TEMPLATE_48HC,
+          EscalationMatrixEmailService.RecipientGroup.CRM_HEAD_BY_PROFILE_DEPARTMENT
+        );
+      }
+
+      if (
+        !leadRecord.Escalation_72_Sent__c &&
+        EscalationMatrixEmailService.hoursSince(
+          leadRecord.Prospect_Stage_Entry_Date__c
+        ) >= 96
+      ) {
+        EscalationMatrixEmailService.sendLeadEmail(
+          leadRecord,
+          TEMPLATE_96H,
+          EscalationMatrixEmailService.RecipientGroup.ED_SIR
+        );
+      }
+
+      if (
+        !leadRecord.Escalation_120_Sent__c &&
+        EscalationMatrixEmailService.hoursSince(
+          leadRecord.Prospect_Stage_Entry_Date__c
+        ) >= 120
+      ) {
+        EscalationMatrixEmailService.sendLeadEmail(
+          leadRecord,
+          TEMPLATE_120H,
+          EscalationMatrixEmailService.RecipientGroup.ED_SIR
+        );
+      }
+    }
+
+    EscalationMatrixEmailService.flushQueuedEmails();
+
+    List<Lead> leadsToUpdate = new List<Lead>();
     for (Lead leadRecord : scope) {
       if (
         !EscalationMatrixEmailService.hasNoActivitySince(
@@ -61,11 +129,8 @@ public without sharing class LeadProspectNotContacted48_96Batch implements Datab
         EscalationMatrixEmailService.hoursSince(
           leadRecord.Prospect_Stage_Entry_Date__c
         ) >= 48 &&
-        EscalationMatrixEmailService.sendLeadEmail(
-          leadRecord,
-          TEMPLATE_48H,
-          EscalationMatrixEmailService.RecipientGroup.HOD_AND_CRM_HEAD
-        )
+        EscalationMatrixEmailService.wasSendSuccessful(leadRecord.Id, TEMPLATE_48H) ||
+        EscalationMatrixEmailService.wasSendSuccessful(leadRecord.Id, TEMPLATE_48HC)
       ) {
         updateRecord.Escalation_48_Sent__c = true;
         changed = true;
@@ -76,13 +141,20 @@ public without sharing class LeadProspectNotContacted48_96Batch implements Datab
         EscalationMatrixEmailService.hoursSince(
           leadRecord.Prospect_Stage_Entry_Date__c
         ) >= 96 &&
-        EscalationMatrixEmailService.sendLeadEmail(
-          leadRecord,
-          TEMPLATE_96H,
-          EscalationMatrixEmailService.RecipientGroup.ED_SIR
-        )
+        EscalationMatrixEmailService.wasSendSuccessful(leadRecord.Id, TEMPLATE_96H)
       ) {
         updateRecord.Escalation_72_Sent__c = true;
+        changed = true;
+      }
+
+      if (
+        !leadRecord.Escalation_120_Sent__c &&
+        EscalationMatrixEmailService.hoursSince(
+          leadRecord.Prospect_Stage_Entry_Date__c
+        ) >= 120 &&
+        EscalationMatrixEmailService.wasSendSuccessful(leadRecord.Id, TEMPLATE_120H)
+      ) {
+        updateRecord.Escalation_120_Sent__c = true;
         changed = true;
       }
 
@@ -92,7 +164,7 @@ public without sharing class LeadProspectNotContacted48_96Batch implements Datab
     }
 
     if (!leadsToUpdate.isEmpty()) {
-      update leadsToUpdate;
+      Database.update(leadsToUpdate, false);
     }
   }
 

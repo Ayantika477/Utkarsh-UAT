@@ -1,3 +1,9 @@
+/**
+ * @description   Batch and Schedulable that sends quote-expiry WhatsApp/journey
+ *                reminders based on Quotation_Date.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_QuoteExpiryReminderBatch implements Database.Batchable<SObject>, Schedulable {
   public Database.QueryLocator start(Database.BatchableContext context) {
     Date reminderDate = System.today().addDays(1);
@@ -39,6 +45,11 @@ public without sharing class BWM_QuoteExpiryReminderBatch implements Database.Ba
   }
 
   public void finish(Database.BatchableContext context) {
+    System.debug(
+      LoggingLevel.INFO,
+      'BWM_QuoteExpiryReminderBatch finished. JobId=' +
+        (context == null ? 'null' : String.valueOf(context.getJobId()))
+    );
   }
 
   public void execute(SchedulableContext context) {

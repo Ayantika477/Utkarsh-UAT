@@ -1,7 +1,8 @@
 import { LightningElement, api, wire } from 'lwc';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import { CloseActionScreenEvent } from 'lightning/actions';
-import { getRecordNotifyChange } from 'lightning/uiRecordApi';
+import { notifyRecordUpdateAvailable } from 'lightning/uiRecordApi';
+import { FlowNavigationNextEvent, FlowNavigationFinishEvent } from 'lightning/flowSupport';
 
 import getContext from '@salesforce/apex/OpportunityCustomerJourneyController.getContext';
 import getEligibleDealers from '@salesforce/apex/OpportunityCustomerJourneyController.getEligibleDealers';
@@ -14,6 +15,7 @@ const NEGOTIATION = 'Negotiation';
 
 export default class OpportunityCustomerJourney extends LightningElement {
     @api recordId; // Opportunity Id
+    @api availableActions = []; // Set by Flow runtime; empty when launched as a quick action
 
     ctx = {};
     saving = false;
@@ -266,13 +268,36 @@ export default class OpportunityCustomerJourney extends LightningElement {
         return new Date(y, m - 1, d, hh, mm).toISOString();
     }
 
-    notifyAndClose() {
-        getRecordNotifyChange([{ recordId: this.recordId }]);
-        this.dispatchEvent(new CloseActionScreenEvent());
+    // True when running inside a Flow screen (mobile button), false for the desktop quick action.
+    get isInFlow() {
+        return Array.isArray(this.availableActions) && this.availableActions.length > 0;
+    }
+
+    // Flow: move to the next element (Navigate_To_record_page) so the flow ends.
+    // Quick action: close the action screen as before.
+    finishOrClose() {
+        if (this.isInFlow) {
+            if (this.availableActions.includes('NEXT')) {
+                this.dispatchEvent(new FlowNavigationNextEvent());
+            } else if (this.availableActions.includes('FINISH')) {
+                this.dispatchEvent(new FlowNavigationFinishEvent());
+            }
+        } else {
+            this.dispatchEvent(new CloseActionScreenEvent());
+        }
+    }
+
+    async notifyAndClose() {
+        try {
+            await notifyRecordUpdateAvailable([{ recordId: this.recordId }]);
+        } catch (e) {
+            // A refresh failure must not block closing/navigation
+        }
+        this.finishOrClose();
     }
 
     closeAction() {
-        this.dispatchEvent(new CloseActionScreenEvent());
+        this.finishOrClose();
     }
 
     fail(err) {

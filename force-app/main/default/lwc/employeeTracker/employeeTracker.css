@@ -146,8 +146,17 @@
 .timeline {
     margin-top: 0.75rem;
     position: relative;
-    padding-left: 20px;
-    border-left: 1px solid #e2e8f0;
+    padding-left: 8px;
+}
+
+.timeline::before {
+    content: '';
+    position: absolute;
+    top: 12px;
+    bottom: 8px;
+    left: 28px;
+    width: 1px;
+    background: #e2e8f0;
 }
 
 .timeline-item {
@@ -157,16 +166,38 @@
     position: relative;
 }
 
+.timeline-marker {
+    width: 42px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    z-index: 1;
+}
+
 .timeline-icon {
     width: 24px; height: 24px; background: #fff;
     border-radius: 50%; border: 1px solid #e2e8f0;
     display: flex; align-items: center; justify-content: center;
-    position: absolute; left: -12.5px; top: 2px;
-    z-index: 1;
+}
+
+.dot-distance-val {
+    display: inline-block;
+    color: #475569;
+    background-color: #f8fafc;
+    font-size: 0.55rem;
+    font-weight: 700;
+    padding: 1px 3px;
+    border-radius: 3px;
+    border: 1px solid #e2e8f0;
+    margin-top: 4px;
+    white-space: nowrap;
+    text-align: center;
 }
 
 .timeline-content {
-    margin-left: 15px;
+    margin-left: 8px;
     padding: 0.75rem 1rem;
     background: #ffffff;
     border: 1px solid #e2e8f0;
@@ -218,6 +249,42 @@
 .timeline-client {
     display: flex; align-items: center; gap: 0.25rem;
     font-size: 0.72rem; color: #0f172a; font-weight: 600; margin: 0.2rem 0;
+}
+
+.timeline-quick-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 6px 0 4px;
+}
+
+.timeline-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 2px 7px;
+}
+
+.timeline-chip-duration {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+}
+
+.timeline-chip-lbl {
+    font-size: 0.55rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+}
+
+.timeline-chip-val {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #0f172a;
 }
 
 .timeline-details {
@@ -383,6 +450,16 @@
 .et-req-date { font-size: 0.7rem; font-weight: 600; color: #333; }
 .et-req-time { font-size: 0.65rem; color: #666; }
 .et-req-actions { display: flex; gap: 0.2rem; }
+.et-req-status {
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    text-transform: capitalize;
+    white-space: nowrap;
+}
 
 /* Access Denied View */
 .access-denied {

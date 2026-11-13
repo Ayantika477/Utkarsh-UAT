@@ -1,3 +1,9 @@
+/**
+ * @description   Queries Lead, Opportunity, and related records needed for messaging
+ *                payload building.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 public without sharing class BWM_RecordQueryService {
   public static Lead queryLead(Id leadId) {
     return [
@@ -53,6 +59,7 @@ public without sharing class BWM_RecordQueryService {
         SyncedQuoteId,
         SyncedQuote.QuoteNumber,
         SyncedQuote.CreatedDate,
+        Final_Quote_Document_ID__c,
         City__c,
         State__c,
         Lead__c,
@@ -71,6 +78,9 @@ public without sharing class BWM_RecordQueryService {
         Owner.Email,
         Owner.Phone,
         Owner.MobilePhone,
+        CRM_User_Name_Formula__c,
+        CRM_User_Contact_No_Formula__c,
+        CRM_User_Email_Formula__c,
         Account.Name,
         Account.Phone
       FROM Opportunity

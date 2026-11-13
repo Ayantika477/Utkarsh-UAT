@@ -24,6 +24,18 @@ System.schedule(
     new ResultWinnerBidderContactScheduler()
 );
 
+System.schedule(
+    'Tender247 Integration - Fetch Result & Winner Contact - 1:30PM Run',
+    '0 0 13 30 * ?',
+    new ResultWinnerBidderContactScheduler()
+);
+
+System.schedule(
+    'Tender247 Integration - Fetch Result & Winner Contact - 3:30PM Run',
+    '0 0 15 30 * ?',
+    new ResultWinnerBidderContactScheduler()
+);
+
 //To verify:
 SELECT Id, CronJobDetail.Name, CronExpression, NextFireTime
 FROM CronTrigger

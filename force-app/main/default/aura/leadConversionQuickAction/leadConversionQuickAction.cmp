@@ -1,0 +1,8 @@
+<!--
+  Aura wrapper so the leadConversionScreen LWC can run as a quick action on Task
+  (Task does not allow LWC-type quick actions, but Aura-type ones work).
+  recordId is injected by the platform via force:hasRecordId.
+-->
+<aura:component implements="force:lightningQuickActionWithoutHeader,force:hasRecordId" access="global">
+    <c:leadConversionScreen recordId="{!v.recordId}"/>
+</aura:component>

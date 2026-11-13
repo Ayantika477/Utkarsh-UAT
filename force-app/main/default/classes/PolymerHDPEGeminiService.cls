@@ -1,24 +1,38 @@
 public with sharing class PolymerHDPEGeminiService {
 
+    private static final String STAGE_NAME = 'PolymerHDPEFileCheck';
+
+    // Result of analyzing ONE file against the Polymer/HDPE keyword configs.
     public class MatchResult {
-        public Boolean excludedMatched = false;
-        public Boolean relevantMatched = false;
-        public String  reasoning       = '';
-        public Boolean hadError        = false;
-        public String  errorMessage    = '';
+        public String  matchedDepartment = null;   // "Polymer" / "HDPE" / null (no match)
+        public String  reasoning         = '';
+        public Boolean hadError          = false;
+        public String  errorMessage      = '';
     }
 
+    // ----------------------------------------------------------------------
+    // METHOD: checkFile
+    // Sends one downloaded file (as Blob) to Gemini along with a prompt built
+    // from the Polymer and HDPE "Relevant" keyword configs, asks it to decide
+    // which department (if any) the file belongs to, parses the JSON result,
+    // and logs the outcome via IntegrationLogger before returning to caller.
+    // tenderId is required purely for logging/traceability - it plays no
+    // role in the actual Gemini call itself.
+    // ----------------------------------------------------------------------
     public static MatchResult checkFile(
         Blob   fileBytes,
         String mimeType,
         String fileName,
-        PolymerHDPEKeywordService.KeywordConfig excludedCfg,
-        PolymerHDPEKeywordService.KeywordConfig relevantCfg
+        Id     tenderId,
+        PolymerHDPEKeywordService.KeywordConfig polymerCfg,
+        PolymerHDPEKeywordService.KeywordConfig hdpeCfg
     ) {
         MatchResult result = new MatchResult();
+        Integer statusCode = null;
+        String  rawResponseForLog = null;
 
         try {
-            String prompt     = buildPrompt(fileName, excludedCfg, relevantCfg);
+            String prompt     = buildPrompt(fileName, polymerCfg, hdpeCfg);
             String base64Data = EncodingUtil.base64Encode(fileBytes);
 
             List<Object> parts = new List<Object>();
@@ -49,13 +63,19 @@ public with sharing class PolymerHDPEGeminiService {
 
             Http         http = new Http();
             HttpResponse res  = http.send(req);
+            statusCode = res.getStatusCode();
+            rawResponseForLog = res.getBody();
 
-            System.debug('Gemini Polymer/HDPE check status: ' + res.getStatusCode() + ' for file: ' + fileName);
+            System.debug('[PolymerHDPEGeminiService] status=' + statusCode + ' file=' + fileName);
 
-            if (res.getStatusCode() != 200) {
+            if (statusCode != 200) {
                 result.hadError     = true;
-                result.errorMessage = 'Gemini call failed - Status: ' + res.getStatusCode()
+                result.errorMessage = 'Gemini call failed - Status: ' + statusCode
                     + ' | Body: ' + (res.getBody() != null ? res.getBody().left(300) : '');
+
+                IntegrationLogger.log(STAGE_NAME, result.errorMessage != null ? 'Gemini' : 'Gemini',
+                    'gemini-2.5-flash:generateContent', prompt, rawResponseForLog,
+                    statusCode, false, result.errorMessage, tenderId);
                 return result;
             }
 
@@ -63,6 +83,9 @@ public with sharing class PolymerHDPEGeminiService {
             if (String.isBlank(text)) {
                 result.hadError     = true;
                 result.errorMessage = 'Empty/unreadable Gemini response for file: ' + fileName;
+
+                IntegrationLogger.log(STAGE_NAME, 'Gemini', 'gemini-2.5-flash:generateContent',
+                    prompt, rawResponseForLog, statusCode, false, result.errorMessage, tenderId);
                 return result;
             }
 
@@ -72,71 +95,97 @@ public with sharing class PolymerHDPEGeminiService {
             } catch (Exception pe) {
                 result.hadError     = true;
                 result.errorMessage = 'Could not parse Gemini JSON for file "' + fileName + '": ' + pe.getMessage();
+
+                IntegrationLogger.log(STAGE_NAME, 'Gemini', 'gemini-2.5-flash:generateContent',
+                    prompt, rawResponseForLog, statusCode, false, result.errorMessage, tenderId);
                 return result;
             }
 
-            result.excludedMatched = parsed.containsKey('excludedMatched') && parsed.get('excludedMatched') == true;
-            result.relevantMatched = parsed.containsKey('relevantMatched') && parsed.get('relevantMatched') == true;
-            result.reasoning       = parsed.containsKey('reasoning') ? String.valueOf(parsed.get('reasoning')) : '';
+            // matchedDepartment is expected to be "Polymer", "HDPE", or "None".
+            String dept = parsed.containsKey('matchedDepartment')
+                ? String.valueOf(parsed.get('matchedDepartment'))
+                : null;
+
+            if (dept == 'Polymer' || dept == 'HDPE') {
+                result.matchedDepartment = dept;
+            }
+            result.reasoning = parsed.containsKey('reasoning') ? String.valueOf(parsed.get('reasoning')) : '';
+
+            // Successful call - log it as success regardless of whether a
+            // department was actually matched (a clean "None" is still a
+            // successful, well-formed callout - only actual errors are
+            // logged as failures).
+            IntegrationLogger.log(STAGE_NAME, 'Gemini', 'gemini-2.5-flash:generateContent',
+                prompt, rawResponseForLog, statusCode, true,
+                (result.matchedDepartment == null ? 'No department matched for file: ' + fileName : null),
+                tenderId);
 
         } catch (Exception e) {
             result.hadError     = true;
             result.errorMessage = 'Exception in checkFile for "' + fileName + '": ' + e.getMessage();
-            System.debug('PolymerHDPEGeminiService ERROR: ' + e.getMessage() + ' | ' + e.getStackTraceString());
+            System.debug('[PolymerHDPEGeminiService] ERROR: ' + e.getMessage() + ' | ' + e.getStackTraceString());
+
+            IntegrationLogger.log(STAGE_NAME, 'Gemini', 'gemini-2.5-flash:generateContent',
+                null, rawResponseForLog, statusCode, false, result.errorMessage, tenderId);
         }
 
         return result;
     }
 
+    // ----------------------------------------------------------------------
+    // METHOD: buildPrompt
+    // Builds the Gemini prompt text for a single file. Checks Polymer
+    // keywords FIRST (matching the same priority used in the Step 1 Prompt
+    // Builder template) - only if Polymer does not match does it consider
+    // HDPE. No "Excluded" criteria exist anymore.
+    // ----------------------------------------------------------------------
     private static String buildPrompt(
         String fileName,
-        PolymerHDPEKeywordService.KeywordConfig excludedCfg,
-        PolymerHDPEKeywordService.KeywordConfig relevantCfg
+        PolymerHDPEKeywordService.KeywordConfig polymerCfg,
+        PolymerHDPEKeywordService.KeywordConfig hdpeCfg
     ) {
-        String prompt = 'You are a Tender Document Analyzer. Your ONLY task here is to decide between two outcomes: Polymer-Excluded (product is HDPE) or Polymer-Relevant (product is Polymer). Ignore all other categories.\n\n';
+        String prompt = 'You are a Tender Document Analyzer. Your ONLY task is to decide whether this document belongs to the "Polymer" department or the "HDPE" department, or neither.\n\n';
         prompt += 'File being analyzed: ' + fileName + '\n\n';
 
-        prompt += '--- POLYMER EXCLUDED CRITERIA (check this FIRST) ---\n';
-        if (excludedCfg != null) {
-            if (String.isNotBlank(excludedCfg.negativeKeywords)) {
-                prompt += 'If ANY of these keywords/phrases are present in the document, it is EXCLUDED (product = HDPE): '
-                    + excludedCfg.negativeKeywords + '\n';
-            }
-            if (String.isNotBlank(excludedCfg.schemaPrompt)) {
-                prompt += 'Additional instruction: ' + excludedCfg.schemaPrompt + '\n';
+        prompt += '--- STEP 1: Check POLYMER keywords FIRST ---\n';
+        if (polymerCfg != null && String.isNotBlank(polymerCfg.positiveKeywords)) {
+            prompt += 'If ANY of these keywords/phrases are present in the document, matchedDepartment = "Polymer" and STOP (do not check HDPE): '
+                + polymerCfg.positiveKeywords + '\n';
+            if (String.isNotBlank(polymerCfg.schemaPrompt)) {
+                prompt += 'Additional instruction: ' + polymerCfg.schemaPrompt + '\n';
             }
         } else {
-            prompt += '(No Excluded criteria configured)\n';
+            prompt += '(No Polymer keyword configuration available)\n';
         }
 
-        prompt += '\n--- POLYMER RELEVANT CRITERIA (check ONLY if NOT excluded) ---\n';
-        if (relevantCfg != null) {
-            if (String.isNotBlank(relevantCfg.positiveKeywords)) {
-                prompt += 'If ANY of these keywords/phrases are present in the document, it is RELEVANT (product = Polymer): '
-                    + relevantCfg.positiveKeywords + '\n';
-            }
-            if (String.isNotBlank(relevantCfg.schemaPrompt)) {
-                prompt += 'Additional instruction: ' + relevantCfg.schemaPrompt + '\n';
+        prompt += '\n--- STEP 2: Only if Polymer did NOT match, check HDPE keywords ---\n';
+        if (hdpeCfg != null && String.isNotBlank(hdpeCfg.positiveKeywords)) {
+            prompt += 'If ANY of these keywords/phrases are present in the document, matchedDepartment = "HDPE": '
+                + hdpeCfg.positiveKeywords + '\n';
+            if (String.isNotBlank(hdpeCfg.schemaPrompt)) {
+                prompt += 'Additional instruction: ' + hdpeCfg.schemaPrompt + '\n';
             }
         } else {
-            prompt += '(No Relevant criteria configured)\n';
+            prompt += '(No HDPE keyword configuration available)\n';
         }
 
-        prompt += '\n--- INSTRUCTIONS ---\n';
-        prompt += 'Read the attached document carefully.\n';
-        prompt += 'Step 1: Check the Excluded criteria. If matched, set excludedMatched=true and relevantMatched=false, and stop.\n';
-        prompt += 'Step 2: If NOT excluded, check the Relevant criteria. If matched, set relevantMatched=true.\n';
-        prompt += 'Step 3: If neither matched, set both to false.\n';
-        prompt += 'Return ONLY a valid JSON object. No markdown. No explanation outside the JSON.\n\n';
+        prompt += '\n--- STEP 3: If neither matched ---\n';
+        prompt += 'Set matchedDepartment = "None".\n';
+
+        prompt += '\nReturn ONLY a valid JSON object. No markdown. No explanation outside the JSON.\n\n';
         prompt += '{\n';
-        prompt += '  "excludedMatched": true/false,\n';
-        prompt += '  "relevantMatched": true/false,\n';
+        prompt += '  "matchedDepartment": "Polymer" | "HDPE" | "None",\n';
         prompt += '  "reasoning": "<brief explanation - which specific keyword(s) or content led to this decision, or why neither matched>"\n';
         prompt += '}';
 
         return prompt;
     }
 
+    // ----------------------------------------------------------------------
+    // METHOD: extractText
+    // Pulls the plain text out of Gemini's raw response envelope
+    // (candidates[0].content.parts[0].text). Unchanged from before.
+    // ----------------------------------------------------------------------
     private static String extractText(String responseBody) {
         try {
             Map<String, Object> resp = (Map<String, Object>) JSON.deserializeUntyped(responseBody);
@@ -158,7 +207,7 @@ public with sharing class PolymerHDPEGeminiService {
             return (String) firstPart.get('text');
 
         } catch (Exception e) {
-            System.debug('extractText error: ' + e.getMessage());
+            System.debug('[PolymerHDPEGeminiService] extractText error: ' + e.getMessage());
             return null;
         }
     }

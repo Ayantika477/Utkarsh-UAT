@@ -71,7 +71,7 @@ public class QuoteExportControllerForSTP {
         quoteRecord = [SELECT Id, Name, QuoteNumber, Quote_Value__c, 
                               Account.Name, 
                               Contact.Name, Contact.Phone, Contact.Email, Opportunity.Account.Name, Opportunity.Account.Phone,
-                       			Opportunity.Account.Email__c 
+                       			Opportunity.Account.Email__c , Quote_Reference__c 
                        FROM Quote WHERE Id = :quoteId];
         
         User currentUser =  [SELECT Id, Name, Phone, Email, Department, Title, ManagerId, IsActive 
@@ -95,7 +95,7 @@ public class QuoteExportControllerForSTP {
 
         accountName = quoteRecord.Account != null ? quoteRecord.Account.Name : 'Test Account Record';
         totalAmount = 0.00;
-        referenceNum = quoteRecord.QuoteNumber != null ? quoteRecord.QuoteNumber : 'Test UIL/STPD/26-27/1';
+        referenceNum = quoteRecord.Quote_Reference__c  != null ? quoteRecord.Quote_Reference__c  : '';
         
         // CHANGE: Initialize the master tables collection
         this.tables = new List<TableWrapper>();

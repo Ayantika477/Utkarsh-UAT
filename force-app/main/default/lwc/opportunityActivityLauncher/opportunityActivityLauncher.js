@@ -1,6 +1,7 @@
 import { LightningElement, api, wire, track } from 'lwc';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import { CloseActionScreenEvent } from 'lightning/actions';
+import { FlowNavigationNextEvent, FlowNavigationFinishEvent } from 'lightning/flowSupport';
 import { refreshApex } from '@salesforce/apex';
 import { getObjectInfo, getPicklistValues } from 'lightning/uiObjectInfoApi';
 import USER_ID from '@salesforce/user/Id';
@@ -19,6 +20,7 @@ const MENU = 'menu';
 
 export default class OpportunityActivityLauncher extends LightningElement {
     @api recordId; // Opportunity Id
+    @api availableActions = []; // Set by Flow runtime; empty when launched as a quick action
 
     view = MENU;
     saving = false;
@@ -47,7 +49,7 @@ export default class OpportunityActivityLauncher extends LightningElement {
         }
     }
 
-    @wire(getAssignableUsers)
+    @wire(getAssignableUsers, { opportunityId: '$recordId' })
     wiredUsers({ data, error }) {
         if (data) {
             this.assignableUsers = data;
@@ -254,7 +256,25 @@ export default class OpportunityActivityLauncher extends LightningElement {
         this.dispatchEvent(new ShowToastEvent({ title, message, variant }));
     }
 
+    // True when running inside a Flow screen (mobile button), false for the desktop quick action.
+    get isInFlow() {
+        return Array.isArray(this.availableActions) && this.availableActions.length > 0;
+    }
+
+    // Flow: finish the flow. Quick action: close the action screen as before.
+    finishOrClose() {
+        if (this.isInFlow) {
+            if (this.availableActions.includes('NEXT')) {
+                this.dispatchEvent(new FlowNavigationNextEvent());
+            } else if (this.availableActions.includes('FINISH')) {
+                this.dispatchEvent(new FlowNavigationFinishEvent());
+            }
+        } else {
+            this.dispatchEvent(new CloseActionScreenEvent());
+        }
+    }
+
     closeAction() {
-        this.dispatchEvent(new CloseActionScreenEvent());
+        this.finishOrClose();
     }
 }

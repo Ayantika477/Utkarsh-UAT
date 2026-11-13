@@ -182,10 +182,13 @@ global class NegoActiveEscalationBatch implements Database.Batchable<SObject> {
 
         List<String> recipientEmails = new List<String>();
 
+        // User Ids of the same recipients - emails are sent to these so they count as internal.
+        Set<Id> recipientUserIds = new Set<Id>();
+
         if (tier == 7) {
 
             User ownerUser = [
-                SELECT Id, Name, Email
+                SELECT Id, Name, Email, IsActive
                 FROM User
                 WHERE Id = :opp.OwnerId
                 LIMIT 1
@@ -193,31 +196,46 @@ global class NegoActiveEscalationBatch implements Database.Batchable<SObject> {
 
             if (ownerUser.Email != null) {
                 recipientEmails.add(ownerUser.Email);
+
+                if (ownerUser.IsActive == true) {
+                    recipientUserIds.add(ownerUser.Id);
+                } else {
+                    System.debug(
+                        'NegoActiveEscalationBatch: no active User Id for recipient ' + ownerUser.Email +
+                        ' on Opportunity ' + opp.Id + ' - email address fallback is disabled, email not sent.'
+                    );
+                }
             }
 
             String roleName = opp.Department_Name__c + ' CRM User';
-            addUsersByRole(roleName, recipientEmails);
+            // addUsersByRole(roleName, recipientEmails);
+            addUsersByRole(roleName, recipientEmails, recipientUserIds);
 
         } else if (tier == 14) {
 
             String deptHodRole = opp.Department_Name__c + ' HOD';
-            addUsersByRole(deptHodRole, recipientEmails);
-            addUsersByRole('Utkarsh CRM Head', recipientEmails);
+            // addUsersByRole(deptHodRole, recipientEmails);
+            // addUsersByRole('Utkarsh CRM Head', recipientEmails);
+            addUsersByRole(deptHodRole, recipientEmails, recipientUserIds);
+            addUsersByRole('Utkarsh CRM Head', recipientEmails, recipientUserIds);
 
         } else if (tier == 21) {
 
-            addUsersByRole('Utkarsh ED', recipientEmails);
+            // addUsersByRole('Utkarsh ED', recipientEmails);
+            addUsersByRole('Utkarsh ED', recipientEmails, recipientUserIds);
         }
 
         System.debug('Tier ' + tier + ' Recipient List For ' + opp.Name + ': ' + recipientEmails);
 
-        if (recipientEmails.isEmpty()) {
+        // if (recipientEmails.isEmpty()) {
+        if (recipientUserIds.isEmpty()) {
             System.debug('No Recipients Found For Tier ' + tier + '. Email Not Queued. Will retry next run.');
             return;
         }
 
+        // Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+        // mail.setToAddresses(recipientEmails);
         Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
-        mail.setToAddresses(recipientEmails);
 
         mail.setSubject(
             'Negotiation Stage Escalation (No Activity) - ' + tier + ' Days - ' + opp.Name
@@ -236,11 +254,25 @@ global class NegoActiveEscalationBatch implements Database.Batchable<SObject> {
 
         mail.setPlainTextBody(body);
 
-        pendingEmails.add(mail);
-        pendingEscalations.add(new PendingEscalation(opp, tier));
+        // pendingEmails.add(mail);
+        // pendingEscalations.add(new PendingEscalation(opp, tier));
+
+        // setTargetObjectId takes a single User, so one copy per recipient. One
+        // PendingEscalation per message keeps results[i] aligned in execute().
+        for (Id userId : recipientUserIds) {
+            Messaging.SingleEmailMessage userMail = new Messaging.SingleEmailMessage();
+            userMail.setTargetObjectId(userId);
+            userMail.setSaveAsActivity(false);
+            userMail.setSubject(mail.getSubject());
+            userMail.setPlainTextBody(mail.getPlainTextBody());
+
+            pendingEmails.add(userMail);
+            pendingEscalations.add(new PendingEscalation(opp, tier));
+        }
     }
 
-    private static void addUsersByRole(String roleName, List<String> recipientEmails) {
+    // private static void addUsersByRole(String roleName, List<String> recipientEmails) {
+    private static void addUsersByRole(String roleName, List<String> recipientEmails, Set<Id> recipientUserIds) {
 
         List<User> roleUsers = [
             SELECT Id, Name, Email
@@ -254,6 +286,7 @@ global class NegoActiveEscalationBatch implements Database.Batchable<SObject> {
         for (User u : roleUsers) {
             if (u.Email != null) {
                 recipientEmails.add(u.Email);
+                recipientUserIds.add(u.Id);
             }
         }
     }

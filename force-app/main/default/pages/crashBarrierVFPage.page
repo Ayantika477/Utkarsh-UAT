@@ -85,6 +85,22 @@
             .keepTogether {
                 page-break-inside: avoid;
             }
+            
+            /* ── LAST PAGE (back cover) — Deepanjan (10th September 2026) ── */
+            @page final-page {
+                margin: 0mm;
+                @top-center { content: normal; }
+                @bottom-center { content: normal; }
+            }
+
+                        .cover-page-last {
+                page: final-page;
+                page-break-before: always;
+                line-height: 0;
+                font-size: 0;
+                margin: 0;
+                padding: 0;
+            }
            
         </style>
     </head>
@@ -395,7 +411,8 @@
                             
                             <!-- Freight Row (Only displays if FVF > 0) -->
                             
-                            <apex:outputPanel layout="none" rendered="{!jsonData['r_s_fvf'] > 0}">
+                            <apex:variable var="rsFreight" value="{!IF(CONTAINS(UPPER(row['name']), 'REFLECTIVE'), jsonData['r_s_fvf'], jsonData['a_s_fvf'])}" />
+                            <apex:outputPanel layout="none" rendered="{!rsFreight > 0}">
                                 <tr>
                                     <!-- Changed colspan from 5 to 4 -->
                                     <td colspan="4" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold; text-transform: uppercase;">
@@ -403,36 +420,19 @@
                                     </td>
                                     <td style="border: 1px solid #000; padding: 4px; text-align: right;">
                                         <apex:outputText value="{0, number, #,##0.00}">
-                                            <apex:param value="{!jsonData['r_s_fvf']}" />
+                                            <apex:param value="{!rsFreight}" />
                                         </apex:outputText>
                                     </td>
                                 </tr>
                             </apex:outputPanel>
 
-                            <apex:outputPanel layout="none" rendered="{!jsonData['a_s_fvf'] > 0}">
-                                <tr>
-                                    <!-- Changed colspan from 5 to 4 -->
-                                    <td colspan="4" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold; text-transform: uppercase;">
-                                        Transportation charges
-                                    </td>
-                                    <td style="border: 1px solid #000; padding: 4px; text-align: right;">
-                                        <apex:outputText value="{0, number, #,##0.00}">
-                                            <apex:param value="{!jsonData['a_s_fvf']}" />
-                                        </apex:outputText>
-                                    </td>
-                                </tr>
-                            </apex:outputPanel>
-
-                            <!-- Interest must print whenever the separate-interest flag is on, even when this section
-                             carries no full-vehicle freight. The old freight gate suppressed the whole block
-                             on freight-free quotes and the interest was silently lost. The variant test keeps
-                             the two panels of this section mutually exclusive. Deepanjan (3rd August 2026) -->
-                            <apex:outputPanel layout="none" rendered="{!showSeperateInterest && CONTAINS(UPPER(row['name']), 'REFLECTIVE')}">
+                            <!-- Interest must print whenever the separate-interest flag is on, even when this section carries no full-vehicle freight. -->
+                            <apex:outputPanel layout="none" rendered="{!showSeperateInterest}">
                                 <tr>
                                     <td colspan="4" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Interest Charges</td>
                                     <td style="border: 1px solid #000; padding: 4px; text-align: right;">
                                         <apex:outputText value="{0, number, ##,##,##0.00}">
-                                            <apex:param value="{!((row['quantity'] * row['unitPrice']) + IF(jsonData['r_s_fvf'] > 0, jsonData['r_s_fvf'], 0)) * (intrestfactor - 1)}" />
+                                            <apex:param value="{!((row['quantity'] * row['unitPrice']) + IF(rsFreight > 0, rsFreight, 0)) * (intrestfactor - 1)}" />
                                         </apex:outputText>
                                     </td>
                                 </tr>
@@ -440,50 +440,18 @@
                                     <td colspan="4" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Total charges</td>
                                     <td style="border: 1px solid #000; padding: 4px; text-align: right;">
                                         <apex:outputText value="{0, number, ##,##,##0.00}">
-                                            <apex:param value="{!((row['quantity'] * row['unitPrice']) + IF(jsonData['r_s_fvf'] > 0, jsonData['r_s_fvf'], 0))  * intrestfactor}" />
-                                        </apex:outputText>
-                                    </td>
-                                </tr>
-                            </apex:outputPanel>
-                            <apex:outputPanel layout="none" rendered="{!jsonData['r_s_fvf'] > 0 && NOT(showSeperateInterest)}">
-                                <tr>
-                                    <td colspan="4" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Total charges</td>
-                                    <td style="border: 1px solid #000; padding: 4px; text-align: right;">
-                                        <apex:outputText value="{0, number, #,##0.00}">
-                                            <apex:param value="{!(row['quantity'] * row['unitPrice']) + jsonData['r_s_fvf']}" />
+                                            <apex:param value="{!((row['quantity'] * row['unitPrice']) + IF(rsFreight > 0, rsFreight, 0)) * intrestfactor}" />
                                         </apex:outputText>
                                     </td>
                                 </tr>
                             </apex:outputPanel>
 
-                            <!-- Interest must print whenever the separate-interest flag is on, even when this section
-                             carries no full-vehicle freight. The old freight gate suppressed the whole block
-                             on freight-free quotes and the interest was silently lost. The variant test keeps
-                             the two panels of this section mutually exclusive. Deepanjan (3rd August 2026) -->
-                            <apex:outputPanel layout="none" rendered="{!showSeperateInterest && NOT(CONTAINS(UPPER(row['name']), 'REFLECTIVE'))}">
-                                <tr>
-                                    <td colspan="4" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Interest Charges</td>
-                                    <td style="border: 1px solid #000; padding: 4px; text-align: right;">
-                                        <apex:outputText value="{0, number, ##,##,##0.00}">
-                                            <apex:param value="{!((row['quantity'] * row['unitPrice']) + IF(jsonData['a_s_fvf'] > 0, jsonData['a_s_fvf'], 0)) * (intrestfactor - 1)}" />
-                                        </apex:outputText>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td colspan="4" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Total charges</td>
-                                    <td style="border: 1px solid #000; padding: 4px; text-align: right;">
-                                        <apex:outputText value="{0, number, ##,##,##0.00}">
-                                            <apex:param value="{!((row['quantity'] * row['unitPrice']) + IF(jsonData['a_s_fvf'] > 0, jsonData['a_s_fvf'], 0))  * intrestfactor}" />
-                                        </apex:outputText>
-                                    </td>
-                                </tr>
-                            </apex:outputPanel>
-                            <apex:outputPanel layout="none" rendered="{!jsonData['a_s_fvf'] > 0 && NOT(showSeperateInterest)}">
+                            <apex:outputPanel layout="none" rendered="{!NOT(showSeperateInterest)}">
                                 <tr>
                                     <td colspan="4" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Total charges</td>
                                     <td style="border: 1px solid #000; padding: 4px; text-align: right;">
                                         <apex:outputText value="{0, number, #,##0.00}">
-                                            <apex:param value="{!(row['quantity'] * row['unitPrice']) + jsonData['a_s_fvf']}" />
+                                            <apex:param value="{!(row['quantity'] * row['unitPrice']) + rsFreight}" />
                                         </apex:outputText>
                                     </td>
                                 </tr>
@@ -944,74 +912,28 @@
                             </td>
                         </tr>
                         <tr><td colspan="7" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold; background-color: #f9f9f9;">All thickness/weight tolerances as per IS standard/drawing applicable</td></tr>
-                        <apex:outputPanel layout="none" rendered="{!jsonData['ns_w_beam_section_full_Vehicle_freight'] > 0}">
-                                <tr>
-                                    <td colspan="6" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold; text-transform: uppercase;">
-                                        Transportation charges
-                                    </td>
-                                    <td style="border: 1px solid #000; padding: 4px; text-align: right;">
-                                        <apex:outputText value="{0, number, #,##0.00}">
-                                            <apex:param value="{!jsonData['ns_w_beam_section_full_Vehicle_freight']}" />
-                                        </apex:outputText>
-                                    </td>
-                                </tr>
-                            </apex:outputPanel>
-             				<apex:outputPanel layout="none" rendered="{!jsonData['ns_thrie_beam_section_full_Vehicle_freight'] > 0}">
-                                <tr>
-                                    <td colspan="6" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold; text-transform: uppercase;">
-                                        Transportation charges
-                                    </td>
-                                    <td style="border: 1px solid #000; padding: 4px; text-align: right;">
-                                        <apex:outputText value="{0, number, #,##0.00}">
-                                            <apex:param value="{!jsonData['ns_thrie_beam_section_full_Vehicle_freight']}" />
-                                        </apex:outputText>
-                                    </td>
-                                </tr>
-                            </apex:outputPanel>
-
-                            <!-- Interest must print whenever the separate-interest flag is on, even when this section
-                             carries no full-vehicle freight. The old freight gate suppressed the whole block
-                             on freight-free quotes and the interest was silently lost. The variant test keeps
-                             the two panels of this section mutually exclusive. Deepanjan (3rd August 2026) -->
-                            <apex:outputPanel layout="none" rendered="{!showSeperateInterest && NOT(CONTAINS(UPPER(row['name']), 'THRIE'))}">
+                        
+                        <apex:variable var="nsFreight" value="{!IF(CONTAINS(UPPER(row['name']), 'THRIE'), jsonData['ns_thrie_beam_section_full_Vehicle_freight'], jsonData['ns_w_beam_section_full_Vehicle_freight'])}" />             
+                        <apex:outputPanel layout="none" rendered="{!nsFreight > 0}">
                             <tr>
-                                <td colspan="6" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Interest Charges</td>
-                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">
-                                    <apex:outputText value="{0, number, ##,##,##0.00}">
-                                        <apex:param value="{!((row['quantity'] * row['unitPrice']) + IF(jsonData['ns_w_beam_section_full_Vehicle_freight'] > 0, jsonData['ns_w_beam_section_full_Vehicle_freight'], 0)) * (intrestfactor - 1)}" />
-                                    </apex:outputText>
+                                <td colspan="6" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold; text-transform: uppercase;">
+                                    Transportation charges
                                 </td>
-                            </tr>
-                            <tr>
-                                <td colspan="6" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Total charges</td>
-                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">
-                                    <apex:outputText value="{0, number, ##,##,##0.00}">
-                                        <apex:param value="{!((row['quantity'] * row['unitPrice']) + IF(jsonData['ns_w_beam_section_full_Vehicle_freight'] > 0, jsonData['ns_w_beam_section_full_Vehicle_freight'], 0))  * intrestfactor}" />
-                                    </apex:outputText>
-                                </td>
-                            </tr>
-                        </apex:outputPanel>
-                        <apex:outputPanel layout="none" rendered="{!jsonData['ns_w_beam_section_full_Vehicle_freight'] > 0 && NOT(showSeperateInterest)}">
-                            <tr>
-                                <td colspan="6" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Total charges</td>
                                 <td style="border: 1px solid #000; padding: 4px; text-align: right;">
                                     <apex:outputText value="{0, number, #,##0.00}">
-                                        <apex:param value="{!(row['quantity'] * row['unitPrice']) + jsonData['ns_w_beam_section_full_Vehicle_freight']}" />
+                                        <apex:param value="{!nsFreight}" />
                                     </apex:outputText>
                                 </td>
                             </tr>
                         </apex:outputPanel>
 
-                        <!-- Interest must print whenever the separate-interest flag is on, even when this section
-                             carries no full-vehicle freight. The old freight gate suppressed the whole block
-                             on freight-free quotes and the interest was silently lost. The variant test keeps
-                             the two panels of this section mutually exclusive. Deepanjan (3rd August 2026) -->
-                            <apex:outputPanel layout="none" rendered="{!showSeperateInterest && CONTAINS(UPPER(row['name']), 'THRIE')}">
+                        <!-- Interest must print whenever the separate-interest flag is on, even when this section carries no full-vehicle freight. -->
+                        <apex:outputPanel layout="none" rendered="{!showSeperateInterest}">
                             <tr>
                                 <td colspan="6" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Interest Charges</td>
                                 <td style="border: 1px solid #000; padding: 4px; text-align: right;">
                                     <apex:outputText value="{0, number, ##,##,##0.00}">
-                                        <apex:param value="{!((row['quantity'] * row['unitPrice']) + IF(jsonData['ns_thrie_beam_section_full_Vehicle_freight'] > 0, jsonData['ns_thrie_beam_section_full_Vehicle_freight'], 0)) * (intrestfactor - 1)}" />
+                                        <apex:param value="{!((row['quantity'] * row['unitPrice']) + nsFreight) * (intrestfactor - 1)}" />
                                     </apex:outputText>
                                 </td>
                             </tr>
@@ -1019,17 +941,18 @@
                                 <td colspan="6" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Total charges</td>
                                 <td style="border: 1px solid #000; padding: 4px; text-align: right;">
                                     <apex:outputText value="{0, number, ##,##,##0.00}">
-                                        <apex:param value="{!((row['quantity'] * row['unitPrice']) + IF(jsonData['ns_thrie_beam_section_full_Vehicle_freight'] > 0, jsonData['ns_thrie_beam_section_full_Vehicle_freight'], 0))  * intrestfactor}" />
+                                        <apex:param value="{!((row['quantity'] * row['unitPrice']) + nsFreight) * intrestfactor}" />
                                     </apex:outputText>
                                 </td>
                             </tr>
                         </apex:outputPanel>
-                        <apex:outputPanel layout="none" rendered="{!jsonData['ns_thrie_beam_section_full_Vehicle_freight'] > 0 && NOT(showSeperateInterest)}">
+
+                        <apex:outputPanel layout="none" rendered="{!NOT(showSeperateInterest)}">
                             <tr>
                                 <td colspan="6" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold;">Total charges</td>
                                 <td style="border: 1px solid #000; padding: 4px; text-align: right;">
                                     <apex:outputText value="{0, number, #,##0.00}">
-                                        <apex:param value="{!(row['quantity'] * row['unitPrice']) + jsonData['ns_thrie_beam_section_full_Vehicle_freight']}" />
+                                        <apex:param value="{!(row['quantity'] * row['unitPrice']) + nsFreight}" />
                                     </apex:outputText>
                                 </td>
                             </tr>
@@ -1552,6 +1475,13 @@
                                     All thickness/weight tolerances as per IS standard/drawing applicable
                                 </td>
                     </tr>
+                    <apex:outputPanel layout="none" rendered="{!jsonData['acc_section_anchor_fastner'] == true}">
+                            <tr>
+                                <td colspan="7" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold; background-color: #f9f9f9;">
+                                    Anchor Fastners, if required, extra @ {!jsonData['acc_section_anchor_fastner_amount']} per piece plus GST
+                                </td>
+                            </tr>
+                        </apex:outputPanel>
                     <apex:outputPanel layout="none" rendered="{!jsonData['acc_section_fvf'] > 0}">
                         <tr>
                             <td colspan="6"
@@ -1671,6 +1601,13 @@
                                 All thickness/weight tolerances as per IS standard/drawing applicable
                             </td>
                         </tr>
+                        <apex:outputPanel layout="none" rendered="{!jsonData['acc_section_anchor_fastner'] == true}">
+                            <tr>
+                                <td colspan="7" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold; background-color: #f9f9f9;">
+                                    Anchor Fastners, if required, extra @ {!jsonData['acc_section_anchor_fastner_amount']} per piece plus GST
+                                </td>
+                            </tr>
+                        </apex:outputPanel>
                         <apex:variable var="miscFreight" value="{!jsonData['misc_section_fvf']}" />
                         <apex:outputPanel layout="none" rendered="{!miscFreight > 0}">
                             <tr>
@@ -1778,6 +1715,13 @@
                                         All thickness/weight tolerances as per IS standard/drawing applicable
                                     </td>
                         </tr>
+                        <apex:outputPanel layout="none" rendered="{!jsonData['acc_section_anchor_fastner'] == true}">
+                            <tr>
+                                <td colspan="7" style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: bold; background-color: #f9f9f9;">
+                                    Anchor Fastners, if required, extra @ {!jsonData['acc_section_anchor_fastner_amount']} per piece plus GST
+                                </td>
+                            </tr>
+                        </apex:outputPanel>
                         <apex:outputPanel layout="none" rendered="{!jsonData['add_misc_fvf'] > 0}">
                         <tr>
                             <td colspan="6"
@@ -1907,6 +1851,10 @@
             <p><strong>web:</strong> <a href="http://www.utkarshindia.in" style="color: #0000EE;">www.utkarshindia.in</a></p>
             
         </div>
+        
+        <div class="cover-page-last" style="text-align: center;">
+    <img src="{!$Resource.HM_Last_Page}" style="width: 100%; height: auto; margin: 0; padding: 0; border: none;" />
+</div>
 
     </body>
     </html>

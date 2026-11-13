@@ -1556,3 +1556,25 @@
         margin-right: 8px !important;
     }
 }
+
+
+/* ================================================================
+   MOBILE v9 — tables with inputs in 1-span columns. Deepanjan (24th September 2026)
+   Only tables the JS marks .has-narrow-inputs get 120px columns and
+   slimmer cell padding; they still pan sideways. Every other table
+   keeps v3. Inside @media (max-width: 600px) only - desktop untouched.
+   ================================================================ */
+@media (max-width: 600px) {
+
+    .spreadsheet-mode.has-col-repeater.has-narrow-inputs {
+        grid-template-columns: repeat(12, 120px) !important;   /* 1440px track */
+    }
+
+    .spreadsheet-mode.has-col-repeater.has-narrow-inputs .field-cell-grid {
+        padding: 8px 3px;
+    }
+
+    .spreadsheet-mode.has-col-repeater.has-narrow-inputs .field-input-cell {
+        padding: 0 2px;
+    }
+}

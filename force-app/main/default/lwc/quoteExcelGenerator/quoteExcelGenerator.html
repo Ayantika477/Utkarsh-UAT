@@ -49,11 +49,17 @@
                     label={buttonLabel} 
                     icon-name="utility:download" 
                     variant="brand" 
-                    disabled={isButtonDisabled}
+                    disabled={exportDisabled}
                     onclick={generateDocument}
                     class="slds-size_1-of-1"
                     stretch>
                 </lightning-button>
+                <!-- Download locked until Approved / finalized. Deepanjan (18th September 2026) -->
+                <template lwc:if={showDownloadLockedNote}>
+                    <p class="slds-text-body_small slds-text-color_weak slds-m-top_xx-small slds-text-align_center">
+                        Download is available once the quote is approved.
+                    </p>
+                </template>
             </div>
 
         </div>

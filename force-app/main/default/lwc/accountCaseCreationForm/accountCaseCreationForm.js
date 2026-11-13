@@ -370,7 +370,7 @@ export default class AccountCaseCreationForm extends NavigationMixin(LightningEl
         detail += sent
             ? `, ${sent} notified by email.`
             : '. No email was sent — none of the selected contacts has an email address.';
-        this.toast(title, detail, sent || !linked ? 'success' : 'warning');
+        //this.toast(title, detail, sent || !linked ? 'success' : 'warning');
     }
 
     handleCancel() {

@@ -650,7 +650,7 @@ div.document-body-inner { padding: 2mm 20mm 2mm 20mm; }
 
     <div class="sec-title">
         <!-- mast-type aware title; Stadium/Flag no longer mislabelled as Lighting. Reetabrata (13th July 2026) -->
-        <apex:outputText value="{!IF(isStadiumMast, 'Stadium Mast', IF(isFlagMast, 'Flag Mast', IF(isLCLM, 'LCLM', IF(isSignageMast, 'Signage Mast', IF(isLatchingMast, 'Latching Mast', 'Lighting Mast')))))}"/> - <apex:outputText value="{!rd.segmentTitleWord}"/> Segment
+        <apex:outputText value="{!mastTypeTitle}"/> - <apex:outputText value="{!rd.segmentTitleWord}"/> Segment
     </div>
 
     <table class="mast-tbl">
@@ -792,13 +792,12 @@ div.document-body-inner { padding: 2mm 20mm 2mm 20mm; }
      rendered="{!isFlagMast && ...}" keeps every other mast type unchanged.
      Column headers and section titles match the blueprint.
      ═══════════════════════════════════════════════════════════════════════ -->
-
-
+		
+            <!-- comment pre existing seprate Addition/Accessory Details Table
 		<apex:outputPanel rendered="{!AND(isFlagMast, OR(hasFmAccessory, hasFmAdditional))}">
             <div class="document-body">
             <div class="document-body-inner">
             
-                <!-- ── ACCESSORY COSTING FORMAT (fm_accessory_costing) ── -->
                 <apex:outputPanel rendered="{!hasFmAccessory}">
                     <div class="sec-title">Accessory Costing Format</div>
             
@@ -832,7 +831,6 @@ div.document-body-inner { padding: 2mm 20mm 2mm 20mm; }
             
                 <div class="sp12"></div>
             
-                <!-- ── ADDITIONAL DETAILS (fm_additional_details) ── -->
                 <apex:outputPanel rendered="{!hasFmAdditional}">
                     <div class="sec-title">Additional Details</div>
             
@@ -869,7 +867,7 @@ div.document-body-inner { padding: 2mm 20mm 2mm 20mm; }
             </div>
             </div>
 		</apex:outputPanel>
-            
+		-->
             <!-- LCLM only: these render solely when the controller filled them, so every
                  other mast type shows exactly the rows it always did. Reetabrata (15th July 2026) -->
             <apex:outputPanel layout="none" rendered="{!OR(rd.spikeWeight != null, rd.dcWeight != null)}">
@@ -909,7 +907,67 @@ div.document-body-inner { padding: 2mm 20mm 2mm 20mm; }
             </tr>
         </tbody>
     </table>
+	<apex:outputPanel rendered="{!AND(isFlagMast, rd.hasFmAccessory)}">
+        <div class="sec-title">Accessory Costing Format</div>
+        <table class="cost-tbl">
+            <thead>
+                <tr>
+                    <th class="c-sno">S.No.</th>
+                    <th style="width:44%">BOM</th>
+                    <th style="width:14%; text-align:right;">Qty</th>
+                    <th style="width:18%; text-align:right;">Rate</th>
+                    <th style="width:18%; text-align:right;">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                <apex:repeat value="{!rd.fmAccessoryList}" var="ac">
+                    <tr>
+                        <td class="c-sno"><apex:outputText value="{!ac.slNo}"/></td>
+                        <td><apex:outputText value="{!ac.itemName}"/></td>
+                        <td style="text-align:right;"><apex:outputText value="{!ac.quantity}"/></td>
+                        <td style="text-align:right;"><apex:outputText value="{!ac.rate}"/></td>
+                        <td style="text-align:right;"><apex:outputText value="{!ac.amount}"/></td>
+                    </tr>
+                </apex:repeat>
+                <tr class="sum-row">
+                    <td colspan="4"><strong>Total with Realization</strong></td>
+                    <td><apex:outputText value="{!rd.fmAcTotal}"/></td>
+                </tr>
+            </tbody>
+        </table>
+    </apex:outputPanel>
 
+    <div class="sp12"></div>
+
+    <apex:outputPanel rendered="{!AND(isFlagMast, rd.hasFmAdditional)}">
+        <div class="sec-title">Additional Details</div>
+        <table class="cost-tbl">
+            <thead>
+                <tr>
+                    <th class="c-sno">S.No.</th>
+                    <th style="width:44%">Description</th>
+                    <th style="width:14%; text-align:right;">Qty</th>
+                    <th style="width:18%; text-align:right;">Rate</th>
+                    <th style="width:18%; text-align:right;">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                <apex:repeat value="{!rd.fmAdditionalList}" var="ad">
+                    <tr>
+                        <td class="c-sno"><apex:outputText value="{!ad.slNo}"/></td>
+                        <td><apex:outputText value="{!ad.itemName}"/></td>
+                        <td style="text-align:right;"><apex:outputText value="{!ad.quantity}"/></td>
+                        <td style="text-align:right;"><apex:outputText value="{!ad.rate}"/></td>
+                        <td style="text-align:right;"><apex:outputText value="{!ad.amount}"/></td>
+                    </tr>
+                </apex:repeat>
+                <tr class="grand-row">
+                    <td colspan="4"><strong>Total with Realization</strong></td>
+                    <td><apex:outputText value="{!rd.fmAddTotal}"/></td>
+                </tr>
+            </tbody>
+        </table>
+    </apex:outputPanel>
 </div>
 </div>
 

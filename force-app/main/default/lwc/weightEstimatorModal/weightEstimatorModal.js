@@ -37,6 +37,22 @@ function _reFor(key) {
     return e;
 }
  
+// PERF - Deepanjan (4th September 2026)
+// _expandFields compiled `new RegExp('\\b' + apiName + '\\b', 'g')` once per column per
+// sub-field per apiName - ~68,000 compiles for one Custom Lighting Pole open. The pattern
+// depends only on apiName, so it is compiled once here and reused. Built from the SAME
+// unescaped string as the original, so it matches exactly what it matched before.
+// (Deliberately NOT _reFor: that one escapes metacharacters, which the original did not.)
+const _PREFIX_RE_CACHE = new Map();
+function _prefixReFor(apiName) {
+    let re = _PREFIX_RE_CACHE.get(apiName);
+    if (!re) {
+        re = new RegExp(`\\b${apiName}\\b`, 'g');
+        _PREFIX_RE_CACHE.set(apiName, re);
+    }
+    return re;
+}
+
 function _fnFor(expr) {
     let fn = _FN_CACHE.get(expr);
     if (!fn) {
@@ -53,6 +69,12 @@ const MULTI_PRICE_MODAL_TITLES = [
     'CUSTOMIZED POLE ESTIMATOR'
 ];
 */
+// api names mapped based on modal - for bom validation check
+const TELECOM_COMPOSITION_GROUPS = {
+        'Tubular':            ['tub_pipe_com', 'tub_plate_com', 'tub_ang_chan_com', 'tub_misc_com'],
+        'Tubular Signalling': ['tsg_pipe_com', 'tsg_plate_com', 'tsg_ang_chan_com', 'tsg_misc_com']
+    };
+const TELECOM_COMPOSITION_APIS = [].concat(...Object.values(TELECOM_COMPOSITION_GROUPS));
 
 export default class WeightEstimatorModal extends LightningElement {
 
@@ -788,6 +810,18 @@ field.fields.forEach(subField => {
  
  
  
+                    // PERF - Deepanjan (4th September 2026)
+                    // fieldsToReplace and its length-sorted copy are identical for every one of
+                    // the maxCols iterations below, so build them ONCE per sub-field instead of
+                    // once per column. The replace loop below is the SAME sequential,
+                    // longest-first loop as before, so every formula comes out byte-identical.
+                    const fieldsToReplace = globalApiNames.length > 0
+                        ? globalApiNames
+                        : field.fields.map(f => f.apiName);
+                    const sortedToReplace = subField.formula
+                        ? [...fieldsToReplace].sort((a, b) => b.length - a.length)
+                        : null;
+
                     for (let c = 1; c <= maxCols; c++) {
                         let cloned = JSON.parse(JSON.stringify(subField));
                         cloned.apiName = `c${c}_${cloned.apiName}`;
@@ -802,14 +836,12 @@ field.fields.forEach(subField => {
                         // Use globalApiNames (repeater sub-fields only, standalone fields excluded)
                         // so cross-repeater references like material_list_type → c1_material_list_type work,
                         // while standalone fields like 'discount' stay unprefixed.
-                        const fieldsToReplace = globalApiNames.length > 0
-                            ? globalApiNames
-                            : field.fields.map(f => f.apiName);
+                        // (fieldsToReplace / sortedToReplace are hoisted above the column loop - Deepanjan 4th Sep 2026)
  
                         if (cloned.formula) {
-                            [...fieldsToReplace].sort((a, b) => b.length - a.length).forEach(apiName => {
-                                cloned.formula = cloned.formula.replace(new RegExp(`\\b${apiName}\\b`, 'g'), `c${c}_${apiName}`);
-                            });
+                            for (const apiName of sortedToReplace) {
+                                cloned.formula = cloned.formula.replace(_prefixReFor(apiName), `c${c}_${apiName}`);
+                            }
                         }
                        if (cloned.controllingFields && Array.isArray(cloned.controllingFields)) {
                             cloned.controllingFields = cloned.controllingFields.map(cf => {
@@ -1083,35 +1115,377 @@ field.fields.forEach(subField => {
         });
     }
  
-    // validate telecom tower composition - rajeev 29-05-2026
+    // validate telecom tower composition updated for both tubular/signalling - rajeev 10-09-2026
     _validateTelecomTowerComposition() {
-        const comAPI = ['tub_pipe_com', 'tub_plate_com', 'tub_ang_chan_com', 'tub_misc_com'];
- 
-        // collect only visible composition fields
-        const visibleCompositionAPI = [];
-        this.accordionSections.forEach(sec => {
-            sec.fields.forEach(f => {
-                if (comAPI.includes(f.apiName) && f.isVisible) {
-                    visibleCompositionAPI.push(f);
+        const groups = [];
+
+        Object.keys(TELECOM_COMPOSITION_GROUPS).forEach(product => {
+            const apis = TELECOM_COMPOSITION_GROUPS[product];
+            const seen = new Set();
+            let total = 0;
+            let found = false;
+
+            this.accordionSections.forEach(sec => {
+                sec.fields.forEach(f => {
+                    if (!f.isVisible) return;
+                    if (!apis.includes(f.apiName)) return;
+                    if (seen.has(f.apiName)) return;   // same field in 2 sections
+                    seen.add(f.apiName);
+                    found = true;
+                    total += Number(f.value) || 0;
+                });
+            });
+
+            if (found) groups.push({ product, total: Math.round(total * 100) / 100 });
+        });
+
+        // no composition fields on this modal - every other department unaffected
+        if (groups.length === 0) return true;
+
+        const bad = groups.filter(g => g.total > 100);
+        if (bad.length === 0) return true;
+
+        const detail = bad.map(g => `${g.product} is ${g.total}%`).join(' and ');
+        this.dispatchEvent(new ShowToastEvent({
+            title: 'Composition Error',
+            message: `Total composition for ${detail}. The sum of PIPE + PLATE + ANGLES & CHANNELS `
+                + '+ MISCELLANEOUS must not exceed 100% for each tower type. Please correct the '
+                + 'values before saving.',
+            variant: 'error'
+        }));
+        return false;
+    }
+
+    // Adding validation for payments that such that each angular, tubular, & tubular signalling should have same payment
+    // terms details - rajeev 14 sep
+    _validateTelecomPaymentTerms() {
+        const PRODUCTS = [
+            { name: 'Angular',            pfx: 'agl_' },
+            { name: 'Tubular',            pfx: 'tub_' },
+            { name: 'Tubular Signalling', pfx: 'tsg_' }
+        ];
+        const GATE = 'payment_terms_req';
+        const TERM = 'select_payment_terms';
+        const DAYS = 'payment_terms_days';
+        const RATE = 'bank_int_rate';
+        const NEEDS_DETAIL = ['Against LC Before Dispatch', 'Against VFS'];
+        const VIRTUAL_SECTION = '__cross_modal_context__';
+
+        // real    = fields declared by THIS modal's JSON (visible copy preferred)
+        // virtual = other modals' saved values injected by crossPriceVariationContext
+        const real = new Map();
+        const virtual = new Map();
+        (this.accordionSections || []).forEach(sec => {
+            const isVirtualSec = !!sec && sec.id === VIRTUAL_SECTION;
+            (sec && sec.fields || []).forEach(f => {
+                if (!f || !f.apiName) return;
+                if (isVirtualSec || f.type === 'hidden') {
+                    if (!virtual.has(f.apiName)) virtual.set(f.apiName, f);
+                    return;
                 }
-            })
-        })
-        // this will ensure other departments don't get affected
-        if (visibleCompositionAPI.length === 0) return true;
- 
-        const total = visibleCompositionAPI.reduce((sum, f) => sum + (Number(f.value) || 0), 0);
-        const roundedTotal = Math.round(total * 100) / 100;
- 
-        console.log('****line 510 in method')
- 
-        if (roundedTotal > 100) {
+                const hit = real.get(f.apiName);
+                if (!hit || (!hit.isVisible && f.isVisible)) real.set(f.apiName, f);
+            });
+        });
+
+        // Which product's modal is open? Decided from REAL fields only.
+        const mine = PRODUCTS.find(p => real.has(p.pfx + TERM));
+        if (!mine) return true;                       // not a Telecom Tower modal
+
+        const saved = this._lastValues || {};
+        const isBlank = v => v === '' || v === null || v === undefined || String(v).trim() === '';
+        const str = v => (isBlank(v) ? '' : String(v).trim());
+        const num = v => { if (isBlank(v)) return null; const n = Number(v); return isNaN(n) ? null : n; };
+
+        // Accepts the gate as a checkbox (true) or as a Yes/No picklist.
+        const GATE_ON = new Set(['true', 'yes', 'y', '1']);
+        const gateOn = v => (v === true || v === 1) ? true : GATE_ON.has(str(v).toLowerCase());
+
+        // Current product: live real field. Other products: virtual copy, then saved.
+        const read = (p, key) => {
+            const api = p.pfx + key;
+            if (p.pfx === mine.pfx) return real.has(api) ? real.get(api).value : '';
+            if (virtual.has(api))   return virtual.get(api).value;
+            return saved[api];
+        };
+
+        const entries = [];
+        PRODUCTS.forEach(p => {
+            if (!gateOn(read(p, GATE))) return;       // gate OFF -> not participating
+            const term = str(read(p, TERM));
+            if (term === '') return;                  // gate ON but no term chosen yet
+            entries.push({
+                name: p.name,
+                term,
+                days: num(read(p, DAYS)),
+                rate: num(read(p, RATE))
+            });
+        });
+
+        if (entries.length < 2) return true;          // only one tower type to check
+
+        // Master = first participating tower type (Angular -> Tubular -> Signalling).
+        const master = entries[0];
+        const problems = [];
+
+        entries.slice(1).forEach(e => {
+            if (e.term !== master.term) {
+                problems.push(`${e.name} is "${e.term}" but ${master.name} is "${master.term}".`);
+            }
+        });
+
+        // Only once every participant agrees on the term do the LC / VFS details matter.
+        if (problems.length === 0 && NEEDS_DETAIL.includes(master.term)) {
+            entries.slice(1).forEach(e => {
+                if (e.days === null && master.days !== null) {
+                    problems.push(`No Of Days is missing on ${e.name} - it must be `
+                        + `${master.days}, same as ${master.name}.`);
+                } else if (e.days !== null && master.days !== null && e.days !== master.days) {
+                    problems.push(`No Of Days differs - ${master.name}: ${master.days}, `
+                        + `${e.name}: ${e.days}.`);
+                }
+
+                // Rate is a rounded formula output (3 dp) - compare with a tiny epsilon,
+                // same as the Tower / Substation check.
+                if (e.rate === null && master.rate !== null) {
+                    problems.push(`Prevailing rate of Bank Interest is missing on ${e.name} - `
+                        + `it must be ${master.rate}%, same as ${master.name}.`);
+                } else if (e.rate !== null && master.rate !== null
+                        && Math.abs(e.rate - master.rate) > 0.00005) {
+                    problems.push(`Prevailing rate of Bank Interest differs - `
+                        + `${master.name}: ${master.rate}%, ${e.name}: ${e.rate}%.`);
+                }
+            });
+        }
+
+        if (problems.length === 0) return true;
+
+        this.dispatchEvent(new ShowToastEvent({
+            title: 'Telecom Tower - Payment Terms Mismatch',
+            message: 'Every tower type with the Interest Component turned on must use the same '
+                + 'Payment Terms:\n' + problems.join('\n')
+                + '\nPlease correct it before saving.',
+            variant: 'error'
+        }));
+        return false;
+    }
+
+    /*
+     * Tower and Substation must agree on Price Basis: Price Variation on one
+     * means Price Variation on the other, FIRM means FIRM.
+     *
+     * The two live in separate Section Logic records under different apiNames -
+     * Tower `pvt_price_basics` (options "Price Variation" / "FIRM") and
+     * Substation `pvs_price_model` (options "Price Variation" / "Firm"). Note the
+     * casing differs between the two option sets, so the comparison is
+     * normalised rather than a raw ===.
+     *
+     * Both records set requiresCrossModalData: true, so crossPriceVariationContext()
+     * in createQuote.js merges the other modal's saved keys into savedData, which
+     * lands in this._lastValues. That is how the Substation modal can see the
+     * Tower's basis and the other way round. Same read order the PV-rate block
+     * above uses: the live field first, the cross-modal saved value as fallback.
+     *
+     * Fires only when BOTH sides actually have a value. Whichever modal is filled
+     * first has nothing to compare against and must not be blocked; the mismatch
+     * surfaces when the second one is applied. Editing the first one later is
+     * caught too, because by then the second side is saved.
+     *
+     * Returns true for every other department - if neither field is on this modal
+     * there is nothing to check. Deepanjan (12th August 2026)
+     */
+    _validateTowerSubstationPriceBasis() {
+        const TOWER_API = 'pvt_price_basics';
+        const SUBSTATION_API = 'pvs_price_model';
+
+        // Prefer a visible field, then any field, then the cross-modal saved value.
+        const readBasis = (apiName) => {
+            let anyMatch = null;
+            for (const sec of this.accordionSections || []) {
+                for (const f of sec.fields || []) {
+                    if (f.apiName !== apiName) continue;
+                    if (f.isVisible) return String(f.value || '').trim();
+                    if (anyMatch === null) anyMatch = String(f.value || '').trim();
+                }
+            }
+            if (anyMatch) return anyMatch;
+            return String(this._lastValues[apiName] || '').trim();
+        };
+
+        const onThisModal = (this.accordionSections || []).some(sec =>
+            (sec.fields || []).some(f => f.apiName === TOWER_API || f.apiName === SUBSTATION_API)
+        );
+        if (!onThisModal) return true;
+
+        const towerBasis = readBasis(TOWER_API);
+        const substationBasis = readBasis(SUBSTATION_API);
+        if (!towerBasis || !substationBasis) return true;
+
+        // "FIRM" vs "Firm" is the same choice spelled two ways.
+        const normalise = (v) => v.toUpperCase().replace(/\s+/g, ' ');
+        if (normalise(towerBasis) === normalise(substationBasis)) return true;
+
+        this.dispatchEvent(new ShowToastEvent({
+            title: 'Price Basis Mismatch',
+            message: `Tower is set to "${towerBasis}" but Substation is set to "${substationBasis}". `
+                + 'Both must use the same Price Basis. Please correct one of them before saving.',
+            variant: 'error'
+        }));
+        return false;
+    }
+
+    _validateTowerSubstationPaymentTerms() {
+        const TOWER_BASIS_API = 'pvt_price_basics';
+        const SUBSTATION_BASIS_API = 'pvs_price_model';
+
+        // visible field first, then any matching field, then the cross-modal
+        // saved value. Generic so it can read basis, picklist, checkbox and
+        // number fields alike.
+        const readRaw = (apiName) => {
+            let anyMatch;
+            for (const sec of this.accordionSections || []) {
+                for (const f of sec.fields || []) {
+                    if (f.apiName !== apiName) continue;
+                    if (f.isVisible) return f.value;
+                    if (anyMatch === undefined) anyMatch = f.value;
+                }
+            }
+            if (anyMatch !== undefined) return anyMatch;
+            return this._lastValues ? this._lastValues[apiName] : undefined;
+        };
+
+        const readStr = (apiName) => String(readRaw(apiName) || '').trim();
+        const readBool = (apiName) => {
+            const v = readRaw(apiName);
+            return v === true || v === 'true';
+        };
+        // Returns null when genuinely empty (not-yet-filled), never 0-as-empty.
+        const readNum = (apiName) => {
+            const v = readRaw(apiName);
+            if (v === '' || v === null || v === undefined) return null;
+            const n = Number(v);
+            return isNaN(n) ? null : n;
+        };
+
+        const onThisModal = (this.accordionSections || []).some(sec =>
+            (sec.fields || []).some(f => f.apiName === TOWER_BASIS_API || f.apiName === SUBSTATION_BASIS_API)
+        );
+        if (!onThisModal) return true;
+
+        // "FIRM" vs "Firm" - same normalisation used for the basis comparison.
+        const normalise = (v) => v.toUpperCase().replace(/\s+/g, ' ');
+
+        const towerBasis = normalise(readStr(TOWER_BASIS_API));
+        const substationBasis = normalise(readStr(SUBSTATION_BASIS_API));
+
+        const towerPrefix =
+            towerBasis === 'FIRM' ? 'pvt_firm_' :
+            towerBasis === 'PRICE VARIATION' ? 'pvt_pv_' : null;
+
+        const substationPrefix =
+            substationBasis === 'FIRM' ? 'pvs_firm_' :
+            substationBasis === 'PRICE VARIATION' ? 'pvs_pv_' : null;
+
+        // Either side hasn't picked a basis yet, or the two bases disagree -
+        // in both cases there is no safe, single field-set pair to compare, and
+        // a basis mismatch is already reported (or will be) by
+        // _validateTowerSubstationPriceBasis. Stay silent here.
+        if (!towerPrefix || !substationPrefix) return true;
+        if (towerPrefix.startsWith('pvt_firm_') !== substationPrefix.startsWith('pvs_firm_')) return true;
+
+        if (towerPrefix === 'pvt_pv_') {
+            const towerModule = readStr('pvt_price_module');
+            const substationModule = readStr('pvs_price_module');
+            const towerMonth = readStr('pvt_price_variable_month');
+            const substationMonth = readStr('pvs_price_variable_month');
+            const towerYear = readStr('pvt_price_variable_year');
+            const substationYear = readStr('pvs_price_variable_year');
+
+            const pvProblems = [];
+
+            if (towerModule && substationModule && towerModule !== substationModule) {
+                pvProblems.push(`PRICE MODULE (Tower: "${towerModule}", Substation: "${substationModule}")`);
+            }
+            if (towerMonth && substationMonth && towerMonth !== substationMonth) {
+                pvProblems.push(`PRICE VARIATION (MONTH) (Tower: "${towerMonth}", Substation: "${substationMonth}")`);
+            }
+            if (towerYear && substationYear && towerYear !== substationYear) {
+                pvProblems.push(`PRICE VARIABLE (YEAR) (Tower: "${towerYear}", Substation: "${substationYear}")`);
+            }
+
+            if (pvProblems.length > 0) {
+                this.dispatchEvent(new ShowToastEvent({
+                    title: 'Price Variation Details Mismatch',
+                    message: 'Both Tower and Substation are on Price Variation, but the following details '
+                        + `differ: ${pvProblems.join('; ')}. These must be identical between Tower and `
+                        + 'Substation. Please correct one of them before saving.',
+                    variant: 'error'
+                }));
+                return false;
+            }
+        }
+
+        const towerInterestOn = readBool(`${towerPrefix}interest_component`);
+        const substationInterestOn = readBool(`${substationPrefix}interest_component`);
+
+        // Payment Terms only exists once the "Interest Component ... ?" checkbox
+        // is on. If either side hasn't switched it on (or hasn't picked a term
+        // yet), there is nothing on that side to compare against - don't block.
+        if (!towerInterestOn && !substationInterestOn) return true;
+
+        const towerTerm = readStr(`${towerPrefix}payment_terms`);
+        const substationTerm = readStr(`${substationPrefix}payment_terms`);
+
+        if (!towerTerm || !substationTerm) return true;
+
+        if (towerTerm !== substationTerm) {
             this.dispatchEvent(new ShowToastEvent({
-                title: 'Composition Error',
-                message: `Total composition is ${roundedTotal}%. The sum of PIPE + PLATE + ANGLES & CHANNELS + MISCELLANEOUS must not exceed 100%. Please correct the values before saving.`,
+                title: 'Payment Terms Mismatch',
+                message: `Tower Payment Terms is "${towerTerm}" but Substation Payment Terms is `
+                    + `"${substationTerm}". Both must use the same Payment Terms. Please correct one `
+                    + 'of them before saving.',
                 variant: 'error'
             }));
             return false;
         }
+
+        // Only "Against LC Before Dispatch" and "Against VFS" unlock the extra
+        // No Of Days / Prevailing Rate fields. Every other Payment Terms value
+        // (Before Dispatch, Against PDC, Against Open Credit) has no further
+        // fields to reconcile, so matching the term above is already sufficient.
+        const NEEDS_DETAIL = ['Against LC Before Dispatch', 'Against VFS'];
+        if (!NEEDS_DETAIL.includes(towerTerm)) return true;
+
+        const towerDays = readNum(`${towerPrefix}no_of_days`);
+        const substationDays = readNum(`${substationPrefix}no_of_days`);
+        const towerRate = readNum(`${towerPrefix}prevailing_rate_of_bank_interest`);
+        const substationRate = readNum(`${substationPrefix}prevailing_rate_of_bank_interest`);
+
+        const problems = [];
+
+        // Only compare once BOTH sides have entered the detail value - same
+        // non-blocking rule as everything above.
+        if (towerDays !== null && substationDays !== null && towerDays !== substationDays) {
+            problems.push(`No Of Days (Tower: ${towerDays}, Substation: ${substationDays})`);
+        }
+
+        // Rate is a rounded formula output (rounded to 3 decimals by the global
+        // math engine) - compare with a tiny epsilon instead of strict ===.
+        if (towerRate !== null && substationRate !== null && Math.abs(towerRate - substationRate) > 0.00005) {
+            problems.push(`Prevailing Rate of Bank Interest (Tower: ${towerRate}%, Substation: ${substationRate}%)`);
+        }
+
+        if (problems.length > 0) {
+            this.dispatchEvent(new ShowToastEvent({
+                title: 'Payment Terms Detail Mismatch',
+                message: `Both sides use Payment Terms "${towerTerm}", but the following details differ: `
+                    + `${problems.join('; ')}. These must be identical between Tower and Substation. `
+                    + 'Please correct one of them before saving.',
+                variant: 'error'
+            }));
+            return false;
+        }
+
         return true;
     }
  
@@ -1211,10 +1585,33 @@ field.fields.forEach(subField => {
             sec.fields.some(f => ((f.isHeader || f.type === 'header') && f.colSpan && f.colSpan < 12) || f.isGridRepeaterCell)) {
             sec.gridWrapperClass += ' has-col-repeater';
         }
+
+
+        // MOBILE: a phone table packs its 12 columns into 56px each, which leaves an
+        // input in a 1-span column only ~6px of visible text - typed values, picked
+        // picklist values and auto-filled weights are there but cannot be seen (CB
+        // Accessories / Miscellaneous). When such a table has an EDITABLE input in a
+        // 1-span column, mark it so the mobile CSS gives the table wider columns. Read
+        // once, when the section is built, from the metadata (not from view-mode
+        // read-only), so the table keeps the same width in view mode. Desktop never
+        // reads this class. Deepanjan (24th September 2026)
+        if (sec._narrowInputs === undefined) {
+            sec._narrowInputs = sec.gridWrapperClass.includes('has-col-repeater') &&
+                                sec.fields.some(f => Number(f.colSpan) === 1 && !f.baseReadOnly &&
+                    // Telecom tables: colSpan comes as the string "1" and the AWT inputs carry a
+                    // formula (pre-filled from BOM) while staying editable - both must still
+                    // count. Every other department keeps the original test. Deepanjan (29th Sep 2026)
+                    (!f.formula || (this._modalConfig && this._modalConfig.department === 'Telecom Tower - Department')) &&
+                    ['picklist', 'number', 'text', 'date', 'textarea'].includes(f.type));
+        }
+        if (sec._narrowInputs && sec.gridWrapperClass.includes('has-col-repeater')) {
+            sec.gridWrapperClass += ' has-narrow-inputs';
+        }
     }
  
+    
     // =========================================================
-    // FIELD BUILDER
+    // FIELD BUILDER reeta
     // =========================================================
     _buildFields(fieldDefs, sectionId, showRequired = true) {
         return fieldDefs.map(f => {
@@ -1244,6 +1641,7 @@ field.fields.forEach(subField => {
                 isDiscount: f.isDiscount || false,        
                 isAddedUp: f.isAddedUp || false,          // 👉 ADD THIS
                 isTolerance: f.isTolerance || false, 
+                approvalMetric: f.approvalMetric || null,  //added by faizan
                 defaultValue: defaultVal,
                 userCleared: wasCleared,
                 isManualOverride: wasManual,
@@ -1356,7 +1754,7 @@ field.fields.forEach(subField => {
     }
 
     /* No class-level this.isFirmMode exists — detect mode the same way the
-       pricing engine does: material grid present AND no PV month field = FIRM. */
+       pricing engine does: material grid present AND no PV month field = FIRM.*/
     _sqgIsFirm() {
         const hasMaterialField = this.accordionSections.some(sec =>
             sec.fields.some(f =>
@@ -1372,7 +1770,7 @@ field.fields.forEach(subField => {
 
     /* ═══════════════ Core SUB-TYPE × QUANTITY multiselect widget (Path B) ═══════════════
        One field type: 'subtype_qty_grid'. Fully gated. Writes total_weight + total_quantity
-       into the column's EXISTING slots, so unit_rate / cost / summary / line-item stay
+       into the  column's EXISTING slots,so unit_rate / cost / summary / line-item stay
        unchanged. Weight comes from CORE_SUBTYPE_DATA (blueprint ternary -> weightMap). */
 
     _sqgDataset() {
@@ -1711,6 +2109,30 @@ field.fields.forEach(subField => {
                     });
                 }
             }
+            // for transmission tower consider line items only for current checked modal which is on the screen, if I first added value for 
+            // for firm then moving to price variation then only price variation should be considered. firm value/line items should not be considered
+            // and vice versa. so when we are changing price basis with gsm checked then this block marked it false before change so that never considered on evaluation
+            if (fieldApiName === 'pvt_price_basics' || fieldApiName === 'pvs_price_model') {
+                const staleCheckboxApis = fieldApiName === 'pvt_price_basics'
+                    ? ['pvt_pv_610_gsm', 'pvt_pv_900_gsm', 'pvt_pv_1000_gsm',
+                    'pvt_firm_610_gsm', 'pvt_firm_900_gsm', 'pvt_firm_1000_gsm']
+                    : ['pvs_pv_610_gsm', 'pvs_pv_900_gsm', 'pvs_pv_1000_gsm',
+                    'pvs_firm_610_gsm', 'pvs_firm_900_gsm', 'pvs_firm_1000_gsm'];
+
+                staleCheckboxApis.forEach(api => {
+                    this.accordionSections.forEach(sec => {
+                        const f = sec.fields.find(x => x.apiName === api);
+                        if (f && f.value === true) {
+                            f.value = false;
+                            f.userCleared = false;
+                            this._updateFieldUI(f);
+                        }
+                    });
+                    this._lastValues[api] = false;
+                });
+            }
+
+
             //Reetabrata (8th July 2026)
  
  
@@ -1897,7 +2319,7 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
                     // (isDiscreteField was already computed above, before the deep clone)
  
                     //check composition validation when composition value changed
-                    const comAPI = ['tub_pipe_com', 'tub_plate_com', 'tub_ang_chan_com', 'tub_misc_com'];
+                    const comAPI = TELECOM_COMPOSITION_APIS;
  
                     if (isDiscreteField) {
                         // dependency picklists / discrete fields → full recalculation now
@@ -2014,6 +2436,42 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
     // =========================================================
     // 👉 NEW & SAFE: DYNAMIC DISABLE / READONLY ENGINE
     // =========================================================
+    // ═══════════════════════════════════════════════════════════════════════
+    // PERF - Deepanjan (4th September 2026)
+    // _evaluateFieldVisibility and _evaluateDynamicDisable resolved every parent
+    // with `fields.find(...)` and, on a miss, a `find` over EVERY section. In a
+    // column-repeater modal (Octagonal / Custom Lighting Pole builds ~1,800
+    // fields) that is a full linear scan per field - millions of property reads,
+    // every one of them through the @track proxy. This builds one
+    // apiName -> field index per call instead.
+    //
+    // Resolution order is IDENTICAL to the scans it replaces: first match inside
+    // `fields`, otherwise first match walking this.accordionSections in order.
+    // It hands back the SAME object references, so a value written to a parent
+    // earlier in the same pass is read back exactly as before. The global index
+    // is built lazily - only when a local miss actually happens.
+    // ═══════════════════════════════════════════════════════════════════════
+    _fieldResolver(fields) {
+        const local = new Map();
+        for (const f of fields) {
+            if (!local.has(f.apiName)) local.set(f.apiName, f);
+        }
+        let global = null;
+        return (apiName) => {
+            const hit = local.get(apiName);
+            if (hit) return hit;
+            if (global === null) {
+                global = new Map();
+                for (const sec of this.accordionSections) {
+                    for (const f of sec.fields) {
+                        if (!global.has(f.apiName)) global.set(f.apiName, f);
+                    }
+                }
+            }
+            return global.get(apiName);
+        };
+    }
+
     _evaluateDynamicDisable(fields) {
         try {
             if (this.isReadOnly) {
@@ -2025,6 +2483,7 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
                 return;
             }
  
+            const resolve = this._fieldResolver(fields); // PERF - Deepanjan (4th September 2026)
             fields.forEach(field => {
                 if (!field.disableControllingField) {
                     field.readOnly = field.baseReadOnly;
@@ -2042,13 +2501,8 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
                     const isNegated = rawApiName.startsWith('!');
                     const apiName = isNegated ? rawApiName.substring(1) : rawApiName;
  
-                    let parent = fields.find(f => f.apiName === apiName);
-                    if (!parent) {
-                        for (const sec of this.accordionSections) {
-                            parent = sec.fields.find(f => f.apiName === apiName);
-                            if (parent) break;
-                        }
-                    }
+                    // same first-match order as the find() scans this replaces - Deepanjan (4th Sep 2026)
+                    let parent = resolve(apiName);
  
                     if (parent) {
                         const parentHasValue = parent.type === 'checkbox'
@@ -2243,17 +2697,13 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
  
     _evaluateFieldVisibility(fields) {
         try {
+            const resolve = this._fieldResolver(fields); // PERF - Deepanjan (4th September 2026)
             fields.forEach(field => {
                 // 👉 isVisible:false on a sub-section hard-hides its header + children - Reetabrata (8th July 2026)
                 if (field.forceHidden) { field.isVisible = false; return; }
                 if (field.columnCountApi) {
-                    let countParent = fields.find(f => f.apiName === field.columnCountApi);
-                    if (!countParent) {
-                        for (const sec of this.accordionSections) {
-                            countParent = sec.fields.find(f => f.apiName === field.columnCountApi);
-                            if (countParent) break;
-                        }
-                    }
+                    // same first-match order as the find() scans this replaces - Deepanjan (4th Sep 2026)
+                    let countParent = resolve(field.columnCountApi);
                     const currentCount = countParent ? (Number(countParent.value) || 0) : 0;
                     if (currentCount < field.columnCountIndex) {
                         field.isVisible = false;
@@ -2279,13 +2729,8 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
                     const isNegated = rawApiName.startsWith('!');
                     const apiName = isNegated ? rawApiName.substring(1) : rawApiName;
  
-                    let parent = fields.find(f => f.apiName === apiName);
-                    if (!parent) {
-                        for (const sec of this.accordionSections) {
-                            parent = sec.fields.find(f => f.apiName === apiName);
-                            if (parent) break;
-                        }
-                    }
+                    // same first-match order as the find() scans this replaces - Deepanjan (4th Sep 2026)
+                    let parent = resolve(apiName);
  
                     if (parent) {
                         const parentHasValue = parent.type === 'checkbox'
@@ -2332,7 +2777,10 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
                 field.isVisible = forceHide ? false : isVisible;
  
                 if (!field.isVisible) {
-                    if (!field.formula) {
+                    // CROSS PRODUCT — Deepanjan (10th September 2026)
+                    const __saved = this._lastValues[field.apiName];
+                    const __hasSaved = __saved !== undefined && __saved !== null && __saved !== '';
+                    if (!field.formula && !__hasSaved) {
                         field.value = (!field.userCleared && field.defaultValue !== '' && field.defaultValue !== null && field.defaultValue !== undefined)
                             ? field.defaultValue
                             : (field.type === 'checkbox' ? false : '');
@@ -2931,6 +3379,23 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
                 return; // Blocks save completely, toast already shown inside method
             }
 
+            if (!this._headlessMode && !this._validateTelecomPaymentTerms()) {
+                return; // Blocks save completely, toast already shown inside method
+            }
+
+            // Tower and Substation must share one Price Basis. No-op on every
+            // other department. Deepanjan (12th August 2026)
+            if (!this._headlessMode && !this._validateTowerSubstationPriceBasis()) {
+                return; // Blocks save completely, toast already shown inside method
+            }
+
+            // Tower and Substation must agree on Payment Terms (and, where applicable,
+            // No Of Days / Prevailing Rate of Bank Interest). No-op on every other
+            // department.
+            if (!this._headlessMode && !this._validateTowerSubstationPaymentTerms()) {
+                return; // Blocks save completely, toast already shown inside method
+            }
+
             // 👉 Block Apply when a visible required field is empty, or a min-flagged
             //    field (e.g. Full Vehicle Freight) holds 0 / negative. Toast shown inside.
             if (!this._headlessMode && !this.validateRequiredFields()) {
@@ -3022,6 +3487,64 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
                     }
                 });
             });
+
+                        // SEGMENT ABOVE 5 — manual overrides survive reopen. Deepanjan (22nd September 2026)
+            // An editable field that also carries a formula (TOTAL PRICE (/KG) =
+            // Base_Amount__c + 5, every segment LENGTH / THICKNESS, SI price/weight add)
+            // is skipped by the formula engine only while isManualOverride is true. That
+            // flag lived only in this instance's _lastValues and never reached the saved
+            // JSON, so any rebuild from saved data re-ran the formula over the typed
+            // value (99 -> 102). The flag now travels with the values as
+            // <apiName>__manual, which _buildFields already reads.
+            // TRUE only for a VISIBLE field the user overrode. FALSE is written only to
+            // retire a flag that was TRUE before - an override the user cleared, or a
+            // field that went invisible (its value is blanked by the baseline above, so
+            // the formula must be free to run again when it reappears). Everything else
+            // writes nothing, so the JSON grows by a handful of keys. Sections that are
+            // not visible are skipped, exactly like the value loop above.
+            // Other departments are untouched.
+            if (this._modalConfig) {
+                const savedAtOpen = this._modalConfig.savedData || {};   // absent in headless
+                const lastVals    = this._lastValues || {};
+                const wasTrue = k => savedAtOpen[k] === true || lastVals[k] === true;
+                const formulaApis = new Set();
+                const manualNow   = new Set();
+                this.accordionSections.forEach(sec => {
+                    if (!sec.isVisible) return;
+                    sec.fields.forEach(f => {
+                        if (!f.formula || f.type === 'header' || f.type === 'hidden') return;
+                        formulaApis.add(f.apiName);
+                        if (f.isVisible && f.isManualOverride === true) manualNow.add(f.apiName);
+                    });
+                });
+                formulaApis.forEach(api => {
+                    const k = `${api}__manual`;
+                    if (manualNow.has(api)) result[k] = true;
+                    else if (wasTrue(k)) result[k] = false;
+                });
+            }
+
+            // PU Paint realization is not a line item, so the approval matrix could never
+            // see it. Every field carrying an approvalMetric tag is folded into ONE flat key
+            // on the saved values. Lowest value wins - low realization is the risky case.
+            // The field is hidden while PU Paint is unticked, so nothing is written then.
+            const approvalMins = {};
+            this.accordionSections.forEach(sec => {
+            const isInternalCalc = sec.forceHidden === true || sec.revealedHiddenInputs === true;
+            if (!sec.isVisible && !isInternalCalc) return;
+            sec.fields.forEach(f => {
+            if (!f.approvalMetric) return;
+            if (!f.isVisible && !isInternalCalc) return;
+            const v = Number(f.value);
+            if (f.value === '' || f.value === null || !Number.isFinite(v)) return;
+            const k = 'approval_' + f.approvalMetric;
+            approvalMins[k] = (k in approvalMins) ? Math.min(approvalMins[k], v) : v;
+            });
+            });
+            // clear stale approval_* first, so a re-save can never leave an old value behind
+            Object.keys(result).filter(k => k.startsWith('approval_')).forEach(k => delete result[k]);
+            Object.assign(result, approvalMins);
+
            
           // 3. 👉 DYNAMIC LINE ITEM PARSER
             let sectionCounter = 1;
@@ -3452,6 +3975,121 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
     // (acc_section_uom_input) while rows 2-10 do (acc_section_uom_input2 ...
     // acc_section_uom_input10), so the suffix list starts with ''.
     // =========================================================
+    // ADDITIONAL ACCESSORIES block, Segment Above 5 - Deepanjan (6th September 2026,
+    // widened 8th September 2026). Wherever the block is on screen, it must carry RATE and
+    // at least ONE of TYPE OF WINCH / DRUM TYPE / TYPE OF POWER TOOL / TYPE OF WIRE ROPE.
+    //   - Stadium Mast: the quote-level block (bare lm_acc_rate), on screen only while Man
+    //     Riding Lift is ticked. RATE there is a plain required flag in segmentGenerator.js,
+    //     so this method only adds the "one of four" rule (no duplicate RATE message).
+    //   - Lighting Mast / LCLM: the block is cloned PER ROW (r{n}_lm_acc_rate) and is always
+    //     on screen for every mast row, so both RATE and "one of four" are checked here,
+    //     per row, labelled "Additional Accessories <row>" like the section header.
+    //   - Flag Mast prices its accessories in its own fm_ac_ grid; its lm_ block is not the
+    //     priced one, so a recipe that carries any fm_ac_ field is skipped entirely.
+    // An "any one of four" rule cannot be a per-field required flag, hence this method -
+    // same shape as the Crash Barrier precedent below. Other departments have no
+    // lm_acc_rate field and return [] on the first pass.
+    _validateAccessoryBlock() {
+        const problems = [];
+        const sections = Array.isArray(this.accordionSections) ? this.accordionSections : [];
+        const byApi = new Map();
+        sections.forEach(sec => {
+            if (!sec || !sec.isVisible || !Array.isArray(sec.fields)) return;
+            sec.fields.forEach(f => {
+                if (f && f.apiName && !byApi.has(f.apiName)) byApi.set(f.apiName, f);
+            });
+        });
+
+        for (const api of byApi.keys()) {
+            if (/^(r\d+_)?fm_ac_/.test(api)) return problems;   // Flag Mast: own accessory grid
+        }
+
+        const hasValue = (f) => {
+            if (!f) return false;
+            const v = f.value;
+            if (v === '' || v === null || v === undefined) return false;
+            return String(v).trim() !== '';
+        };
+        const TYPES = ['lm_type_of_winch', 'lm_winch_drum', 'lm_type_of_power_tool', 'lm_type_of_wire_rope'];
+
+        byApi.forEach((rate, api) => {
+            const m = api.match(/^(r(\d+)_)?lm_acc_rate$/);
+            if (!m || !rate.isVisible) return;
+            const pfx   = m[1] || '';
+            const label = '[Additional Accessories' + (m[2] ? ' ' + m[2] : '') + ']';
+
+            // RATE: only when the field is not already a required flag (Stadium copy is).
+            if (rate.required !== true && !hasValue(rate)) {
+                problems.push(label + ' RATE');
+            }
+            const anyType = TYPES.some(k => hasValue(byApi.get(pfx + k)));
+            if (!anyType) {
+                problems.push(label + ' TYPE OF WINCH / DRUM TYPE / TYPE OF POWER TOOL / TYPE OF WIRE ROPE (at least one)');
+            }
+        });
+        return problems;
+    }
+
+
+       /* Octagonal / Custom Pole (High Mast): FOUNDATION BOLT DIAMETER = N.R. means the
+       bolts are NOT in our scope, but the offer still prints their dimensions - N.R FB
+       DIAMETER, FOUNDATION BOLT LENGTH and BOLT QUANTITY. HighMastSOWController drops
+       each one when blank, so a half-filled N.R. foundation saved cleanly and then
+       printed a sentence with pieces missing (seen on a quote with
+       c1_s1_cus_op_nr_fb_diameter and _foundation_bolt_length both empty). Make all
+       three mandatory once N.R. is picked.
+
+       Column-repeater fields are flattened into sec.fields by _expandFields as
+       c{n}_<api>, each carrying isColRepeaterInput + columnCountIndex, so siblings are
+       matched on columnCountIndex - the same idiom as the dependent-picklist wake-up.
+
+       Matching on the VALUE, not on isVisible: an unused column saves as '' while an
+       in-use N.R. column saves 'N.R.', so columns 2-10 fall out on their own and this
+       never depends on how a disabled-but-shown repeater input reports visibility.
+       Covers Standard (s1_foundation_bolt_diameter) and Custom (s1_cus_op_...) alike -
+       both end in the same suffix. Deepanjan (16th September 2026) */
+       _validateOctagonalNrFoundation() {
+        const missing = [];
+        const NR_REQUIRED = [
+            { suffix: 'nr_fb_diameter',         label: 'N.R FB DIAMETER' },
+            { suffix: 'foundation_bolt_length', label: 'FOUNDATION BOLT LENGTH' },
+            { suffix: 'bolt_quantity',          label: 'BOLT QUANTITY' }
+        ];
+
+        const resolve = this._fieldResolver([]);   // global apiName -> field
+
+        this.accordionSections.forEach(sec => {
+            if (!sec.isVisible) return;
+
+            sec.fields.forEach(dia => {
+                if (dia.type === 'header' || !dia.isColRepeaterInput) return;
+                if (!dia.apiName || !dia.apiName.endsWith('foundation_bolt_diameter')) return;
+
+                // Only columns the user actually opened. Every column carries the
+                // defaultValue "N.R." in memory, so without this all 10 report errors -
+                // the saved JSON hides it because unused columns are stripped on write.
+                // Deepanjan (16th September 2026)
+                const cnt   = resolve(dia.columnCountApi);
+                const inUse = parseInt(cnt && cnt.value, 10) || 0;
+                if (!dia.columnCountIndex || dia.columnCountIndex > inUse) return;
+
+                if (String(dia.value || '').trim().toUpperCase() !== 'N.R.') return;
+
+                NR_REQUIRED.forEach(req => {
+                    const t = sec.fields.find(f => f.apiName
+                                               && f.apiName.endsWith(req.suffix)
+                                               && f.columnCountIndex === dia.columnCountIndex);
+                    if (!t) return;                     // field not on this layout
+                    if (t.value === '' || t.value === null || t.value === undefined) {
+                        missing.push(`[${sec.label}] Column ${dia.columnCountIndex}: ${req.label} (required when FOUNDATION BOLT is N.R.)`);
+                    }
+                });
+            });
+        });
+
+        return missing;
+    }
+
     _validateCrashBarrierAccessoryRows() {
         const problems = [];
 
@@ -3499,6 +4137,80 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
         });
 
         return problems;
+
+        
+    }
+
+        // ── CROSS PRODUCT: the freight TERM must agree across every product on the quote ──
+    // Deepanjan (10th September 2026)
+    //
+    // One quote can now carry several MBCB types, each with its own "Trans.in offer?"
+    // picklist. Ex-works / F.O.R is a commercial term of the whole offer (the T&C prints
+    // one sentence for it), so it must be the same everywhere: the FIRST product's
+    // choice is the master and every other product must match it.
+    //
+    // Deliberately NOT validated: types of freight and the Transportation KG / Full
+    // Vehicle Freight amounts. Those are per-product costs that legitimately differ
+    // with weight and quantity, and each PDF section prints its own.
+    //
+    // Field names differ per product, so fields are matched by ROLE, not by name:
+    // any visible picklist whose apiName contains "trans_in_offer".
+    //
+    // "Master" = the value already saved by ANY OTHER modal (read from _lastValues,
+    // excluding this modal's own fields). If nothing is saved yet, this modal's first
+    // visible value is the master and the others in this modal must agree with it.
+    //
+    // Scope: Crash Barrier only, detected by MBCB_Type in the saved data - no other
+    // department carries that key. Returns [] everywhere else.
+    _validateCrashBarrierFreightConsistency() {
+        const problems = [];
+        const saved = this._lastValues || {};
+        if (!saved.MBCB_Type) return problems;
+
+        const R1 = /trans_in_offer/i;
+        const isBlank = v => v === '' || v === null || v === undefined || String(v).trim() === '';
+        const norm = v => String(v).trim();
+
+                const mine = [];
+        const mineApi = new Set();
+        (Array.isArray(this.accordionSections) ? this.accordionSections : []).forEach(sec => {
+            if (!sec || !Array.isArray(sec.fields)) return;
+            sec.fields.forEach(f => {
+                if (!f || !f.apiName || f.type === 'header') return;
+                // every field of THIS modal (hidden sections too) is "mine", never another product
+                mineApi.add(f.apiName);
+                if (sec.isVisible && f.isVisible && f.type === 'picklist' && R1.test(f.apiName)) mine.push({ f, sec });
+            });
+        });
+        if (mine.length === 0) return problems;          // this modal has no freight term
+
+        // Master from OTHER products already saved on this quote.
+        let master = null;
+                Object.keys(saved).forEach(k => {
+            if (master !== null) return;
+            if (!R1.test(k) || mineApi.has(k) || /_header$/i.test(k)) return;
+            // skip internal flags (<api>__cleared / <api>__manual) - they hold true/false, not a freight term
+            if (/__(cleared|manual)$/i.test(k)) return;
+            const v = saved[k];
+            if (typeof v === 'boolean') return;
+            if (!isBlank(v)) master = norm(v);
+        });
+        const where = master !== null ? 'the product entered first' : 'the first section above';
+
+        // Nothing saved elsewhere yet: this modal's first chosen value is the master.
+        if (master === null) {
+            const first = mine.find(x => !isBlank(x.f.value));
+            if (!first) return problems;
+            master = norm(first.f.value);
+        }
+
+        mine.forEach(x => {
+            if (isBlank(x.f.value)) return;                // blanks are the required-check's job
+            if (norm(x.f.value) !== master) {
+                problems.push(`[${x.sec.label}] Trans.in offer? must be "${master}" - same as ${where}`);
+            }
+        });
+        return problems;
     }
 
     validateRequiredFields() {
@@ -3544,6 +4256,19 @@ if (this._modalConfig && this._modalConfig.dynamicSegments &&
         // carry UOM, RATE and QUANTITY (NO.). Rows with no beam stay optional, and
         // no field is hidden - see _validateCrashBarrierAccessoryRows.
         missingFields = missingFields.concat(this._validateCrashBarrierAccessoryRows());
+
+        // Crash Barrier cross product: Ex-works / F.O.R must match what other products
+        // on this quote already saved - see _validateCrashBarrierFreightConsistency.
+        missingFields = missingFields.concat(this._validateCrashBarrierFreightConsistency());
+
+
+        // Segment Above 5 Additional Accessories (Stadium quote-level block, Lighting Mast /
+        // LCLM per-row blocks): RATE + at least one accessory type - see _validateAccessoryBlock.
+        missingFields = missingFields.concat(this._validateAccessoryBlock());
+
+        // Octagonal Pole: N.R. foundation must carry dia / length / bolt quantity -
+        // see _validateOctagonalNrFoundation. Faizan (16th September 2026)
+        missingFields = missingFields.concat(this._validateOctagonalNrFoundation());
  
         if (missingFields.length > 0) {
             // Remove duplicates (Grid rows often have the same column labels repeatedly)

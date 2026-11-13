@@ -15,7 +15,25 @@ public without sharing class ParentProjectOpportunityTriggerHandler {
         'forecastcategoryname',
         'LastModifiedDate',
         'LastModifiedById',
-        'SystemModstamp'
+        'SystemModstamp',
+        'active_task_escalation_72_sent__c',
+        'active_task_escalation_96_sent__c',
+        'active_task_escalation_120_sent__c',
+        'nurture_escalation_48_sent__c',
+        'nurture_escalation_60_sent__c',
+        'nurture_escalation_72_sent__c',
+        'nurtureescalation48sent__c',
+        'nurtureescalation60sent__c',
+        'nurtureescalation72sent__c',
+        'amount',
+         'nurture_count__c',
+            'closed_lost_count__c',
+        'last_open_task_activity__c',
+        'oppoverdueesc96sent__c',
+        'oppoverdueesc36sent__c',
+        'firstoverduetaskdate__c',
+        'expectedrevenue',
+        'stage_lost_from__c'
     };
 
     public static void validateParentProjectOpportunity(
@@ -72,15 +90,17 @@ public without sharing class ParentProjectOpportunityTriggerHandler {
             }
 
             if (otherFieldChanged) {
-                opp.addError('This Parent Project Opportunity is locked. Only Stage can be changed, and it must be changed to Closed Lost.');
+                opp.addError('This Parent Project Opportunity is locked.');
                 continue;
             }
 
-            // Rule 2: if Stage changed, it must be to Closed Lost
-            if (opp.StageName != oldOpp.StageName && opp.StageName != CLOSED_LOST) {
-                System.debug('OpportunityTriggerHandler: blocking ' + opp.Id + ' - Stage changed to "' + opp.StageName + '" instead of Closed Lost');
-                opp.addError('This Parent Project Opportunity is locked. Stage can only be changed to Closed Lost.');
-            }
+            // Rule 2 disabled 2026-11-11 (user decision): Stage changes on locked parent
+            // project opportunities are no longer restricted to Closed Lost, so reopening
+            // is allowed. StageName stays in ALLOWED_FIELDS above.
+            // if (opp.StageName != oldOpp.StageName && opp.StageName != CLOSED_LOST) {
+            //     System.debug('OpportunityTriggerHandler: blocking ' + opp.Id + ' - Stage changed to "' + opp.StageName + '" instead of Closed Lost');
+            //     opp.addError('This Parent Project Opportunity is locked. Stage can only be changed to Closed Lost.');
+            // }
         }
     }
 }

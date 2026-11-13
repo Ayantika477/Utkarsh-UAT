@@ -6,8 +6,30 @@ import sendQuoteToCustomer from '@salesforce/apex/OpportunityQuoteController.sen
 export default class OpportunitySendQuoteAction extends LightningElement {
     @api recordId;
 
+    sending = false;
+
+    get isFlowContext() {
+        return window.location.pathname.includes('/flow/');
+    }
+
     @api
     async invoke() {
+        await this.sendQuote(true);
+    }
+
+    async handleSendQuote() {
+        await this.sendQuote(false);
+    }
+
+    async sendQuote(closeOnComplete) {
+        if (!this.recordId || this.sending) {
+            if (!this.recordId) {
+                this.showToast('Error', 'Opportunity Id is required.', 'error');
+            }
+            return;
+        }
+
+        this.sending = true;
         try {
             await sendQuoteToCustomer({ opportunityId: this.recordId });
             this.showToast(
@@ -18,7 +40,10 @@ export default class OpportunitySendQuoteAction extends LightningElement {
         } catch (error) {
             this.showToast('Error', this.getErrorMessage(error), 'error');
         } finally {
-            this.dispatchEvent(new CloseActionScreenEvent());
+            this.sending = false;
+            if (closeOnComplete) {
+                this.dispatchEvent(new CloseActionScreenEvent());
+            }
         }
     }
 

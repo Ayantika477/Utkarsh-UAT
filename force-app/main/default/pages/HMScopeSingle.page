@@ -223,7 +223,7 @@
             margin-bottom: 10px;
             font-size: 10pt;
             line-height: 1.5;
-            text-align: justify;
+            text-align: left;
         }
         .term-title {
             font-weight: bold;
@@ -303,7 +303,7 @@
         /* Sign-off */
         .signature-section {
             margin-top: 30px;
-            text-align: right;
+            text-align: left;
             font-size: 10pt;
             line-height: 1.8;
             page-break-inside: avoid; 
@@ -384,8 +384,8 @@
                     <strong>dated</strong> <apex:outputText value="{!soWDate}"/>
                 </p>
                 <p class="subject-line">
-                    Sub: Offer for manufacturing and supply of
-                    <apex:outputText value="{!opportunityName}"/> "Utkarsh" Brand.
+                    Sub: Offer for manufacturing and supply of 
+                    <apex:outputText value=" {!opportunityName}"/> "Utkarsh" Brand.
                 </p>
             </div>
 
@@ -396,9 +396,8 @@
                 range of products of the company. We are obliged to have got this opportunity to submit our
                 offer and/or quotation for manufacturing and supply of the product described in the captioned
                 subject, as against your enquiry No.
-                <strong><apex:outputText value="{!soWRef}"/></strong> dated
-                <strong><apex:outputText value="{!soWDate}"/></strong> and/or verbal enquiry dated
-                <strong><apex:outputText value="{!soWDate}"/></strong>.
+                <strong><apex:outputText value="{!soWRef}"/></strong> dated 
+                <strong> <apex:outputText value="{!soWDate}"/></strong>.
             </p>
             <p class="body-para">
                 We take pride to mention that you have approached one of the leading brands in the country
@@ -408,7 +407,7 @@
             </p>
             <p class="body-para">
                 Our offer and/or quotation for the
-                <strong>Octagonal Poles and/or High Mast Poles "Utkarsh"</strong> brand as enquired by you
+                <strong>Highmast &amp; Polygonal Poles "Utkarsh"</strong> brand as enquired by you
                 is/are more clearly mentioned and recorded in the <strong>Annexure "A"</strong> to this
                 quotation. The said <strong>Annexure "A"</strong> shall for all practical purposes be
                 considered as a part of the present quotation.
@@ -427,14 +426,7 @@
                     having its office at 95A, Elliot Road, Arrjavv Square, Kolkata - 700016.
                 </li>
                 <li>
-                    <div class="term-title"> 3. Rates and Taxes: </div>
-                    <div style="padding-left:20px; margin-top:6px;"> 3.1 The rates quoted are exclusive of Goods &amp; 
-                        Service Taxes and therefore the <strong>Goods &amp; Service Taxes</strong> shall be chargeable 
-                        extra @18% on the total order value. <br/><br/> 
-                        3.2 <strong>TCS</strong> as applicable shall be 
-                        imposed extra @0.10%. <br/><br/> Any changes in the statutory provisions for imposing of rates 
-                        and taxes made applicable with immediate effect shall be implemented as per the implication of 
-                        such statutory provisions. </div>
+                    <span class="term-title"> 3. Rates and Taxes: </span> The rates quoted are exclusive of Goods &amp; Service Taxes and therefore the Goods &amp; Service Taxes shall be chargeable extra as applicable. Any changes in the statutory provisions for imposing of rates and taxes made applicable with immediate effect shall be implemented as per the implication of such statutory provisions.
                 </li>
                 <li>
                     <span class="term-title">4. Payment Terms:</span> The Buyer shall have to make full
@@ -448,7 +440,7 @@
                     accounted for with any subjective precondition in that event the delivery schedule shall
                     be accounted for from the date of the receipt of the supply order. Subject to normal
                     working condition prevailing, the Supplier shall be liable to deliver the entire
-                    consignment within 30 days from the date of the receipt of the supply order.
+                    consignment within {!deliverytime} from the date of the receipt of the supply order.
                 </li>
                 <li>
                     <span class="term-title">6. Packing &amp; Forwarding:</span> The rates quoted for supply
@@ -458,12 +450,17 @@
                     the supplier before the finalization of the Order.
                 </li>
                 <li>
-                    <span class="term-title">7. Transportation &amp; Freight:</span> The rates quoted for the materials and/or goods are on ex-works basis are exclusive of any
-transportation and freight charges, therefore be it mentioned here that if the Supplier has to facilitate the process of transportation
-in that event such freight charges shall become chargeable additionally. OR The rates quoted for the materials and/or goods are on
-F.O.R. destination basis and are inclusive of any transportation and freight charges, therefore be it mentioned here that the Supplier
-assumes the responsibility of effecting transportation of the materials to its given destination at <strong>(SETOUT THE DESTINATION WHERE
-THE MATERIALS ARE TO BE DELIVERED)</strong>.
+                    <span class="term-title">7. Transportation &amp; Freight:</span>
+                    <apex:outputPanel layout="none" rendered="{!transportationType == 'F.O.R (Freight on Road)'}">
+                        The rates quoted for the materials and/or goods are on F.O.R. destination basis and are inclusive of any
+                        transportation and freight charges, therefore be it mentioned here that the Supplier assumes the responsibility
+                        of effecting transportation of the materials to its given destination at <strong><apex:outputText value="{!deliveryAddress}"/></strong>.
+                    </apex:outputPanel>
+                    <apex:outputPanel layout="none" rendered="{!transportationType == 'Ex-works'}">
+                        The rates quoted for the materials and/or goods are on ex-works basis are exclusive of any transportation and
+                        freight charges, therefore be it mentioned here that if the Supplier has to facilitate the process of
+                        transportation in that event such freight charges shall become chargeable additionally.
+                    </apex:outputPanel>
                 </li>
                 <li>
                     <span class="term-title">8. Inspection:</span> The Buyer at its own cost shall have to make arrangements for pre-delivery third party inspection of the entire
@@ -488,8 +485,8 @@ illegible and/or inadequate drawings and designs as provided by the Buyer.
                     supplied subject to the Buyer having made full payments in favour of the Supplier.
                 </li>
                 <li>
-                    <span class="term-title">11. Warranty:</span> The Supplier’s products are covered by a mechanical guarantee for a period of <strong>12 (twelve)</strong> months from the date of
-commissioning or at the latest <strong>18 (eighteen)</strong> months from the date of delivery as per the agreed incoterm, unless a longer period has
+                    <span class="term-title">11. Warranty:</span> The Supplier’s products are covered by a mechanical guarantee for a period of <strong>{!warrFromDOC}</strong> months from the date of
+commissioning or at the latest <strong>{!warrFromDOD}</strong> months from the date of delivery as per the agreed incoterm, unless a longer period has
 been accepted by the Supplier on case by case basis. The warranty period for a defective material, which has been replaced, shall
 extend only to the extent of the unexpired term of such warranty from the date of replacement. Repaired or corrected materials
 shall remain warranted for the balance of the original warranty period.
@@ -509,7 +506,7 @@ set aside and/or determined.
                 </li>
                 <li>
                     <span class="term-title">14. Validity:</span> This offer shall remain valid for a period
-                    of <strong>5 days</strong> from the date of issuing of the present quotation thereafter
+                    of <strong>{!quationValidity} days</strong> from the date of issuing of the present quotation thereafter
                     with the efflux of time this offer shall deemed become null and void, unless the same is
                     revalidated in writing.
                 </li>
@@ -539,7 +536,7 @@ delay caused in delivery of the materials.
                 <li>
                     <span class="term-title">19. Price variation:</span> The rates as quoted herein by the Supplier are subject to factoring of price variation being applicable. If for any
 reason the supplies get carried forward to the next month in that event the next month’s rates shall become applicable. For
-quantities that are proposed to be delivered after <strong>30</strong> days price variation will be applicable as per change of rates between base
+quantities that are proposed to be delivered after <strong>{!priceVariationdays}</strong> days price variation will be applicable as per change of rates between base
 month (that is the month in which the order was placed) and month of dispatch. If there are changes in price of raw materials by
 SAIL/TATA then the prices of the products will also become liable to be changed.
                 </li>
@@ -553,33 +550,7 @@ to raise claims of short supply in writing, if any, along with video proof of un
 despatch of goods from the Supplier’s factory/works.
                 </li>
                 <li>
-                    <span class="term-title">21. Confidentiality:</span> (A) During the term of this Agreement, each party (the “disclosing party”) may communicate to the other party (the “receiving party”)
-information which it considers to be confidential (“Confidential Information”). All Confidential Information shall be specifically
-designated as confidential. Such Confidential Information may include, without limitation, trade secrets, know-how, inventions,
-technical data or specifications, testing methods, business or financial information, research and development activities, product and
-marketing plans, and customer and supplier information. Confidential Information that is disclosed orally or visually shall be
-documented in a written notice prepared by the disclosing party and delivered to the receiving party within thirty (30) days of the date
-of disclosure; such notice shall summarize the Confidential Information disclosed to the receiving party and reference to the time and
-place of disclosure.<br/>
-(B) The receiving party agrees that it shall: (a) maintain all Confidential Information in strict confidence, except that the receiving party
-may disclose or permit the disclosure of any Confidential Information to its directors, officers, employees, consultants, and advisors
-who are obligated to maintain the confidential nature of such Confidential Information and who need to know such Confidential
-Information for the purpose set forth in this Agreement; (b) use all Confidential Information solely for the purpose set forth in this
-Agreement; and (c) allow its directors, officers, employees, consultants, and advisors to reproduce the Confidential Information only to
-the extent necessary to effect the purposes set forth in this Agreement, with all such reproductions being considered Confidential
-                    Information.<br/>
-(C) The obligations of the receiving party under Clause B above shall not apply to the extent that the receiving party can demonstrate
-that certain Confidential Information: (a) was in the public domain prior to the time of its disclosure under this Agreement; (b) entered
-the public domain after the time of its disclosure under this Agreement through means other than an unauthorized disclosure resulting
-from an act or omission by the receiving party; (c) was independently developed or discovered by receiving party without use of the
-Confidential Information; (d) is or was disclosed to the receiving party at any time, whether prior to or after the time of its disclosure
-under this Agreement, by a third party having no fiduciary relationship with the disclosing party and having no obligation of
-confidentiality with respect to such Confidential Information; or (e) is required to be disclosed to comply with application laws or
-regulation, or with a court or administrative order, provided that, the disclosing party receives prior written notice of such disclosure
-and that the receiving party takes all reasonable and lawful actions to obtain confidential treatment for such disclosure and, if possible,
-                    to minimize the extent of such disclosure.<br/>
-(D) The obligations set forth in this Article shall remain in effect for a period of five (5) years after the expiration or the earlier
-termination of this Agreement.
+                    <span class="term-title">21. Confidentiality:</span> The terms and conditions described in this contract including its existence shall be confidential information and shall not be disclosed by any party to any third party without the prior written consent of the other party. Each of the Parties agrees, (unless otherwise required by law), that it shall not disclose to any other person the fact that the confidential information has been made available to the other party, that discussions or negotiations are taking place concerning the said enquiry/tender proceedings between the Parties, or any of the terms, conditions or other facts with respect thereto (including the status thereof).
                 </li>
                 <li>
                     <span class="term-title">22. Service Charges:</span> Erection and commissioning work is to be done by the Buyer unless otherwise specified and agreed in writing by
@@ -587,37 +558,13 @@ the Supplier. Be it further noted that separate service charges will be applicab
 and commissioning and such charges shall be indicated as and when requested by the Buyer.
                 </li>
                 <li>
-                    <span class="term-title">23. Force Majeure:</span> (a) Neither Party will be liable for any failure to perform its obligations hereunder, other than payment
-obligations, due to unforeseen circumstances or causes beyond the Party’s reasonable control, including, without limitation, acts of
-God, war, riot, embargoes, acts of civil or military authorities, acts of terrorism or sabotage, electronic viruses, worms or corrupting
-microcode, fire, flood, earthquake, accident, strikes, radiation, inability to secure transportation, failure of communications or
-electrical lines, facilities, fuel, energy, labour or materials. In an event of force majeure, either Party’s time for delivery or other
-performance will be extended for a period equal to the duration of the delay caused thereby. The Party subject to the force majeure
-shall (A)give notice of suspension of its obligations as soon as reasonably practicable stating the date and extent of such suspension and
-the cause thereof, (B)use its best efforts to remedy or remove such force majeure with the least practicable delay, and (C)resume the
-performance of its obligations as soon as reasonably practicable after the remediation or removal of the cause. Notwithstanding
-anything to the contrary herein, if an event of force majeure can reasonably be expected to prevent the affected Party from performing
-its obligations for a period of at least three (3)months, then the other Party may terminate this Agreement upon not less than fifteen
-days written notice to the affected Party.
+                    <span class="term-title">23. Force Majeure:</span> (a) In this agreement, “force majeure” means any cause preventing Supplier from performing any or all of its obligations which arises from or is attributable to acts or events beyond the reasonable control of the party so prevented, including, without limitation, strikes, lock-outs or other industrial disputes (whether involving the workforce of the party so prevented or of any other party), act of god, war, riot, civil commotion, malicious damage, accident, breakdown of plant or machinery, fire, flood, storm or default of suppliers or sub-contractors. (b) If Supplier is prevented or delayed in the performance of any of its obligations under this contract by force majeure, that party shall forthwith serve notice in writing on the other party specifying the nature and extent of the circumstances giving rise to force majeure and subject to service of such notices such party shall have no liability in respect of the performance of such of its obligations as are prevented by the force majeure events during the continuation of such events and for such time after they cease as is necessary for that party, using all reasonable endeavours, to recommence its affected operations in order for it to perform its obligations. (c) If Supplier is prevented from performance of its obligations for a continuous period in excess of two months, the Buyer and/or the Supplier may terminate this agreement forthwith on service of written notice on the party so prevented, in which case neither party shall have any liability to the other except that rights and liabilities which accrued prior to such termination shall continue to subsist.
                 </li>
                 <li>
-                    <span class="term-title">24. Governing Law, Arbitration and Jurisdiction:</span> The Courts at Kolkata shall have exclusive jurisdiction over all unresolved disputes
-relating to this Agreement. The Parties expressly consent to this jurisdiction and waive, as well as undertake, that they will not assert
-any claim, with respect to personal applicability, inconvenience of forum, venue or any other hardship related to jurisdiction.
-Should there be any dispute or difference of opinion regarding this contract, both the parties will make all efforts to amicably settle such
-disputes. Efforts at reaching an amicable settlement will be deemed to have failed as soon as one of the contractual parties informs the
-other in writing about such a deadlock. If efforts at amicable settlement fail, all disputes arising out of this contract or its validity will be
-finally decided in accordance with the provisions of the Arbitration and Conciliation Act 1996, as amended from time to time. The
-arbitration proceedings shall be headed by a sole arbitrator. The decision of the sole arbitrator shall be binding upon the parties. The
-arbitration proceedings shall be held at KOLKATA, India and conducted in English language.
+                    <span class="term-title">24. Jurisdiction:</span> No suit or any proceedings in regard to any matter arising in respect of this contract shall be instituted in any court, save in the High Court, Calcutta, City Civil Court at Calcutta or at the Court of small causes at Calcutta. It is agreed that no other court shall have jurisdiction to entertain any suit or proceedings, even though, part of the cause of action might arise within their jurisdiction.
                 </li>
                 <li>
-                    <span class="term-title">25. Miscellaneous:</span> The Company would issue various work orders from time to time during the tenure of this agreement and the
-present Agreement contains the general terms and conditions of the contract which would govern and administer the work order
-issued by the Company from time to time. Any specific terms and conditions not mentioned in this agreement but mentioned in the
-work order shall prevail and govern the contract. Any specific terms and conditions mentioned herein but not mentioned in the work
-order shall also continue to prevail and govern the contract. However, in the event of any conflicting interpretation of any clauses of this
-Agreement with the work order, the present agreement shall prevail over the work order.
+                    <span class="term-title">25. Miscellaneous:</span> Notwithstanding anything otherwise or contrary recorded anywhere within the purchase/supply order arising from this quotation, the terms and conditions of this quotation shall be deemed to be a part of the contract and in the event of any conflict in interpretation of the clauses of this quotation in that event the clauses of the quotation shall prevail over the clauses of the purchase/supply order.
                 </li>
             </ol>
 
@@ -650,13 +597,16 @@ Agreement with the work order, the present agreement shall prevail over the work
                     </tr>
                 </thead>
                 <tbody>
-                    <apex:repeat value="{!lineItems}" var="item">
+                    <!-- ANNEXURE GROUPING: outer repeat = one line item, inner repeat = its
+                         parts, then that line item's own SUB-TOTAL. The row below is the
+                         original one, unchanged. Reetabrata (18th Aug 2026) -->
+                    <apex:repeat value="{!lineGroups}" var="grp">
+                    <apex:repeat value="{!grp.rows}" var="item">
                         <tr>
                             <td class="num"><apex:outputText value="{!item.slNo}"/></td>
                             <td><apex:outputText escape="false" value="{!item.description}"/></td>  <!-- red Stadium clauses; controller escapes dynamic text. Reetabrata (13th July 2026) -->
-                            <td class="right"><apex:outputText value="{0, number, ###,###,##0}">
-                                <apex:param value="{!item.unitRateRaw}"/></apex:outputText></td>
-                            <td class="center"><apex:outputText value="{!item.gstPct}"/>%</td>
+                            <td class="right"><apex:outputText value="{!item.unitRate}"/></td>
+                            <td class="center"><apex:outputText value="{!IF(item.gstPct == '-', '-', item.gstPct & '%')}"/></td>
                             <td class="right"><apex:outputText value="{!item.gstAmount}"/></td>
                             <td class="center"><apex:outputText value="{!item.freight}"/></td>
                             <td class="right"><apex:outputText value="{!item.unitAmount}"/></td>
@@ -664,10 +614,23 @@ Agreement with the work order, the present agreement shall prevail over the work
                             <td class="right"><apex:outputText value="{!item.totalAmount}"/></td>
                         </tr>
                     </apex:repeat>
+                    <!-- SUB-TOTAL spans Sl No. .. Qty; only the Total Amount cell carries a
+                         figure, the same way the Total row below does. Deepanjan (18th Aug 2026) -->
+                    <apex:outputPanel layout="none" rendered="{!grp.showSubTotal}">
+                        <tr class="subtotal-row">
+                            <td colspan="8" class="center">SUB-TOTAL OF <apex:outputText value="{!mastTypeLabel}"/></td>
+                            <td class="right"><apex:outputText value="{!grp.subTotalAmount}"/></td>
+                        </tr>
+                    </apex:outputPanel>
+                    </apex:repeat>
                 </tbody>
                 <tfoot>
+                    <!-- The document-wide SUB-TOTAL moved into the body, one per line item.
+                         Nothing removed - this row is simply not rendered any more. Set
+                         rendered="true" to bring it back. Reetabrata (18th Aug 2026) -->
+                    <apex:outputPanel layout="none" rendered="false">
                     <tr class="subtotal-row">
-                        <td colspan="2" class="center">SUB-TOTAL OF <apex:outputText value="{!IF(isStadiumMast, ' STADIUM MAST', IF(isFlagMast, ' FLAG MAST', IF(isLCLM, ' LCLM', IF(isSignageMast, ' SIGNAGE MAST', IF(isLatchingMast, ' LATCHING MAST', ' LIGHTING MAST')))))}"/></td>
+                        <td colspan="2" class="center">SUB-TOTAL OF <apex:outputText value="{!mastTypeLabel}"/></td>
                         <td class="right"><apex:outputText value="{!subTotalUnitRate}"/></td>
                         <td class="center">18%</td>
                         <td class="right"><apex:outputText value="{!subTotalGST}"/></td>
@@ -676,6 +639,7 @@ Agreement with the work order, the present agreement shall prevail over the work
                         <td></td>
                         <td class="right"><apex:outputText value="{!subTotalAmount}"/></td>
                     </tr>
+                    </apex:outputPanel>
                     <tr class="total-row">
                         <td colspan="8" class="center">Total</td>
                         <td class="right"><apex:outputText value="{!grandTotal}"/></td>
@@ -691,15 +655,30 @@ Agreement with the work order, the present agreement shall prevail over the work
             <p class="grand-note">
                 The total order value is of Rs. <apex:outputText value="{!grandTotal}"/> /-
                 ( <apex:outputText value="{!grandTotalWords}"/> ) which is inclusive of all rates,
-                taxes but exclusive of any transportation or freight charges.
+                taxes
+                <apex:outputPanel layout="none" rendered="{!transportationType == 'F.O.R (Freight on Road)'}">
+                    and inclusive of any transportation or freight charges.
+                </apex:outputPanel>
+                <apex:outputPanel layout="none" rendered="{!transportationType == 'Ex-works'}">
+                    but exclusive of any transportation or freight charges.
+                </apex:outputPanel>
             </p>
 
             <div class="signature-section">
                 Thanking you,<br/>
                 Yours faithfully,<br/>
-                <strong>For Utkarsh India Limited</strong><br/>
-                Authorized Signatory<br/>
-                E-mail :
+                <apex:outputPanel layout="none" rendered="{!AND(NOT(ISBLANK(loggedInUser)), loggedInUser != 'N/A')}">
+                    <strong>{!loggedInUser}</strong><br/>
+                </apex:outputPanel>
+                <apex:outputPanel layout="none" rendered="{!AND(NOT(ISBLANK(loggedInUserTitle)), loggedInUserTitle != 'N/A')}">
+                    {!loggedInUserTitle}<br/>
+                </apex:outputPanel>
+                <apex:outputPanel layout="none" rendered="{!AND(NOT(ISBLANK(loggedInUserPhone)), loggedInUserPhone != 'N/A')}">
+                    Mobile: {!loggedInUserPhone}<br/>
+                </apex:outputPanel>
+                <apex:outputPanel layout="none" rendered="{!AND(NOT(ISBLANK(loggedInUserEmail)), loggedInUserEmail != 'N/A')}">
+                    Email: {!loggedInUserEmail}
+                </apex:outputPanel>
             </div>
 
         </div>

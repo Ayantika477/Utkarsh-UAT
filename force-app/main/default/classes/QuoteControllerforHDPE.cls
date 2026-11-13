@@ -67,6 +67,7 @@ public class QuoteControllerforHDPE {
     public String pipeDuctDuctTransportText { get; set; }
     public String pipeDuctPipeTransportText { get; set; }
     public String is4984TransportText { get; set; }
+    public String mdpeTransportText { get; set; }
 
     public class ImprovisedRow {
         public Integer slNo { get; set; }
@@ -149,12 +150,7 @@ public class QuoteControllerforHDPE {
 
         jsonData = (Map<String, Object>) JSON.deserializeUntyped(quoteRecord.Quote_Value__c);
         this.standard = castToString(jsonData.get('Standard'));
-        // Pressure-IS 4984 / Non pressure-IS 4984 (28-Jul): both are IS 4984 in
-        // every respect for this document - same layout rules, same '_is_'
-        // suffix, same PDF panels and descriptions. Normalising here makes
-        // every downstream branch and both VF pages behave byte-identically
-        // to a plain IS 4984 quote; the saved JSON keeps the user's actual
-        // choice for reporting. Deepanjan (28th July 2026)
+        
         if (this.standard != null && this.standard.contains('IS 4984')) {
             this.standard = 'IS 4984';
         }
@@ -172,6 +168,8 @@ public class QuoteControllerforHDPE {
         String resolvedDynamicName = 'HDPE Pipe';
         if (String.isNotBlank(standard) && standard.equalsIgnoreCase('PLB Duct')) {
             resolvedDynamicName = 'PLB Duct';
+        } else if (String.isNotBlank(standard) && standard.equalsIgnoreCase('MDPE Pipe')) {
+            resolvedDynamicName = 'MDPE Pipe';
         } else if (standard == 'Pipe & Duct') {
             resolvedDynamicName = 'HDPE Pipe & Duct';
         }
@@ -193,14 +191,37 @@ public class QuoteControllerforHDPE {
                 Integer absoluteSlNo = 1;
                 
                 String prefix = 'c';
-                String suffix = (String.isNotBlank(standard) && standard.equalsIgnoreCase('PLB Duct')) ? '_' : '_is_';
-                Decimal pipeCount = jsonData.containsKey('pipe_count') ? castToDecimal(jsonData.get('pipe_count')) : castToDecimal(jsonData.get('is_pipe_count'));
+                String suffix = '_is_';
+                if (String.isNotBlank(standard) && standard.equalsIgnoreCase('PLB Duct')) {
+                    suffix = '_';
+                } else if (String.isNotBlank(standard) && standard.equalsIgnoreCase('MDPE Pipe')) {
+                    suffix = '_mdpe_';
+                }
+                
+                Decimal pipeCount = 0;
+                if (String.isNotBlank(standard) && standard.equalsIgnoreCase('MDPE Pipe')) {
+                    pipeCount = jsonData.containsKey('mdpe_pipe_count') ? castToDecimal(jsonData.get('mdpe_pipe_count')) : 0;
+                } else {
+                    pipeCount = jsonData.containsKey('pipe_count') ? castToDecimal(jsonData.get('pipe_count')) : castToDecimal(jsonData.get('is_pipe_count'));
+                }
+                
                 Integer maxPipes = Integer.valueOf(pipeCount);
                 for (Integer i = 1; i <= maxPipes; i++) {
                     String s = String.valueOf(i);
-                    String dia = castToString(jsonData.get(prefix + s + suffix + 'Diameter_Size'));
-                    String grade = jsonData.containsKey(prefix + s + suffix + 'PE_Grade_select') ? castToString(jsonData.get(prefix + s + suffix + 'PE_Grade_select')) : '';
-                    String rating = jsonData.containsKey(prefix + s + suffix + 'Pressure_rating_select') ? castToString(jsonData.get(prefix + s + suffix + 'Pressure_rating_select')) : '';
+                    
+                    String dia = '';
+                    String grade = '';
+                    String rating = '';
+                    
+                    if (String.isNotBlank(standard) && standard.equalsIgnoreCase('MDPE Pipe')) {
+                        dia = castToString(jsonData.get(prefix + s + suffix + 'Nominal_Dia'));
+                        grade = jsonData.containsKey(prefix + s + suffix + 'SDR_Grade_select') ? castToString(jsonData.get(prefix + s + suffix + 'SDR_Grade_select')) : '';
+                    } else {
+                        dia = castToString(jsonData.get(prefix + s + suffix + 'Diameter_Size'));
+                        grade = jsonData.containsKey(prefix + s + suffix + 'PE_Grade_select') ? castToString(jsonData.get(prefix + s + suffix + 'PE_Grade_select')) : '';
+                        rating = jsonData.containsKey(prefix + s + suffix + 'Pressure_rating_select') ? castToString(jsonData.get(prefix + s + suffix + 'Pressure_rating_select')) : '';
+                    }
+                    
                     if (String.isBlank(dia)) continue;
 
                     String lengthKey = prefix + s + suffix + 'len_of_coil_pipe';
@@ -219,7 +240,6 @@ public class QuoteControllerforHDPE {
                     String description = '';
                     if (String.isNotBlank(standard) && standard.equalsIgnoreCase('PLB Duct')) {
                         Boolean pullingRopeSuffix = jsonData.containsKey(prefix + s + suffix + 'Fittings_Charges') && !String.isBlank(String.valueOf(jsonData.get(prefix + s + suffix + 'Fittings_Charges')));
-                        // If diameter is "40/33", format to TEC Spec description
                         if (String.isNotBlank(dia) && dia.contains('40/33 TEC Spec')) {
                             description = '40/33 mm HDPE PLB DUCT as per TEC Spec ';
                         } else {
@@ -227,6 +247,8 @@ public class QuoteControllerforHDPE {
                         }
                         description += pullingRopeSuffix ? 'With Pulling Rope (' + lenCoil + ' mtr coil length)' : '(' + lenCoil + ' mtr coil length)';
                         
+                    } else if (String.isNotBlank(standard) && standard.equalsIgnoreCase('MDPE Pipe')) {
+                        description = dia + ' mm MDPE ' + grade + ' (' + lenCoil + ' mtr ' + dynamicLenSuffix + ')';
                     } else {
                         description = dia + ' mm HDPE PIPE ' + grade + ' ' + rating + ' ' + (String.isNotBlank(standard) ? standard : 'IS 4984') + ' (' + lenCoil + ' mtr ' + dynamicLenSuffix + ')';
                     }
@@ -255,9 +277,7 @@ public class QuoteControllerforHDPE {
                         String fSize = castToString(jsonData.get('acc_Diameter_Size_input' + j));
                         
                         List<String> descParts = new List<String>();
-                        //descParts.add(itemName);
                         
-                        // Handle "40/33" override for accessories under Block A
                         if (String.isNotBlank(fSize)) {
                             if (fSize.contains('40/33 TEC Spec')) {
                                 descParts.add('40/33 mm ');
@@ -281,6 +301,7 @@ public class QuoteControllerforHDPE {
                 if (!unifiedTable.lineItems.isEmpty()) {
                     Decimal dynamicGst = castToDecimal(jsonData.get('c1_GST'));
                     if (dynamicGst == 0) dynamicGst = castToDecimal(jsonData.get('c1_is_GST'));
+                    if (dynamicGst == 0) dynamicGst = castToDecimal(jsonData.get('c1_mdpe_GST'));
                     if (dynamicGst == 0) dynamicGst = 18.00;
                     
                     unifiedTable.gst = dynamicGst;
@@ -290,6 +311,10 @@ public class QuoteControllerforHDPE {
                     if (String.isNotBlank(standard) && standard.equalsIgnoreCase('PLB Duct')) {
                         if (castToString(jsonData.get('Type_of_transportation')) == 'F.O.R (Freight on Road)' && castToString(jsonData.get('Type_of_FOR')) == 'Lump Sum') {
                             unifiedTable.transportationCharge = castToDecimal(jsonData.get('LumpSum_Amount'));
+                        }
+                    } else if (String.isNotBlank(standard) && standard.equalsIgnoreCase('MDPE Pipe')) {
+                        if (castToString(jsonData.get('mdpe_Type_of_transportation')) == 'F.O.R (Freight on Road)' && castToString(jsonData.get('mdpe_Type_of_FOR')) == 'Lump Sum') {
+                            unifiedTable.transportationCharge = castToDecimal(jsonData.get('mdpe_LumpSum_Amount'));
                         }
                     } else {
                         if (castToString(jsonData.get('is_Type_of_transportation')) == 'F.O.R (Freight on Road)' && castToString(jsonData.get('is_Type_of_FOR')) == 'Lump Sum') {
@@ -304,17 +329,19 @@ public class QuoteControllerforHDPE {
                 if (String.isNotBlank(standard) && standard.equalsIgnoreCase('PLB Duct')) {
                     String plbTrans = castToString(jsonData.get('Type_of_transportation'));
                     String freightIncoterms = castToString(jsonData.get('freight_incoterms_hdpe'));
-                    
                     String selectedPlbTrans = String.isNotBlank(plbTrans) ? plbTrans : String.isNotBlank(freightIncoterms) ? freightIncoterms : 'Ex-works';
-                
                     this.plbDuctTransportText = selectedPlbTrans.equalsIgnoreCase('Ex-works') ? 'Ex-works' : selectedPlbTrans.containsIgnoreCase('F.O.R') ? 'Delivery included upto ' + this.destinationLocation + ' Destination' : selectedPlbTrans;
                 
+                } else if (String.isNotBlank(standard) && standard.equalsIgnoreCase('MDPE Pipe')) {
+                    String mdpeTrans = castToString(jsonData.get('mdpe_Type_of_transportation'));
+                    String freightIncoterms = castToString(jsonData.get('freight_incoterms_hdpe'));
+                    String selectedMdpeTrans = String.isNotBlank(mdpeTrans) ? mdpeTrans : String.isNotBlank(freightIncoterms) ? freightIncoterms : 'Ex-works';
+                    this.mdpeTransportText = selectedMdpeTrans.equalsIgnoreCase('Ex-works') ? 'Ex-works' : selectedMdpeTrans.containsIgnoreCase('F.O.R') ? 'Delivery included upto ' + this.destinationLocation + ' Destination' : selectedMdpeTrans;
+                    
                 } else if (String.isNotBlank(standard) && standard.containsIgnoreCase('IS 4984')) {
                     String isTrans = castToString(jsonData.get('is_Type_of_transportation'));
                     String freightIncoterms = castToString(jsonData.get('freight_incoterms_hdpe'));
-                    
                     String selectedIsTrans = String.isNotBlank(isTrans) ? isTrans : String.isNotBlank(freightIncoterms) ? freightIncoterms : 'Ex-works';
-                
                     this.is4984TransportText = selectedIsTrans.equalsIgnoreCase('Ex-works') ? 'Ex-works' : selectedIsTrans.containsIgnoreCase('F.O.R') ? 'Delivery included upto ' + this.destinationLocation + ' Destination' : selectedIsTrans;
                 }
             } catch (Exception e) {
@@ -361,7 +388,6 @@ public class QuoteControllerforHDPE {
                             if (currentLength > maxPipeLength) maxPipeLength = currentLength;
                         }
                         
-                        // Dynamically check for type of pipe (coil or straight) in Block B
                         String typeOfPipeKey = prefix + 'p_type_of_pipe';
                         String pipeType = jsonData.containsKey(typeOfPipeKey) ? castToString(jsonData.get(typeOfPipeKey)) : 'straight';
                         String dynamicLenSuffix = (String.isNotBlank(pipeType) && pipeType.equalsIgnoreCase('coil')) ? 'coil length' : 'straight length';
@@ -408,11 +434,8 @@ public class QuoteControllerforHDPE {
                         
                        	ImprovisedRow row = new ImprovisedRow();
                         row.slNo = globalSerialNo++;
-                        //d_Fittings_Charges
-                        // If diameter is "40/33 TEC Spec", format to TEC Spec description
                         String description = '';
                         Boolean pullingRopeSuffix = jsonData.containsKey(prefix + 'd_Fittings_Charges') && !String.isBlank(String.valueOf(jsonData.get(prefix + 'd_Fittings_Charges')));
-                        // If diameter is "40/33", format to TEC Spec description
                         if (String.isNotBlank(dia) && dia.contains('40/33 TEC Spec')) {
                             description = '40/33 mm HDPE PLB DUCT as per TEC Spec ';
                         } else {
@@ -444,7 +467,6 @@ public class QuoteControllerforHDPE {
                     String fSize = castToString(jsonData.get('acc_Diameter_Size_input' + k));
                     String detailedDescription = '';
                     
-                    // Handle "40/33" override for accessories under Block B
                     if (String.isNotBlank(fSize)) {
                         if (fSize.contains('40/33 TEC Spec')) {
                             detailedDescription += '40/33 mm ';
@@ -469,32 +491,24 @@ public class QuoteControllerforHDPE {
             // --- 4. CALCULATE CUMULATIVE SUMMARY FIGURES FOR BLOCK B ---
             this.blockBGstAmount = (this.blockBBasicTotal * (this.blockBGstPercent / 100.0)).setScale(2, RoundingMode.HALF_UP);
             
-            // Consolidate Pipe Freight Setup
             String fallbackTrans = castToString(jsonData.get('freight_incoterms_hdpe'));
             
-            // --- Pipe Freight Setup ---
             String rawPTrans = castToString(jsonData.get('p_Type_of_transportation'));
             String pTrans = String.isNotBlank(rawPTrans) ? rawPTrans : String.isNotBlank(fallbackTrans) ? fallbackTrans : 'Ex-works';
             
-            // Check block B charge against the resolved pTrans value
             if (this.showPipeTable && pTrans == 'F.O.R (Freight on Road)' && castToString(jsonData.get('p_Type_of_FOR')) == 'Lump Sum') {
                 this.blockBTransportationCharge += castToDecimal(jsonData.get('p_LumpSum_Amount'));
             }
             
-            // Format the resulting transport text
             this.pipeDuctPipeTransportText = pTrans.equalsIgnoreCase('Ex-works') ? 'Ex-works' : pTrans.containsIgnoreCase('F.O.R') ? 'Delivery included upto ' + this.destinationLocation + ' Destination' : pTrans;
             
-            
-            // --- Duct Freight Setup ---
             String rawDTrans = castToString(jsonData.get('d_Type_of_transportation'));
             String dTrans = String.isNotBlank(rawDTrans) ? rawDTrans : String.isNotBlank(fallbackTrans) ? fallbackTrans : 'Ex-works';
             
-            // Check block B charge against the resolved dTrans value
             if (this.showDuctTable && dTrans == 'F.O.R (Freight on Road)' && castToString(jsonData.get('d_Type_of_FOR')) == 'Lump Sum') {
                 this.blockBTransportationCharge += castToDecimal(jsonData.get('d_LumpSum_Amount'));
             }
             
-            // Format the resulting transport text
             this.pipeDuctDuctTransportText = dTrans.equalsIgnoreCase('Ex-works') ? 'Ex-works' : dTrans.containsIgnoreCase('F.O.R') ? 'Delivery included upto ' + this.destinationLocation + ' Destination' : dTrans;
             
             this.blockBFinalAmount = (this.blockBBasicTotal + this.blockBGstAmount + this.blockBTransportationCharge).setScale(2, RoundingMode.HALF_UP);
@@ -511,7 +525,6 @@ public class QuoteControllerforHDPE {
             String dTrans = castToString(jsonData.get('d_Type_of_transportation'));
             String fallbackTrans = castToString(jsonData.get('freight_incoterms_hdpe'));
         
-            // Primary -> Secondary -> Default ('Ex-works')
             String pipeVal = String.isNotBlank(pTrans) ? pTrans 
                            : String.isNotBlank(fallbackTrans) ? fallbackTrans 
                            : 'Ex-works';
@@ -526,16 +539,22 @@ public class QuoteControllerforHDPE {
             String plbTrans = castToString(jsonData.get('Type_of_transportation'));
             String fallbackTrans = castToString(jsonData.get('freight_incoterms_hdpe'));
         
-            // Primary -> Secondary -> Default ('Ex-works')
             parsedFreight = String.isNotBlank(plbTrans) ? plbTrans 
                           : String.isNotBlank(fallbackTrans) ? fallbackTrans 
                           : 'Ex-works';
+                          
+        } else if (standard == 'MDPE Pipe') {
+            String mdpeTrans = castToString(jsonData.get('mdpe_Type_of_transportation'));
+            String fallbackTrans = castToString(jsonData.get('freight_incoterms_hdpe'));
         
+            parsedFreight = String.isNotBlank(mdpeTrans) ? mdpeTrans 
+                          : String.isNotBlank(fallbackTrans) ? fallbackTrans 
+                          : 'Ex-works';
+                          
         } else { // IS 4984 and other standards
             String isTrans = castToString(jsonData.get('is_Type_of_transportation'));
             String fallbackTrans = castToString(jsonData.get('freight_incoterms_hdpe'));
         
-            // Primary -> Secondary -> Default ('Ex-works')
             parsedFreight = String.isNotBlank(isTrans) ? isTrans 
                           : String.isNotBlank(fallbackTrans) ? fallbackTrans 
                           : 'Ex-works';
@@ -557,7 +576,7 @@ public class QuoteControllerforHDPE {
         this.packingForwarding = packingBase;
         
         Boolean hasInspectionCommission = false;
-        for (String key : new List<String>{'is_Inspection_Commission','Inspection_Commission','p_Inspection_Commission','d_Inspection_Commission'}) {
+        for (String key : new List<String>{'is_Inspection_Commission','Inspection_Commission','p_Inspection_Commission','d_Inspection_Commission', 'mdpe_Inspection_Commission'}) {
             if (jsonData.containsKey(key) && String.isNotBlank(String.valueOf(jsonData.get(key)))) { 
                 hasInspectionCommission = true;
                 break;
@@ -568,17 +587,24 @@ public class QuoteControllerforHDPE {
             'Material shall be inspected at our works before dispatch and third party inspection charges are included.\nNo rejection acceptable at your site.': 
             'Material shall be inspected at our works before dispatch and third party inspection charges are extra.\nNo rejection acceptable at your site.';
         this.loadingCharges = 'Loading to be borne by us & unloading to be arrange by you.';
+        
         Decimal configGst = castToDecimal(jsonData.get('c1_GST'));
         if(configGst == 0) configGst = castToDecimal(jsonData.get('c1_is_GST'));
         if(configGst == 0) configGst = castToDecimal(jsonData.get('c1_p_GST'));
+        if(configGst == 0) configGst = castToDecimal(jsonData.get('c1_mdpe_GST'));
         this.gstPercentage = (configGst != 0) ? configGst : 18.00;
         
         this.tcsPercentage = 0.10;
         this.paymentTerms = castToString(jsonData.get('tc_payment_term'));
         
-        this.delayInterestPercentage = (String.isNotBlank(standard) && standard.equalsIgnoreCase('PLB Duct')) ?
-                                        castToDecimal(jsonData.get('c1_Interest_Charges_on_Payment')) : 
-                                        castToDecimal(jsonData.get('c1_is_Interest_Charges_on_Payment'));
+        if (String.isNotBlank(standard) && standard.equalsIgnoreCase('PLB Duct')) {
+            this.delayInterestPercentage = castToDecimal(jsonData.get('c1_Interest_Charges_on_Payment'));
+        } else if (String.isNotBlank(standard) && standard.equalsIgnoreCase('MDPE Pipe')) {
+            this.delayInterestPercentage = castToDecimal(jsonData.get('mdpe_Interest_Charges_on_Payment'));
+        } else {
+            this.delayInterestPercentage = castToDecimal(jsonData.get('c1_is_Interest_Charges_on_Payment'));
+        }
+        
         if(this.delayInterestPercentage == 0 && jsonData.containsKey('c1_p_Interest_Charges_on_Payment')) {
             this.delayInterestPercentage = castToDecimal(jsonData.get('c1_p_Interest_Charges_on_Payment'));
         }

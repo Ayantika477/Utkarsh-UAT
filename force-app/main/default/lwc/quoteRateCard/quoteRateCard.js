@@ -7,6 +7,8 @@ import saveToMetadata from '@salesforce/apex/QuoteRateCardController.saveToMetad
 import getExistingRates from '@salesforce/apex/QuoteRateCardController.getExistingRates';
 import getRateCardJson from '@salesforce/apex/CreateQuoteController.getRateCardJson';
 import savePriceCalculatorMetadata from '@salesforce/apex/QuoteRateCardController.savePriceCalculatorMetadata';
+import getHighMastAmounts from '@salesforce/apex/QuoteRateCardController.getHighMastAmounts';
+import saveHighMastAmounts from '@salesforce/apex/QuoteRateCardController.saveHighMastAmounts';
 
 
 export default class QuoteRateCard extends LightningElement {
@@ -38,10 +40,10 @@ export default class QuoteRateCard extends LightningElement {
     // ==========================================
     picklistData = {
         'Crash Barrier - Department': ['MBCB type - Conventional Type','MBCB type - Railway','MBCB type - Crash Tested','MBCB type - Non-Spacer Design','MBCB type - Noise Barrier'], // 👉 ADDED NOISE BARRIER
-        'HDPE Pipe - Department': ['Standard - IS 4984', 'Standard - PLB Duct', 'Standard - Pipe & Duct'],
-        'High Mast - Department': ['Standard Mast - Lighting Pole','Standard Mast - Transmission Pole','Standard Mast - Lighting Mast','Customized Mast - STADIUM MAST','Customized Mast - FLAG MAST'],
-        'Solar Structure - Department': ['Unit of Measurement - Pcs','Unit of Measurement - Weight', 'Global Zinc Rate'], 
-        'Steel Pipes - Department': ['Domestic', 'Export'],
+        'HDPE Pipe - Department': ['Standard - IS 4984', 'Standard - PLB Duct', 'Standard - Pipe & Duct', 'Standard - MDPE Pipe'],
+        'High Mast - Department': ['Standard Mast - Transmission Pole','Standard Mast - Lighting Mast','Customized Mast - STADIUM MAST','Customized Mast - FLAG MAST', 'Octagonal Pole - Standard Pole', 'Octagonal Pole - Customized Pole', 'Octagonal Pole - Mid Hinge Pole', 'Lighting Cum Lighting Mast','Signage Mast', 'Latching Mast', 'Custom Lighting Mast'],
+        'Solar Structure - Department': ['Unit of Measurement - Pcs','Unit of Measurement - Weight', 'Global Zinc Rate'],
+        'Steel Pipes - Department': ['Domestic', 'Export', 'Core Pipes'], // 👉 ADDED Core Pipes
         'Steel Tubular Pole - Department': ['Type of Pole - Standard','Type of Pole - Customized'],
         'Transmission Tower - Department': ['Type of Product - Tower','Type of Product - Substation','Nuts & Bolts Details'],
         'Telecom Tower - Department': ['Generalized value']
@@ -53,6 +55,7 @@ export default class QuoteRateCard extends LightningElement {
     validationSchemas = {
     'Steel Pipes - Department|Domestic': ['Item', 'Rate'],
     'Steel Pipes - Department|Export': ['Item', 'Rate'],
+    'Steel Pipes - Department|Core Pipes': ['Item', 'Rate'], // 👉 ADDED Core Pipes Schema
         'Crash Barrier - Department|MBCB type - Conventional Type': ['Item','Rate'],
         'Crash Barrier - Department|MBCB type - Noise Barrier': ['Item','Rate'], // 👉 ADDED NOISE BARRIER SCHEMA
         'Crash Barrier - Department|MBCB type - Railway': ['Item','Rate'],
@@ -61,9 +64,19 @@ export default class QuoteRateCard extends LightningElement {
         'HDPE Pipe - Department|Standard - IS 4984': ['Item','Value'],
         'HDPE Pipe - Department|Standard - PLB Duct': ['Item','Value'],
         'HDPE Pipe - Department|Standard - Pipe & Duct': ['Item','Value'],
-        'High Mast - Department|Standard Mast - Lighting Pole': ['Pole Height','Section Count','Flange Size','Base Price'],
-        'High Mast - Department|Customized Mast - STADIUM MAST': ['Project Ref','Mast Height','Wind Speed Capacity','Custom Rate'],
-         'Solar Structure - Department|Unit of Measurement - Pcs': ['Item', 'Rate'],
+        'HDPE Pipe - Department|Standard - MDPE Pipe': ['Item','Value'],
+        'High Mast - Department|Standard Mast - Transmission Pole': ['Item','Value'],
+        'High Mast - Department|Standard Mast - Lighting Mast': ['Item','Value'],
+        'High Mast - Department|Customized Mast - STADIUM MAST': ['Item','Value'],
+        'High Mast - Department|Customized Mast - FLAG MAST': ['Item','Value'],
+        'High Mast - Department|Octagonal Pole - Standard Pole': ['Item','Value'],
+        'High Mast - Department|Octagonal Pole - Customized Pole': ['Item','Value'],
+        'High Mast - Department|Octagonal Pole - Mid Hinge Pole': ['Item','Value'],
+        'High Mast - Department|Lighting Cum Lighting Mast': ['Item','Value'],
+        'High Mast - Department|Signage Mast': ['Item','Value'],
+        'High Mast - Department|Latching Mast': ['Item','Value'],
+        'High Mast - Department|Custom Lighting Mast': ['Item','Value'],
+        'Solar Structure - Department|Unit of Measurement - Pcs': ['Item', 'Rate'],
         'Solar Structure - Department|Unit of Measurement - Weight': ['Item', 'Rate'],
         'Solar Structure - Department|Global Zinc Rate': ['Item', 'Rate'], 
         'Transmission Tower - Department|Type of Product - Tower': ['Item','Value'],
@@ -76,6 +89,15 @@ export default class QuoteRateCard extends LightningElement {
         'Steel Pipes - Department|Domestic': ['Item','Rate'],
         'Steel Pipes - Department|Export': ['Item','Rate']
     };
+    mdpePipe ={
+        'Pipe Base Rate' : 'mdpe_pipe_b_rate',
+        'Pipe GST %' : 'mdpe_pipe_gst'
+    };
+
+    reversemdpePipe ={
+        'mdpe_pipe_b_rate' : 'Pipe Base Rate',
+        'mdpe_pipe_gst' : 'Pipe GST %'
+    };
 
     hdpepipeAndDuct = {
         'Pipe Base Rate' : 'pipe_b_rate',
@@ -121,11 +143,41 @@ export default class QuoteRateCard extends LightningElement {
         'Thrie-Beam DSSB': 't_DSSB',
         'Thrie-Beam DSDB': 't_DSDB',
         'Regular (Zinc Coating)': 'zinc_reg',
+        'Medium 55 micron (Zinc Coating)': 'zinc_medium_55_delta',
         'Average 77 micron (Zinc Coating)': 'zinc_avg_77',
         'Minimum 77 micron (Zinc Coating)': 'zinc_min_77',
         'Consumption Zinc Regular': 'con_zinc_reg',
+        'Consumption Zinc Medium 55 micron': 'con_zinc_medium_55',
         'Consumption Zinc Average 77 micron': 'con_zinc_avg_77',
         'Consumption Zinc Minimum 77 micron': 'con_zinc_min_77'
+    };
+
+        highMastRecordMap = {
+        'Standard Mast - Transmission Pole': 'Transmission_Pole_Price_Details',
+        'Standard Mast - Lighting Mast'    : 'Lighting_Mast_Price',
+        'Customized Mast - STADIUM MAST'   : 'STADIUM_MAST_Price',
+        'Customized Mast - FLAG MAST'      : 'FLAG_MAST_Price',
+        'Octagonal Pole - Standard Pole'   : 'Lightning_Pole_Price',   // ⚠️ verify
+        'Octagonal Pole - Customized Pole' : 'Custom_Lightning_Pole',         // ⚠️ verify — clashes
+        'Octagonal Pole - Mid Hinge Pole'  : 'Mid_Hinge_Pole',
+        'Lighting Cum Lighting Mast'       : 'LCLM_Price', // ⚠️ verify
+        'Signage Mast'                     : 'Signage_Mast_Price',
+        'Latching Mast'                    : 'Latching_Mast_Price',
+        'Custom Lighting Mast'             : 'Custom_Lighting_Mast'
+    };
+
+    reverseHighMastRecordMap = {
+        'Transmission_Pole_Price_Details': 'Standard Mast - Transmission Pole',
+        'Lighting_Mast_Price': 'Standard Mast - Lighting Mast',
+        'STADIUM_MAST_Price': 'Customized Mast - STADIUM MAST',
+        'FLAG_MAST_Price': 'Customized Mast - FLAG MAST',
+        'Lightning_Pole_Price': 'Octagonal Pole - Standard Pole',
+        'Custom_Lightning_Pole': 'Octagonal Pole - Customized Pole',
+        'Mid_Hinge_Pole': 'Octagonal Pole - Mid Hinge Pole',
+        'LCLM_Price': 'Lighting Cum Lighting Mast',
+        'Signage_Mast_Price': 'Signage Mast',
+        'Latching_Mast_Price': 'Latching Mast',
+        'Custom_Lighting_Mast': 'Custom Lighting Mast'
     };
 
     reverseCrashBarrierConvMap = {
@@ -139,9 +191,11 @@ export default class QuoteRateCard extends LightningElement {
         't_DSSB': 'Thrie-Beam DSSB',
         't_DSDB': 'Thrie-Beam DSDB',
         'zinc_reg': 'Regular (Zinc Coating)',
+        'zinc_medium_55_delta': 'Medium 55 micron (Zinc Coating)',
         'zinc_avg_77': 'Average 77 micron (Zinc Coating)',
         'zinc_min_77': 'Minimum 77 micron (Zinc Coating)',
         'con_zinc_reg': 'Consumptionn Zinc Regular',
+        'con_zinc_medium_55': 'Consumption Zinc Medium 55 micron',
         'con_zinc_avg_77': 'Consumption Zinc Average 77 micron',
         'con_zinc_min_77': 'Consumption Zinc Minimum 77 micron'
     };
@@ -214,11 +268,13 @@ export default class QuoteRateCard extends LightningElement {
     };
     
     telecomMap = {
+        'Raw Material Cost': 'ang_rmc',
         'Zinc Value': 'ang_zinc_value',
         'Zinc Conversion %': 'ang_zinc_conversion_percent',
         'Fabrication Cost': 'ang_fabrication_cost',
         'Labour Cost': 'ang_labour_cost',
-        'Prevailing Interest LC': 'against_LC_percent',
+        'Against LC Margin %': 'against_LC_percent',
+        'Against VFS Margin %': 'against_VFS_percent',
         'Without BOM Value': 'tub_without_bom_value1',
         'Pipe Rate': 'tub_pipe_rate',
         'Plate Rate': 'tub_plate_rate',
@@ -227,11 +283,13 @@ export default class QuoteRateCard extends LightningElement {
     };
 
     reverseTelecomMap = {
+        'ang_rmc': 'Raw Material Cost',
         'ang_zinc_value': 'Zinc Value',
         'ang_zinc_conversion_percent': 'Zinc Conversion %',
         'ang_fabrication_cost': 'Fabrication Cost',
         'ang_labour_cost': 'Labour Cost',
-        'against_LC_percent': 'Prevailing Interest LC',
+        'against_LC_percent': 'Against LC Margin %',
+        'against_VFS_percent': 'Against VFS Margin %',
         'tub_without_bom_value1': 'Without BOM Value',
         'tub_pipe_rate': 'Pipe Rate',
         'tub_plate_rate': 'Plate Rate',
@@ -242,6 +300,7 @@ export default class QuoteRateCard extends LightningElement {
     crashTestedMap = {
         'Base Rate': 'common_base_rate',
         'Regular (Zinc Coating)': 'zinc_regular_delta',
+        'Medium 55 micron (Zinc Coating)':'zinc_medium_55_delta',
         'Average 77 micron (Zinc Coating)': 'zinc_average_delta',
         'Minimum 77 micron (Zinc Coating)': 'zinc_minimum_delta',
         'W-Beam Natrax (Delta)': 'wb_natrax_rate_rm',
@@ -250,12 +309,17 @@ export default class QuoteRateCard extends LightningElement {
         'W-Beam Transpolis (Delta)': 'wb_trans_rate_rm',
         'Thrie-Beam Natrax (Delta)': 'tb_natrax_rate_rm',
         'Thrie-Beam Alka Type - 2 c/c (Delta)': 'tb_alka_2cc_rate',
-        'Thrie-Beam Alka Type - 2.66 c/c (Delta)': 'tb_alka_266cc_rate'
+        'Thrie-Beam Alka Type - 2.66 c/c (Delta)': 'tb_alka_266cc_rate',
+        'Consumption Zinc Regular': 'con_zinc_reg',
+        'Consumption Zinc Medium 55 micron': 'con_zinc_medium_55',
+        'Consumption Zinc Average 77 micron': 'con_zinc_avg_77',
+        'Consumption Zinc Minimum 77 micron': 'con_zinc_min_77'
     };
 
     reverseCrashTestedMap = {
         'common_base_rate': 'Base Rate',
         'zinc_regular_delta': 'Regular (Zinc Coating)',
+        'zinc_medium_55_delta': 'Medium 55 micron (Zinc Coating)',
         'zinc_average_delta': 'Average 77 micron (Zinc Coating)',
         'zinc_minimum_delta': 'Minimum 77 micron (Zinc Coating)',
         'wb_natrax_rate_rm': 'W-Beam Natrax (Delta)',
@@ -264,46 +328,78 @@ export default class QuoteRateCard extends LightningElement {
         'wb_trans_rate_rm': 'W-Beam Transpolis (Delta)',
         'tb_natrax_rate_rm': 'Thrie-Beam Natrax (Delta)',
         'tb_alka_2cc_rate': 'Thrie-Beam Alka Type - 2 c/c (Delta)',
-        'tb_alka_266cc_rate': 'Thrie-Beam Alka Type - 2.66 c/c (Delta)'
+        'tb_alka_266cc_rate': 'Thrie-Beam Alka Type - 2.66 c/c (Delta)',
+        'con_zinc_reg': 'Consumptionn Zinc Regular',
+        'con_zinc_medium_55': 'Consumption Zinc Medium 55 micron',
+        'con_zinc_avg_77': 'Consumption Zinc Average 77 micron',
+        'con_zinc_min_77': 'Consumption Zinc Minimum 77 micron'
     };
     railwayMap = {
         'Base Rate': 'common_base_rate',
         'Regular (Zinc Coating)': 'zinc_regular_delta',
+        'Medium 55 micron (Zinc Coating)':'zinc_medium_55_delta',
         'Average 77 micron (Zinc Coating)': 'zinc_average_delta',
         'Minimum 77 micron (Zinc Coating)': 'zinc_minimum_delta',
         'Railway Graded (Delta)(1.8)': 'railway_graded_delta1_8',
         'Railway Graded (Delta)(2.0)': 'railway_graded_delta2',
         'Railway Non-Graded (Delta)(1.8)': 'railway_nongraded_delta1_8',
-        'Railway Non-Graded (Delta)(2.0)': 'railway_nongraded_delta2'
+        'Railway Non-Graded (Delta)(2.0)': 'railway_nongraded_delta2',
+        'Consumption Zinc Regular': 'con_zinc_reg',
+        'Consumption Zinc Medium 55 micron': 'con_zinc_medium_55',
+        'Consumption Zinc Average 77 micron': 'con_zinc_avg_77',
+        'Consumption Zinc Minimum 77 micron': 'con_zinc_min_77'
     };
 
     reverseRailwayMap = {
         'common_base_rate': 'Base Rate',
         'zinc_regular_delta': 'Regular (Zinc Coating)',
+        'zinc_medium_55_delta': 'Medium 55 micron (Zinc Coating)',
         'zinc_average_delta': 'Average 77 micron (Zinc Coating)',
         'zinc_minimum_delta': 'Minimum 77 micron (Zinc Coating)',
         'railway_graded_delta1_8': 'Railway Graded (Delta)(1.8)',
         'railway_graded_delta2': 'Railway Graded (Delta)(2.0)',   
         'railway_nongraded_delta1_8': 'Railway Non-Graded (Delta)(1.8)',
-        'railway_nongraded_delta2': 'Railway Non-Graded (Delta)(2.0)'
+        'railway_nongraded_delta2': 'Railway Non-Graded (Delta)(2.0)',
+        'con_zinc_reg': 'Consumptionn Zinc Regular',
+        'con_zinc_medium_55': 'Consumption Zinc Medium 55 micron',
+        'con_zinc_avg_77': 'Consumption Zinc Average 77 micron',
+        'con_zinc_min_77': 'Consumption Zinc Minimum 77 micron'
     };
     nonSpacerMap = {
         'Base Rate': 'common_base_rate',
         'Regular (Zinc Coating)': 'zinc_regular_delta',
+        'Medium 55 micron (Zinc Coating)':'zinc_medium_55_delta',
         'Average 77 micron (Zinc Coating)': 'zinc_average_delta',
         'Minimum 77 micron (Zinc Coating)': 'zinc_minimum_delta',
         'W-Beam Non Spacer (Delta)': 'wb_non_spacer_delta',
-        'Thrie-Beam Non Spacer (Delta)': 'tb_non_spacer_delta'
+        'Thrie-Beam Non Spacer (Delta)': 'tb_non_spacer_delta',
+        'Consumption Zinc Regular': 'con_zinc_reg',
+        'Consumption Zinc Medium 55 micron': 'con_zinc_medium_55',
+        'Consumption Zinc Average 77 micron': 'con_zinc_avg_77',
+        'Consumption Zinc Minimum 77 micron': 'con_zinc_min_77'
     };
 
     reverseNonSpacerMap = {
         'common_base_rate': 'Base Rate',
         'zinc_regular_delta': 'Regular (Zinc Coating)',
+        'zinc_medium_55_delta': 'Medium 55 micron (Zinc Coating)',
         'zinc_average_delta': 'Average 77 micron (Zinc Coating)',
         'zinc_minimum_delta': 'Minimum 77 micron (Zinc Coating)',
         'wb_non_spacer_delta': 'W-Beam Non Spacer (Delta)',
-        'tb_non_spacer_delta': 'Thrie-Beam Non Spacer (Delta)'
+        'tb_non_spacer_delta': 'Thrie-Beam Non Spacer (Delta)',
+        'con_zinc_reg': 'Consumptionn Zinc Regular',
+        'con_zinc_medium_55': 'Consumption Zinc Medium 55 micron',
+        'con_zinc_avg_77': 'Consumption Zinc Average 77 micron',
+        'con_zinc_min_77': 'Consumption Zinc Minimum 77 micron'
     };
+
+    // 👉 ADDED CORE PIPES MAP (Baseline Default Rates)
+    corePipesMap = {
+        "Supply of Galvanized STAY & REGISTER ARM Small Tube(33.7X28.40mm),As per specification ETI/OHE/11(5/89)& ETI/OHE/13(4/84).": 140,
+        "Supply of Galvanized Large Tube (49.00X40.90mm),As per specification ETI/OHE/11(5/89)& ETI/OHE/13(4/84)": 335,
+        "Supply of Galvanized BRACKET Standard Tube (38.00X29.90mm),As per specification ETI/OHE/11(5/89)& ETI/OHE/13(4/84).": 250,
+        "Supply of Galvanized GUIDE Counter Weight Tube 25mm(NB),Length- 5.6MTR. Drawing No. ETI/OHE/P/5060-2 Rev-C": 900
+    };
 
    // ==========================================
     // STEEL PIPES DOMESTIC MAPS
@@ -316,153 +412,15 @@ export default class QuoteRateCard extends LightningElement {
 
     // 👉 CLEANUP: Standardized to 'exportPipesMap'
    exportPipesMap = {
-        "Black Steel": 62.5,
-        "Black Steel|MS ERW": 62.5,
-        "Black Steel|CS ERW": 62.5,
-        "Galvanized Iron (GI)": 70,
-        "Galvanized Iron (GI)|GI ERW": 70,
-        "Stainless Steel": 150,
-
-        // =====================================
-        // 1. MS ERW OVERRIDES
-        // =====================================
-        "--- MS ERW: SQUARE PIPE (SHS) ---": 0,
-        "Black Steel|MS ERW|Square|default|19": 65.5,
-        "Black Steel|MS ERW|Square|default|25": 63,
-        "Black Steel|MS ERW|Square|default|32": 63,
-        "Black Steel|MS ERW|Square|default|38": 63,
-        "Black Steel|MS ERW|Square|default|49.5": 63,
-        "Black Steel|MS ERW|Square|default|60": 63,
-        
-        "--- MS ERW: RECTANGULAR PIPE (RHS) ---": 0,
-        "Black Steel|MS ERW|Rectangular|default|50": 63,
-        "Black Steel|MS ERW|Rectangular|default|60": 63,
-        "Black Steel|MS ERW|Rectangular|default|66": 63,
-        
-        "--- MS ERW: ROUND PIPE (IS 1239) ---": 0,
-        "Black Steel|MS ERW|Light|default|15mm": 65,
-        "Black Steel|MS ERW|Light|default|20mm": 64,
-        "Black Steel|MS ERW|Light|default|25mm": 63,
-        "Black Steel|MS ERW|Light|default|32mm": 63,
-        "Black Steel|MS ERW|Medium|default|15mm": 65,
-        "Black Steel|MS ERW|Medium|default|20mm": 64,
-        "Black Steel|MS ERW|Medium|default|25mm": 63,
-        "Black Steel|MS ERW|Medium|default|32mm": 63,
-        "Black Steel|MS ERW|Heavy|default|15mm": 65,
-        "Black Steel|MS ERW|Heavy|default|20mm": 64,
-        "Black Steel|MS ERW|Heavy|default|25mm": 63,
-        "Black Steel|MS ERW|Heavy|default|32mm": 63,
-        
-        "--- MS ERW: ROUND PIPE (DEFAULT) ---": 0,
-        "Black Steel|MS ERW|Default|default|15mm": 65,
-        "Black Steel|MS ERW|Default|default|20mm": 64,
-        "Black Steel|MS ERW|Default|default|25mm": 63,
-        "Black Steel|MS ERW|Default|default|32mm": 63,
-        "Black Steel|MS ERW|Default|default|40mm": 63.5,
-        "Black Steel|MS ERW|Default|default|50mm": 63.5,
-        "Black Steel|MS ERW|Default|default|65mm": 63.5,
-        "Black Steel|MS ERW|Default|default|80mm": 63.5,
-        "Black Steel|MS ERW|Default|default|90mm": 63.5,
-        "Black Steel|MS ERW|Default|default|175mm": 63,
-        "Black Steel|MS ERW|Default|default|200mm": 63,
-        "Black Steel|MS ERW|Default|default|250mm": 64,
-        "Black Steel|MS ERW|Default|default|300mm": 64,
-        "Black Steel|MS ERW|Default|default|350mm": 64.5,
-        "Black Steel|MS ERW|Default|default|400mm": 64.5,
-
-        // =====================================
-        // 2. GI ERW OVERRIDES
-        // =====================================
-        "--- GI ERW: SQUARE PIPE (SHS) ---": 0,
-        "Galvanized Iron (GI)|GI ERW|Square|default|19": 70,
-        "Galvanized Iron (GI)|GI ERW|Square|default|25": 70,
-        "Galvanized Iron (GI)|GI ERW|Square|default|32": 70,
-        "Galvanized Iron (GI)|GI ERW|Square|default|38": 70,
-        "Galvanized Iron (GI)|GI ERW|Square|default|49.5": 70,
-        "Galvanized Iron (GI)|GI ERW|Square|default|60": 70,
-        
-        "--- GI ERW: RECTANGULAR PIPE (RHS) ---": 0,
-        "Galvanized Iron (GI)|GI ERW|Rectangular|default|50": 70,
-        "Galvanized Iron (GI)|GI ERW|Rectangular|default|60": 70,
-        "Galvanized Iron (GI)|GI ERW|Rectangular|default|66": 70,
-        
-        "--- GI ERW: ROUND PIPE (IS 1239) ---": 0,
-        "Galvanized Iron (GI)|GI ERW|Light|default|15mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Light|default|20mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Light|default|25mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Light|default|32mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Medium|default|15mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Medium|default|20mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Medium|default|25mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Medium|default|32mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Heavy|default|15mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Heavy|default|20mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Heavy|default|25mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Heavy|default|32mm": 70,
-        
-        "--- GI ERW: ROUND PIPE (DEFAULT) ---": 0,
-        "Galvanized Iron (GI)|GI ERW|Default|default|15mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|20mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|25mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|32mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|40mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|50mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|65mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|80mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|90mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|175mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|200mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|250mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|300mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|350mm": 70,
-        "Galvanized Iron (GI)|GI ERW|Default|default|400mm": 70,
-
-        // =====================================
-        // 3. CS ERW OVERRIDES
-        // =====================================
-        "--- CS ERW: SQUARE PIPE (SHS) ---": 0,
-        "Black Steel|CS ERW|Square|default|19": 62.5,
-        "Black Steel|CS ERW|Square|default|25": 62.5,
-        "Black Steel|CS ERW|Square|default|32": 62.5,
-        "Black Steel|CS ERW|Square|default|38": 62.5,
-        "Black Steel|CS ERW|Square|default|49.5": 62.5,
-        "Black Steel|CS ERW|Square|default|60": 62.5,
-        
-        "--- CS ERW: RECTANGULAR PIPE (RHS) ---": 0,
-        "Black Steel|CS ERW|Rectangular|default|50": 62.5,
-        "Black Steel|CS ERW|Rectangular|default|60": 62.5,
-        "Black Steel|CS ERW|Rectangular|default|66": 62.5,
-        
-        "--- CS ERW: ROUND PIPE (IS 1239) ---": 0,
-        "Black Steel|CS ERW|Light|default|15mm": 62.5,
-        "Black Steel|CS ERW|Light|default|20mm": 62.5,
-        "Black Steel|CS ERW|Light|default|25mm": 62.5,
-        "Black Steel|CS ERW|Light|default|32mm": 62.5,
-        "Black Steel|CS ERW|Medium|default|15mm": 62.5,
-        "Black Steel|CS ERW|Medium|default|20mm": 62.5,
-        "Black Steel|CS ERW|Medium|default|25mm": 62.5,
-        "Black Steel|CS ERW|Medium|default|32mm": 62.5,
-        "Black Steel|CS ERW|Heavy|default|15mm": 62.5,
-        "Black Steel|CS ERW|Heavy|default|20mm": 62.5,
-        "Black Steel|CS ERW|Heavy|default|25mm": 62.5,
-        "Black Steel|CS ERW|Heavy|default|32mm": 62.5,
-        
-        "--- CS ERW: ROUND PIPE (DEFAULT) ---": 0,
-        "Black Steel|CS ERW|Default|default|15mm": 62.5,
-        "Black Steel|CS ERW|Default|default|20mm": 62.5,
-        "Black Steel|CS ERW|Default|default|25mm": 62.5,
-        "Black Steel|CS ERW|Default|default|32mm": 62.5,
-        "Black Steel|CS ERW|Default|default|40mm": 62.5,
-        "Black Steel|CS ERW|Default|default|50mm": 62.5,
-        "Black Steel|CS ERW|Default|default|65mm": 62.5,
-        "Black Steel|CS ERW|Default|default|80mm": 62.5,
-        "Black Steel|CS ERW|Default|default|90mm": 62.5,
-        "Black Steel|CS ERW|Default|default|175mm": 62.5,
-        "Black Steel|CS ERW|Default|default|200mm": 62.5,
-        "Black Steel|CS ERW|Default|default|250mm": 62.5,
-        "Black Steel|CS ERW|Default|default|300mm": 62.5,
-        "Black Steel|CS ERW|Default|default|350mm": 62.5,
-        "Black Steel|CS ERW|Default|default|400mm": 62.5
+        "Black Steel": 0.65,
+        "Galvanized Iron (GI)": 0.75,
+        "Stainless Steel": 2.00,
+        "RODTEP (%)": 0.45,
+        "Incentive (%)": 1.5,
+        "Light Series Delta (USD)": 0,
+        "Light Series Delta (EUR)": 0,
+        "Light Series Delta (GBP)": 0,
+        "Light Series Delta (AED)": 0
     };
 
     domesticWeightMap = {
@@ -485,11 +443,11 @@ export default class QuoteRateCard extends LightningElement {
         "Carport Structure E350": "Carport Structure|E350",
         "Carport Structure E450": "Carport Structure|E450",
         "Carport Structure E550": "Carport Structure|E550",
-        "HDG MMS/Carport Structure": "HDG MMS/Carport Structure",
+        /*"HDG MMS/Carport Structure": "HDG MMS/Carport Structure",
         "HDG MMS/Carport Structure E250": "HDG MMS/Carport Structure|E250",
         "HDG MMS/Carport Structure E350": "HDG MMS/Carport Structure|E350",
         "HDG MMS/Carport Structure E450": "HDG MMS/Carport Structure|E450",
-        "HDG MMS/Carport Structure E550": "HDG MMS/Carport Structure|E550",
+        "HDG MMS/Carport Structure E550": "HDG MMS/Carport Structure|E550",*/
         // Special Grade dropped; Piers now carries E350/E450/E550.
         // Renamed to "Piers (W-Beam) for Tracker" - Deepanjan (9th August 2026).
         // W-Beam is gone from the estimator's material list and folded in here.
@@ -535,6 +493,23 @@ export default class QuoteRateCard extends LightningElement {
         "W-Beam E550": "W-Beam|E550",
         "HBM": "HBM",
         "WBM": "WBM",
+        // black beam prices
+         "I-Beam (Black)": "I-Beam (Black)",
+        "I-Beam (Black) E350": "I-Beam (Black)|E350",
+        "I-Beam (Black) E450": "I-Beam (Black)|E450",
+        "I-Beam (Black) E550": "I-Beam (Black)|E550",
+        "W-Beam (Black)": "W-Beam (Black)",
+        "W-Beam (Black) E350": "W-Beam (Black)|E350",
+        "W-Beam (Black) E450": "W-Beam (Black)|E450",
+        "W-Beam (Black) E550": "W-Beam (Black)|E550",
+        "H-Beam (Black)": "H-Beam (Black)",
+        "H-Beam (Black) E350": "H-Beam (Black)|E350",
+        "H-Beam (Black) E450": "H-Beam (Black)|E450",
+        "H-Beam (Black) E550": "H-Beam (Black)|E550",
+        "Piers for Tracker (Black)": "Piers for Tracker (Black)",
+        "Piers for Tracker (Black) E350": "Piers for Tracker (Black)|E350",
+        "Piers for Tracker (Black) E450": "Piers for Tracker (Black)|E450",
+        "Piers for Tracker (Black) E550": "Piers for Tracker (Black)|E550",
         "Zinc Labour": "Zinc Labour",
         "Labour Contractor": "Labour Contractor",
         "Consumables": "Consumables",
@@ -687,11 +662,52 @@ reverseNutsBoltsMap = {
         this.isModalOpen = false;
         this.gridData = [];
 
+
+        // ===== HIGH MAST: flat Base Amount / Add On Amount, no JSON rate card =====
+        if (this.valueA === 'High Mast - Department') {
+            const hmDevName = this.highMastRecordMap[this.valueB];
+            if (!hmDevName) {
+                this.showError('No Price Calculator record mapped for: ' + this.valueB);
+                this.showDataGrid = false;
+                return;
+            }
+
+            let baseVal = '0';
+            let addOnVal = '0';
+            try {
+                const hmRec = await getHighMastAmounts({ recordDeveloperName: hmDevName });
+                if (hmRec) {
+                    baseVal  = hmRec.Base_Amount__c    != null ? String(hmRec.Base_Amount__c)    : '0';
+                    addOnVal = hmRec.Add_On_Amount__c  != null ? String(hmRec.Add_On_Amount__c)  : '0';
+                }
+            } catch (err) {
+                console.error('High Mast amount fetch failed:', err);
+            }
+
+            this.gridData = [
+                {
+                    id: 'hm_row_0', displayIndex: 1,
+                    cells: [
+                        { column: 'Item',  value: 'Base Amount',   isReadOnly: true },
+                        { column: 'Value', value: baseVal,         isReadOnly: false }
+                    ]
+                },
+                {
+                    id: 'hm_row_1', displayIndex: 2,
+                    cells: [
+                        { column: 'Item',  value: 'Add On Amount', isReadOnly: true },
+                        { column: 'Value', value: addOnVal,        isReadOnly: false }
+                    ]
+                }
+            ];
+            return;
+        }
         let targetDeveloperName = '';
         if (this.valueA === 'Solar Structure - Department') targetDeveloperName = 'Solar_Structure';
         else if (this.valueA === 'HDPE Pipe - Department' && this.valueB === 'Standard - PLB Duct') targetDeveloperName = 'PLB_Duct_Price';
         else if (this.valueA === 'HDPE Pipe - Department' && this.valueB === 'Standard - IS 4984') targetDeveloperName = 'IS_4984_Price';
         else if (this.valueA === 'HDPE Pipe - Department' && this.valueB === 'Standard - Pipe & Duct') targetDeveloperName = 'pipe_and_duct_price';
+        else if (this.valueA === 'HDPE Pipe - Department' && this.valueB === 'Standard - MDPE Pipe') targetDeveloperName = 'MDPE_Pipe_Price';
         else if (this.valueB === 'Type of Pole - Standard') targetDeveloperName = 'Standard_Pole';
         else if (this.valueB === 'Type of Pole - Customized') targetDeveloperName = 'Customized_Pole';
         else if (this.valueA === 'Crash Barrier - Department' && this.valueB === 'MBCB type - Conventional Type') targetDeveloperName = 'Crash_Barrier_Conventional';
@@ -702,6 +718,8 @@ reverseNutsBoltsMap = {
         else if (this.valueA === 'Crash Barrier - Department' && this.valueB === 'MBCB type - Non-Spacer Design') targetDeveloperName = 'Crash_Barrier_Non_Spacer';
         else if (this.valueA === 'Steel Pipes - Department' && this.valueB === 'Domestic') targetDeveloperName = 'Steel_Pipe_Domestic_Config';
         else if (this.valueA === 'Steel Pipes - Department' && this.valueB === 'Export') targetDeveloperName = 'Steel_Pipes_Export';
+        // 👉 ADDED CORE PIPES (Retrieves from Steel Pipe Domestic Config metadata)
+        else if (this.valueA === 'Steel Pipes - Department' && this.valueB === 'Core Pipes') targetDeveloperName = 'Steel_Pipe_Domestic_Config';
         else if (this.valueA === 'Transmission Tower - Department' && this.valueB === 'Type of Product - Tower') targetDeveloperName = 'Transmission_Tower_Product';
         else if (this.valueA === 'Transmission Tower - Department' && this.valueB === 'Type of Product - Substation') targetDeveloperName = 'Transmission_Substation';
         else if (this.valueA === 'Transmission Tower - Department' && this.valueB === 'Nuts & Bolts Details') targetDeveloperName = 'Transmission_Nuts_Bolts';
@@ -728,13 +746,17 @@ reverseNutsBoltsMap = {
                         this.valueA === 'Solar Structure - Department' || 
                         this.valueA === 'Steel Tubular Pole - Department' || 
                         (this.valueA === 'Crash Barrier - Department' && (this.valueB === 'MBCB type - Conventional Type' || this.valueB === 'MBCB type - Noise Barrier' || this.valueB === 'MBCB type - Crash Tested' || this.valueB === 'MBCB type - Railway' || this.valueB === 'MBCB type - Non-Spacer Design')) 
-                        || (this.valueA === 'Steel Pipes - Department' && (this.valueB === 'Domestic' || this.valueB === 'Export')) || this.valueA === 'Telecom Tower - Department' ||
-                        (this.valueA === 'HDPE Pipe - Department' && (this.valueB === 'Standard - IS 4984' || this.valueB === 'Standard - PLB Duct' || this.valueB === 'Standard - Pipe & Duct')) ||
+                        || (this.valueA === 'Steel Pipes - Department' && (this.valueB === 'Domestic' || this.valueB === 'Export' || this.valueB === 'Core Pipes')) || this.valueA === 'Telecom Tower - Department' ||
+                        (this.valueA === 'HDPE Pipe - Department' && (this.valueB === 'Standard - IS 4984' || this.valueB === 'Standard - PLB Duct' || this.valueB === 'Standard - Pipe & Duct' || this.valueB === 'Standard - MDPE Pipe')) ||
                         (this.valueA === 'Transmission Tower - Department' && (this.valueB === 'Type of Product - Tower' || this.valueB === 'Type of Product - Substation' || this.valueB === 'Nuts & Bolts Details'))
                     )){
                         let parsedConfig = JSON.parse(payload);
                         
-                        if ((this.valueA === 'Steel Pipes - Department' && (this.valueB === 'Domestic' || this.valueB === 'Export')) || (this.valueA === 'Solar Structure - Department' && this.valueB !== 'Global Zinc Rate')) {
+                        // 👉 CORE PIPES EXTRACTION
+                        if (this.valueA === 'Steel Pipes - Department' && this.valueB === 'Core Pipes') {
+                            this.fullExistingDatabaseConfig = parsedConfig.CORE_PIPE_RATES || parsedConfig.coreRates || this.corePipesMap;
+                        } 
+                        else if ((this.valueA === 'Steel Pipes - Department' && (this.valueB === 'Domestic' || this.valueB === 'Export')) || (this.valueA === 'Solar Structure - Department' && this.valueB !== 'Global Zinc Rate')) {
                             // 👉 SAFELY extracts baseRatesMap for BOTH Domestic and Export, and Solar Structure Map
                             if (parsedConfig && (parsedConfig.baseRatesMap !== undefined || parsedConfig.baseRates !== undefined || parsedConfig.BASE_RATES !== undefined)) {
                                 this.fullExistingDatabaseConfig = parsedConfig.baseRatesMap || parsedConfig.baseRates || parsedConfig.BASE_RATES;
@@ -754,17 +776,30 @@ reverseNutsBoltsMap = {
             }
         }
 
-        // 👉 SOLAR STRUCTURE DEPARTMENT: PRE-POPULATE INDIVIDUAL BASE RATE ROWS
-        if (this.valueA === 'Solar Structure - Department' && this.valueB !== 'Global Zinc Rate') {
-            const defaultItems = Object.keys(this.solarStructureMap);
+        // 👉 DEFAULT GRID: CORE PIPES
+        if (this.valueA.includes('Steel Pipe') && this.valueB.includes('Core')) {
+            const defaultItems = Object.keys(this.corePipesMap || {});
             this.gridData = defaultItems.map((item, idx) => ({
                 id: 'new_row_' + idx,
                 displayIndex: idx + 1,
                 cells: [
                     { column: 'Item', value: item, isReadOnly: true },
-                    { column: 'Rate', value: '0', isReadOnly: false }
+                    { column: 'Rate', value: String(this.corePipesMap[item]), isReadOnly: false }
                 ]
             }));
+            return;
+        }
+
+        // 👉 SOLAR STRUCTURE DEPARTMENT: PRE-POPULATE INDIVIDUAL BASE RATE ROWS
+        if (this.valueA === 'Solar Structure - Department' && this.valueB === 'Global Zinc Rate') {
+            this.gridData = [{
+                id: 'new_row_0',
+                displayIndex: 1,
+                cells: [
+                    { column: 'Item', value: 'Zinc Rate per MT', isReadOnly: true },
+                    { column: 'Rate', value: '0', isReadOnly: false }
+                ]
+            }];
             return;
         }
 
@@ -777,6 +812,8 @@ reverseNutsBoltsMap = {
                 defaultItems = Object.keys(this.hdpeIs4984);
             } else if (this.valueB === 'Standard - PLB Duct') {
                 defaultItems = Object.keys(this.hdpePlbDuct);
+            } else if(this.valueB === 'Standard - MDPE Pipe'){
+                defaultItems = Object.keys(this.mdpePipe);
             }
 
             if (defaultItems.length > 0) {
@@ -926,8 +963,26 @@ reverseNutsBoltsMap = {
             return !(lowerCol.includes('price') || lowerCol.includes('rate') || lowerCol === 'value' || lowerCol.includes('cost'));
         };
 
+        // 👉 CORE PIPES REBUILD
+        if (this.valueA === 'Steel Pipes - Department' && this.valueB === 'Core Pipes') {
+            const defaultItems = Object.keys(this.corePipesMap);
+            let ratesMap = parsedConfig || {};
+
+            defaultItems.forEach(item => {
+                let savedValue = ratesMap[item] !== undefined ? ratesMap[item] : this.corePipesMap[item];
+                reconstructedRows.push({
+                    id: 'saved_row_' + (rowIndex++),
+                    displayIndex: rowIndex,
+                    cells: [
+                        { column: 'Item', value: item, isReadOnly: true },
+                        { column: 'Rate', value: String(savedValue !== undefined ? savedValue : '0'), isReadOnly: false }
+                    ]
+                });
+            });
+        }
+
         // 👉 UPDATED: REBUILD BASE RATES FOR INDIVIDUAL SOLAR STRUCTURE MATERIALS
-        if (this.valueA === 'Solar Structure - Department' && this.valueB !== 'Global Zinc Rate') {
+        else if (this.valueA === 'Solar Structure - Department' && this.valueB !== 'Global Zinc Rate') {
             const defaultItems = Object.keys(this.solarStructureMap);
             
             let actualRatesMap = {};
@@ -939,7 +994,7 @@ reverseNutsBoltsMap = {
             } else if (parsedConfig && parsedConfig.BASE_RATES) {
                 actualRatesMap = parsedConfig.BASE_RATES;
             } else {
-                actualRatesMap = {};
+                actualRatesMap = parsedConfig || {};
             }
 
             defaultItems.forEach((item, index) => {
@@ -1046,19 +1101,27 @@ reverseNutsBoltsMap = {
             });
         }
         else if (this.valueA === 'Telecom Tower - Department') {
-            parsedConfig.forEach(field => {
-                let label = this.reverseTelecomMap[field.apiName] || field.apiName;
-                let savedValue = field.defaultValue !== undefined ? field.defaultValue : (field.formula || '0');
+            const savedByApi = {};
+            parsedConfig.forEach(field => {
+                if (field && field.apiName) {
+                    savedByApi[field.apiName] = field.defaultValue !== undefined
+                        ? field.defaultValue
+                        : (field.formula || '0');
+                }
+            });
 
-                reconstructedRows.push({
-                    id: 'saved_row_' + (rowIndex++),
-                    displayIndex: rowIndex,
-                    cells: [
-                        { column: 'Item', value: label, isReadOnly: true },
-                        { column: 'Rate', value: String(savedValue), isReadOnly: false }
-                    ]
-                });
-            });
+            Object.keys(this.telecomMap).forEach(label => {
+                const apiName = this.telecomMap[label];
+                const savedValue = savedByApi[apiName] !== undefined ? savedByApi[apiName] : '0';
+                reconstructedRows.push({
+                    id: 'saved_row_' + (rowIndex++),
+                    displayIndex: rowIndex,
+                    cells: [
+                        { column: 'Item', value: label, isReadOnly: true },
+                        { column: 'Rate', value: String(savedValue), isReadOnly: false }
+                    ]
+                });
+            });
         }
         // 👉 ADD THIS: Reverse Engineering for Crash Tested
         else if (this.valueA === 'Crash Barrier - Department' && this.valueB === 'MBCB type - Crash Tested') {
@@ -1162,6 +1225,7 @@ reverseNutsBoltsMap = {
             if (this.valueB === 'Standard - Pipe & Duct') activeReverseMap = this.reversehdpepipeAndDuct;
             else if (this.valueB === 'Standard - IS 4984') activeReverseMap = this.reversehdpeIs4984;
             else if (this.valueB === 'Standard - PLB Duct') activeReverseMap = this.reversehdpePlbDuct;
+            else if (this.valueB === 'Standard - MDPE Pipe') activeReverseMap = this.reversemdpePipe;
 
             parsedConfig.forEach(field => {
                 let label = activeReverseMap[field.apiName] || field.apiName;
@@ -1369,11 +1433,14 @@ reverseNutsBoltsMap = {
         const flatData = this.getFlatGridData();
 
         let hasErrors = false;
-        flatData.forEach(row => {
-            this.currentColumns.forEach(col => {
-                if (!row[col] || String(row[col]).trim() === '') hasErrors = true;
-            });
-        });
+        flatData.forEach(row => {
+            this.currentColumns.forEach(col => {
+                // 👉 FIX: Allow '0' to pass validation safely
+                if (row[col] === undefined || row[col] === null || String(row[col]).trim() === '') {
+                    hasErrors = true;
+                }
+            });
+        });
 
         if (hasErrors) {
             this.showError('Please fill in all empty fields, or delete empty rows before saving.');
@@ -1381,7 +1448,41 @@ reverseNutsBoltsMap = {
             return;
         }
 
-        if (this.valueA === 'Solar Structure - Department') {
+        // 👉 SAVE CORE PIPES INTO METADATA
+        if (this.valueA === 'Steel Pipes - Department' && this.valueB === 'Core Pipes') {
+            try {
+                let ratesMap = {};
+                flatData.forEach(row => {
+                    let label = row['Item'];
+                    let val = row['Rate'];
+                    if (val === undefined || val === null || String(val).trim() === '') {
+                        val = '0'; 
+                    }
+                    ratesMap[String(label).trim()] = Number(val);
+                });
+
+                let existingJsonStr = await getRateCardJson({ departmentName: 'Steel Pipe Domestic Config' });
+                let parsedData = existingJsonStr ? JSON.parse(existingJsonStr) : {};
+
+                // Attach under CORE_PIPE_RATES
+                parsedData.CORE_PIPE_RATES = ratesMap;
+
+                await savePriceCalculatorMetadata({ 
+                    developerName: 'Steel_Pipe_Domestic_Config', 
+                    jsonString: JSON.stringify(parsedData, null, 2) 
+                });
+                
+                await LightningAlert.open({
+                    message: `Successfully processed! The pricing rates for Core Pipes have been deployed to Price Calculator.`,
+                    theme: 'success',
+                    label: 'Save Complete'
+                });
+            } catch(e) {
+                console.error(e);
+                this.showError('Failed to save to Price Calculator: ' + (e.body ? e.body.message : e.message));
+            }
+        }
+        else if (this.valueA === 'Solar Structure - Department') {
             let finalMergedConfig = [];
 
             if (this.valueB === 'Global Zinc Rate') {
@@ -1453,6 +1554,11 @@ reverseNutsBoltsMap = {
                 metadataGroup = 'PLB_Duct_Price';
                 metadataLabel = 'PLB_Duct_Price';
                 department = 'PLB Duct';
+            } else if (this.valueB === 'Standard - MDPE Pipe') {
+                activeForwardMap = this.mdpePipe;
+                metadataGroup = 'MDPE_Pipe_Price';
+                metadataLabel = 'MDPE_Pipe_Price';
+                department = 'MDPE Pipe';
             }
 
             let finalMergedConfig = flatData.map(row => {
@@ -1650,30 +1756,37 @@ reverseNutsBoltsMap = {
         }
 
         else if (this.valueA === 'Steel Pipes - Department' && this.valueB === 'Export') {
-            let ratesMap = {};
-            
-            flatData.forEach(row => {
-                let label = row['Item'];
-                let val = row['Rate'];
-                
-                if (val === undefined || val === null || String(val).trim() === '') {
-                    val = '0'; 
-                }
+            try {
+                let ratesMap = {};
+                flatData.forEach(row => {
+                    let label = row['Item'];
+                    let val = row['Rate'];
+                    if (val === undefined || val === null || String(val).trim() === '') {
+                        val = '0'; 
+                    }
+                    ratesMap[String(label).trim()] = Number(val);
+                });
 
-                // 👉 CLEANUP: Using 'reverseExportPipesMap' to save keys correctly
-                let apiName = (this.reverseExportPipesMap && this.reverseExportPipesMap[label]) ? this.reverseExportPipesMap[label] : label;
-                ratesMap[apiName] = Number(val);
-            });
+                // 👉 Ensures we don't wipe out Weight Maps when updating Base Rates
+                let existingJsonStr = await getRateCardJson({ departmentName: 'Steel Pipe Export Config' });
+                let parsedData = existingJsonStr ? JSON.parse(existingJsonStr) : {};
 
-            let finalMergedConfig = {
-                apiName: "rate",
-                label: "RATE (Rs./MTR)",
-                type: "number",
-                baseRatesMap: ratesMap
-            };
+                parsedData.BASE_RATES = ratesMap;
 
-            await this.saveJsonToSalesforce(finalMergedConfig, 'Steel_Pipes_Export', 'Export', null, 'Export');
-        }
+                // 👉 Writes directly to JSON_Payload__c and links to the correct Department
+                await this.saveJsonToSalesforce(
+                    parsedData, 
+                    'Steel_Pipes_Export', 
+                    'Export', 
+                    null, 
+                    'Steel Pipe Export Config'
+                );
+                
+            } catch(e) {
+                console.error(e);
+                this.showError('Failed to save to Price Calculator: ' + (e.body ? e.body.message : e.message));
+            }
+        }
 
         else if (this.valueA === 'Transmission Tower - Department' && this.valueB === 'Type of Product - Tower') {
             let finalMergedConfig = flatData.map(row => {
@@ -1744,12 +1857,13 @@ reverseNutsBoltsMap = {
             let item = String(row['Item'] || '').trim();
             let rate = row['Rate'] !== undefined && row['Rate'] !== null ? String(row['Rate']).trim() : '0';
 
-            // Build individual formula segments
-            if (['HDG MMS/Carport Structure', 'RSJ', 'Piers for Tracker', 'IBM', 'HBM', 'WBM', 'PS'].includes(item)) {
+            // 1. Build individual formula segments for HDG Materials
+            if (['HDG MMS Structure', 'Carport Structure', 'Piers (W-Beam) for Tracker', 'I-BEAM', 'RSJ', 'H-Beam', 'W-Beam'].includes(item)) {
                 hdgSegments.push(`(hdg_material == '${item}') ? ${rate}`);
             } 
-            else if (item === 'Black Metal' || item === 'Galvalume') {
-                let formattedMaterial = item === 'Galvalume' ? 'Galvalume Structure' : 'Black Metal';
+            // 2. Build individual formula segments for Galvalume & Black Materials
+            else if (['Black Metal', 'Galvalume', 'I-Beam (Black)', 'W-Beam (Black)', 'H-Beam (Black)', 'Piers for Tracker (Black)'].includes(item)) {
+                let formattedMaterial = item === 'Galvalume' ? 'Galvalume Structure' : item;
                 galvSegments.push(`(galv_material == '${formattedMaterial}') ? ${rate}`);
             }
         });
@@ -1836,4 +1950,67 @@ reverseNutsBoltsMap = {
             console.error('LightningAlert Error:', error);
         }
     }
+
+
+    // ==========================================
+    // HIGH MAST SAVE HANDLER
+    // ==========================================
+
+    get isHighMast() {
+        return this.valueA === 'High Mast - Department';
+    }
+
+    async handleSaveHighMast() {
+        this.isSaving = true;
+        try {
+            const hmDevName = this.highMastRecordMap[this.valueB];
+            if (!hmDevName) {
+                this.showError('No Price Calculator record mapped for: ' + this.valueB);
+                this.isSaving = false;
+                return;
+            }
+
+            const flatData = this.getFlatGridData();
+            let baseAmt = null;
+            let addOnAmt = null;
+
+            for (const row of flatData) {
+                const label = String(row['Item'] || '').trim();
+                const raw = row['Value'];
+
+                if (raw === undefined || raw === null || String(raw).trim() === '') {
+                    this.showError(`${label} cannot be blank. Enter 0 if it does not apply.`);
+                    this.isSaving = false;
+                    return;
+                }
+
+                const num = Number(raw);
+                if (isNaN(num)) {
+                    this.showError(`${label} must be a number.`);
+                    this.isSaving = false;
+                    return;
+                }
+
+                if (label === 'Base Amount')   baseAmt = num;
+                if (label === 'Add On Amount') addOnAmt = num;
+            }
+
+            await saveHighMastAmounts({
+                developerName: hmDevName,
+                baseAmount: baseAmt,
+                addOn: addOnAmt
+            });
+
+            await LightningAlert.open({
+                message: `Amounts for ${this.valueB} have been queued for deployment. Allow a minute before they take effect.`,
+                theme: 'success',
+                label: 'Save Complete'
+            });
+        } catch (e) {
+            console.error('High Mast save error:', e);
+            this.showError('Failed to save High Mast amounts: ' + (e.body ? e.body.message : e.message));
+        } finally {
+            this.isSaving = false;
+        }
+    }
 }

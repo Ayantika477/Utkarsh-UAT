@@ -1,4 +1,11 @@
-public without sharing class DealerOpportunityEmailService {
+/**
+ * @description   Opportunity campaign Salesforce email template render/send helpers.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
+public with sharing class DealerOpportunityEmailService {
+    private static Map<Id, EmailTemplate> templateById = new Map<Id, EmailTemplate>();
+
     private static final Set<String> CORPORATE_BROCHURE_TEMPLATES = new Set<String>{
         'prospect_enq_gen',
         'prospect_not_responding',
@@ -16,6 +23,13 @@ public without sharing class DealerOpportunityEmailService {
         public String htmlBody;
     }
 
+    /**
+     * @description Renders a Salesforce email template for an Opportunity, supporting Lightning merge syntax.
+     * @param templateId EmailTemplate Id to render.
+     * @param opportunityRecord Opportunity used for merge fields.
+     * @param whoIdOverride Optional Contact/Lead who Id for rendering.
+     * @return RenderedEmail with subject/bodies, or null when rendering fails.
+     */
     public static RenderedEmail renderTemplate(
         Id templateId,
         Opportunity opportunityRecord,
@@ -25,17 +39,20 @@ public without sharing class DealerOpportunityEmailService {
             return null;
         }
 
-        List<EmailTemplate> templates = [
-            SELECT Id, Subject, HtmlValue, Body, UiType
-            FROM EmailTemplate
-            WHERE Id = :templateId
-            LIMIT 1
-        ];
-        if (templates.isEmpty()) {
-            return null;
+        EmailTemplate templateRecord = templateById.get(templateId);
+        if (templateRecord == null) {
+            List<EmailTemplate> templates = [
+                SELECT Id, Subject, HtmlValue, Body, UiType
+                FROM EmailTemplate
+                WHERE Id = :templateId
+                LIMIT 1
+            ];
+            if (templates.isEmpty()) {
+                return null;
+            }
+            templateRecord = templates[0];
+            templateById.put(templateId, templateRecord);
         }
-
-        EmailTemplate templateRecord = templates[0];
         Id whoId = whoIdOverride != null
             ? whoIdOverride
             : BWM_EmailTemplateRenderer.resolveWhoId(opportunityRecord);
@@ -64,12 +81,24 @@ public without sharing class DealerOpportunityEmailService {
         }
     }
 
+    /**
+     * @description Returns true when the EmailTemplate is a Lightning (SFX) template.
+     * @param templateRecord EmailTemplate to inspect.
+     * @return True for Lightning templates.
+     */
     private static Boolean isLightningTemplate(EmailTemplate templateRecord) {
         return templateRecord.UiType == 'SFX' ||
             (String.isNotBlank(templateRecord.HtmlValue) &&
             templateRecord.HtmlValue.contains('{{{'));
     }
 
+    /**
+     * @description Renders a Lightning email template for an Opportunity with who-Id context.
+     * @param templateRecord Lightning EmailTemplate record.
+     * @param opportunityRecord Opportunity used for merge fields.
+     * @param whoId Who Id used during rendering.
+     * @return RenderedEmail DTO, or null when empty.
+     */
     private static RenderedEmail renderLightningTemplate(
         EmailTemplate templateRecord,
         Opportunity opportunityRecord,
@@ -113,6 +142,11 @@ public without sharing class DealerOpportunityEmailService {
         return hasContent(rendered) ? rendered : null;
     }
 
+    /**
+     * @description Converts Lightning merge-field syntax into a renderable format.
+     * @param value Template HTML/text containing Lightning merges.
+     * @return Converted template string.
+     */
     private static String convertLightningMergeSyntax(String value) {
         if (String.isBlank(value)) {
             return value;
@@ -120,6 +154,11 @@ public without sharing class DealerOpportunityEmailService {
         return value.replaceAll('\\{\\{\\{', '{!').replaceAll('\\}\\}\\}', '}');
     }
 
+    /**
+     * @description Returns true when the rendered email has a subject or body content.
+     * @param rendered Rendered email DTO to inspect.
+     * @return True when subject or body content is present.
+     */
     private static Boolean hasContent(RenderedEmail rendered) {
         return rendered != null &&
             (String.isNotBlank(rendered.subject) ||
@@ -127,6 +166,12 @@ public without sharing class DealerOpportunityEmailService {
             String.isNotBlank(rendered.plainTextBody));
     }
 
+    /**
+     * @description Builds brochure file attachments for the Opportunity email based on template mapping.
+     * @param templateName Email template name used to resolve mapping.
+     * @param opportunityRecord Opportunity used for brochure resolution.
+     * @return List of EmailFileAttachment values; empty when none apply.
+     */
     public static List<Messaging.EmailFileAttachment> buildBrochureAttachments(
         String templateName,
         Opportunity opportunityRecord
@@ -146,6 +191,11 @@ public without sharing class DealerOpportunityEmailService {
         );
     }
 
+    /**
+     * @description Resolves brochure attachment mode for the given email template name.
+     * @param templateName Email template name.
+     * @return Attachment mode string from mapping/config.
+     */
     private static String resolveBrochureAttachmentMode(String templateName) {
         if (String.isBlank(templateName)) {
             return null;

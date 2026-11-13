@@ -17,7 +17,8 @@ public with sharing class CampaignEmailReportListBridgeController {
 
   public PageReference redirectToLwc() {
     PageReference target = new PageReference(
-      '/lightning/cmp/c__campaignEmailReport'
+      '/lightning/cmp/c__campaignEmailReport?c__ts=' +
+      String.valueOf(Datetime.now().getTime())
     );
     target.setRedirect(true);
     redirectUrl = target.getUrl();

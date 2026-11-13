@@ -1,3 +1,8 @@
+/**
+ * @description   Test class for CampaignStatsService Bluewave stats API scenarios.
+ * @author        Anshita Chanda
+ * @date          2026-08-06
+ */
 @IsTest
 private class CampaignStatsServiceTest {
   private class CampaignStatsMock implements HttpCalloutMock {
@@ -269,6 +274,107 @@ private class CampaignStatsServiceTest {
 
     System.assertEquals(null, target);
     System.assert(String.isNotBlank(controller.errorMessage));
+  }
+
+  @IsTest
+  static void getCampaignOptionsHandlesEmptyAndControllerDelegation() {
+    System.assertEquals(
+      0,
+      CampaignStatsService.getCampaignOptions(null).size()
+    );
+    System.assertEquals(
+      0,
+      CampaignStatsService.getCampaignOptions(new List<Id>()).size()
+    );
+
+    Campaign campaignRecord = new Campaign(
+      Name = 'Controller Campaign',
+      IsActive = true
+    );
+    insert campaignRecord;
+    Test.setMock(HttpCalloutMock.class, new CampaignStatsMock());
+
+    Test.startTest();
+    List<CampaignStatsService.CampaignOption> options =
+      CampaignStatsController.getCampaignOptions(new List<Id>{ campaignRecord.Id });
+    CampaignStatsService.FetchResult result = CampaignStatsController.fetchCampaignStats(
+      campaignRecord.Id,
+      campaignRecord.Name,
+      'RCS'
+    );
+    Test.stopTest();
+
+    System.assertEquals(1, options.size());
+    System.assertEquals(1, result.reportIds.size());
+  }
+
+  @IsTest
+  static void fetchAndSaveValidatesRequiredInputs() {
+    Boolean missingCampaign = false;
+    Boolean missingName = false;
+    Boolean missingProduct = false;
+    try {
+      CampaignStatsService.fetchAndSave(null, 'Name', 'RCS');
+    } catch (Exception ex) {
+      missingCampaign = ex instanceof AuraHandledException;
+    }
+    Campaign campaignRecord = new Campaign(Name = 'Required Fields', IsActive = true);
+    insert campaignRecord;
+    try {
+      CampaignStatsService.fetchAndSave(campaignRecord.Id, '  ', 'RCS');
+    } catch (Exception ex) {
+      missingName = ex instanceof AuraHandledException;
+    }
+    try {
+      CampaignStatsService.fetchAndSave(campaignRecord.Id, campaignRecord.Name, '');
+    } catch (Exception ex) {
+      missingProduct = ex instanceof AuraHandledException;
+    }
+    System.assert(missingCampaign);
+    System.assert(missingName);
+    System.assert(missingProduct);
+  }
+
+  @IsTest
+  static void persistResponseCoversEmptyAndInvalidPayloads() {
+    Campaign campaignRecord = new Campaign(Name = 'Persist Campaign', IsActive = true);
+    insert campaignRecord;
+
+    Boolean invalidJson = false;
+    try {
+      CampaignStatsService.persistResponse(campaignRecord.Id, '{');
+    } catch (Exception ex) {
+      invalidJson = ex instanceof AuraHandledException;
+    }
+    System.assert(invalidJson);
+
+    Boolean apiError = false;
+    try {
+      CampaignStatsService.persistResponse(
+        campaignRecord.Id,
+        '{"code":"404","message":"missing"}'
+      );
+    } catch (Exception ex) {
+      apiError = ex instanceof AuraHandledException;
+    }
+    System.assert(apiError);
+
+    CampaignStatsService.FetchResult emptyResult = CampaignStatsService.persistResponse(
+      campaignRecord.Id,
+      '{"journeyName":"j1","journeyCampaignName":"c1","productName":"RCS","components":[]}'
+    );
+    System.assertEquals(1, emptyResult.reportIds.size());
+    System.assertEquals(
+      null,
+      CampaignStatsService.getStatisticValue(null, new List<String>{ 'DELIVERED' })
+    );
+    System.assertEquals(
+      9,
+      CampaignStatsService.getStatisticValue(
+        new Map<String, Object>{ 'delivered' => 9 },
+        new List<String>{ 'DELIVERED' }
+      )
+    );
   }
 
   @IsTest
