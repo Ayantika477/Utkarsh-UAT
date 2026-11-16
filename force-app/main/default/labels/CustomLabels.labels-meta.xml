@@ -8,6 +8,13 @@
         <value>005</value>
     </labels>
     <labels>
+        <fullName>Mapbox_Access_Token</fullName>
+        <language>en_US</language>
+        <protected>false</protected>
+        <shortDescription>Mapbox Access Token</shortDescription>
+        <value>MAPBOX_TOKEN_PLACEHOLDER</value>
+    </labels>
+    <labels>
         <fullName>Tender_RECORDS_PER_PAGE</fullName>
         <language>en_US</language>
         <protected>false</protected>

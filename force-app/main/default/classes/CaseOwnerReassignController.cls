@@ -539,6 +539,21 @@ public without sharing class CaseOwnerReassignController {
             addOption(optionsByUser, mtx.L2__c, mtx.L2__r?.Name, LVL_L2, ownerId);
             addOption(optionsByUser, mtx.L3__c, mtx.L3__r?.Name, LVL_L3, ownerId);
         }
+        // Only offer active users - inactive users cannot own a case.
+        if (!optionsByUser.isEmpty()) {
+            Set<Id> activeUserIds = new Map<Id, User>([
+                SELECT Id
+                FROM User
+                WHERE Id IN :optionsByUser.keySet()
+                  AND IsActive = true
+                WITH SYSTEM_MODE
+            ]).keySet();
+            for (Id candidateId : new List<Id>(optionsByUser.keySet())) {
+                if (!activeUserIds.contains(candidateId)) {
+                    optionsByUser.remove(candidateId);
+                }
+            }
+        }
         ctx.options = optionsByUser.values();
         ctx.options.sort();
         System.debug('>>> buildContext: final option count=' + ctx.options.size());
