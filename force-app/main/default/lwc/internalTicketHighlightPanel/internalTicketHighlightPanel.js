@@ -10,6 +10,7 @@ import STATUS_FIELD from '@salesforce/schema/Case.Status';
 import TICKET_NO_FIELD from '@salesforce/schema/Case.Ticket_No_formula__c';
 import IS_CASE_OWNER_FIELD from '@salesforce/schema/Case.isCaseOwner__c';
 import PROFILE_NAME_FIELD from '@salesforce/schema/User.Profile.Name';
+import isMatrixL3 from '@salesforce/apex/InternalTicketVisibilityController.isMatrixL3';
 
 const TITLE = 'Internal Ticket';
 const NUM_VISIBLE_ACTIONS = 4;
@@ -17,53 +18,55 @@ const RESOLVED = 'Resolved';
 
 const SYSTEM_ADMINISTRATOR = 'System Administrator';
 const UTKARSH_ADMIN = 'Utkarsh Admin';
-const UTKARSH_HOD = 'Utkarsh HOD';
-const CRM_HEAD = 'CRM Head';
 
 // Same order as the "Internal ticket" compact layout; the first field is the record title.
 const SECONDARY_FIELDS = [PRIORITY_FIELD, STATUS_FIELD, TICKET_NO_FIELD];
 
-// Actions and visibility rules copied from the standard highlights panel on Internal_Ticket_Page.
+// Visibility rules from the Internal Ticket button spec. An L3 on any Internal Ticket Matrix row
+// (ctx.isL3) gets all four actions; the status rules still apply to them.
 const ACTIONS = [
     {
         apiName: 'Case.Change_Ticket_Owner',
         label: 'Change Ticket Owner',
-        // (1 OR 2 OR 4 OR 5) AND 3
+        // status != Resolved AND (Utkarsh Admin OR System Administrator OR ticket owner OR L3)
         isVisible: (ctx) =>
-            (ctx.profileEquals(SYSTEM_ADMINISTRATOR) ||
-                ctx.isCaseOwner ||
-                ctx.profileEquals(UTKARSH_HOD) ||
-                ctx.profileEquals(CRM_HEAD)) &&
-            ctx.status !== RESOLVED
+            ctx.status !== RESOLVED &&
+            (ctx.isL3 ||
+                ctx.profileEquals(UTKARSH_ADMIN) ||
+                ctx.profileEquals(SYSTEM_ADMINISTRATOR) ||
+                ctx.isCaseOwner)
+    },
+    {
+        apiName: 'Case.Resolve_Ticket',
+        label: 'Resolve Ticket',
+        // status != Resolved AND (Utkarsh Admin OR System Administrator OR ticket owner OR L3)
+        isVisible: (ctx) =>
+            ctx.status !== RESOLVED &&
+            (ctx.isL3 ||
+                ctx.profileEquals(UTKARSH_ADMIN) ||
+                ctx.profileEquals(SYSTEM_ADMINISTRATOR) ||
+                ctx.isCaseOwner)
     },
     {
         apiName: 'Case.Create_New_Task',
         label: 'Create New Task',
-        // 1 AND (2 OR 3 OR 4)
+        // status != Resolved AND (Utkarsh Admin OR System Administrator OR ticket owner OR L3)
         isVisible: (ctx) =>
             ctx.status !== RESOLVED &&
-            (ctx.profileEquals(UTKARSH_ADMIN) ||
+            (ctx.isL3 ||
+                ctx.profileEquals(UTKARSH_ADMIN) ||
                 ctx.profileEquals(SYSTEM_ADMINISTRATOR) ||
                 ctx.isCaseOwner)
     },
     {
         apiName: 'Case.Reopen_Ticket',
         label: 'Reopen Ticket',
-        // 1 AND (2 OR 3)
+        // status = Resolved AND (profile CONTAINS System Administrator OR Utkarsh Admin OR L3)
         isVisible: (ctx) =>
             ctx.status === RESOLVED &&
-            (ctx.profileContains(SYSTEM_ADMINISTRATOR) || ctx.profileContains(UTKARSH_ADMIN))
-    },
-    {
-        apiName: 'Case.Resolve_Ticket',
-        label: 'Resolve Ticket',
-        // 1 AND (2 OR 3 OR 4 OR 5)
-        isVisible: (ctx) =>
-            ctx.status !== RESOLVED &&
-            (ctx.profileEquals(SYSTEM_ADMINISTRATOR) ||
-                ctx.profileEquals(CRM_HEAD) ||
-                ctx.profileEquals(UTKARSH_HOD) ||
-                ctx.isCaseOwner)
+            (ctx.isL3 ||
+                ctx.profileContains(SYSTEM_ADMINISTRATOR) ||
+                ctx.profileContains(UTKARSH_ADMIN))
     }
 ];
 
@@ -74,6 +77,7 @@ export default class InternalTicketHighlightPanel extends NavigationMixin(Lightn
     title = TITLE;
     record;
     profileName;
+    isL3User = false;
     objectInfo;
     errorMessage;
 
@@ -105,6 +109,13 @@ export default class InternalTicketHighlightPanel extends NavigationMixin(Lightn
         }
     }
 
+    @wire(isMatrixL3)
+    wiredIsL3({ data }) {
+        if (data !== undefined) {
+            this.isL3User = data === true;
+        }
+    }
+
     get subject() {
         return this.record ? getFieldValue(this.record, SUBJECT_FIELD) : '';
     }
@@ -132,6 +143,7 @@ export default class InternalTicketHighlightPanel extends NavigationMixin(Lightn
         const ctx = {
             status: getFieldValue(this.record, STATUS_FIELD),
             isCaseOwner: getFieldValue(this.record, IS_CASE_OWNER_FIELD) === true,
+            isL3: this.isL3User,
             profileEquals: (name) => profile === name.toLowerCase(),
             profileContains: (name) => profile.includes(name.toLowerCase())
         };

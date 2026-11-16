@@ -1256,12 +1256,19 @@ public without sharing class CaseCreatorShareHandler {
     // NEW: profiles that can still edit a case they created but no longer own.
     private static final Set<String> CREATOR_LOCK_EXEMPT_PROFILES = new Set<String>{
         'System Administrator',
-        'Utkarsh Admin'
+        'Utkarsh Admin',
+        'CRM Head',
+        'Utkarsh HOD'
     };
 
     // NEW: field API names (LOWER CASE) that may still change on a creator-locked case,
-    // e.g. fields stamped by a Flow / workflow running as the creator. Empty by default.
-    private static final Set<String> CREATOR_LOCK_IGNORED_FIELDS = new Set<String>();
+    // e.g. fields stamped by a Flow / workflow running as the creator.
+    // Stamped by "After Case 1st update is Shared Process" when the first CaseComment is saved.
+    private static final Set<String> CREATOR_LOCK_IGNORED_FIELDS = new Set<String>{
+        'status',
+        'first_response__c',
+        'first_response_date_time__c'
+    };
 
     private static final String RESOLVED_STATUS_VALUE = 'Resolved';
 
@@ -1718,7 +1725,10 @@ public without sharing class CaseCreatorShareHandler {
             Id ownerAtEditTime = (previous != null) ? previous.OwnerId : caseRecord.OwnerId;
 
             if (runningUserId != ownerAtEditTime) {
-                caseRecord.addError('Only the Ticket Owner can edit this ticket.');
+                caseRecord.addError(
+                    'This ticket is currently assigned to another owner, so only the current owner can make changes. ' +
+                    'Please contact the ticket owner or an Admin.'
+                );
             }
         }
     }

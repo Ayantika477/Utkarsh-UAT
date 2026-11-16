@@ -1,0 +1,21 @@
+[ git remote -v ] - check git is connected or not (empty output = not connected)
+
+If not connected:
+[ git init ] - initialize a local git repo
+[ git remote add origin <repo-url> ] - link the project to your remote repo
+[ git remote -v ] - verify the remote is added
+[ git branch -M main ] - rename the current branch to main
+[ git add . ] - stage all files
+[ git commit -m “Initial org backup” ] - make the first commit
+[ git push -u origin main ] - push to remote and set upstream
+
+If connected:
+[ git status ] - see changed and untracked files
+[ git branch ] - see the current branch
+[ git pull origin main ] - get the latest code from remote
+[ git checkout -b backup/2026-11-16 ] - create a new backup branch
+[ sf project retrieve start --manifest manifest/package.xml --target-org <alias> ] - retrieve the org metadata into the project
+[ git status ] - confirm the retrieved files show as changed
+[ git add . ] - stage all changes
+[ git commit -m “Org backup 2026-11-16” ] - commit the backup
+[ git push -u origin backup/2026-11-16 ] - push the new branch to remote
